@@ -33,6 +33,19 @@
     <button class="tab" data-tab="history">🕑 Historique</button>
   </nav>
 
+  <!-- Bandeau d'installation (affiché quand l'app est installable) -->
+  <div id="install-banner" class="install-banner" hidden>
+    <span class="install-text">📲 Installer l'app sur ton écran d'accueil</span>
+    <button id="install-btn" class="btn btn-primary install-go">Installer</button>
+    <button id="install-dismiss" class="install-x" aria-label="Fermer">✕</button>
+  </div>
+
+  <!-- Aide installation iOS (Safari n'a pas de bouton d'installation) -->
+  <div id="ios-install-hint" class="install-banner ios" hidden>
+    <span class="install-text">📲 Pour installer : touche <strong>Partager</strong> ⎋ puis <strong>« Sur l'écran d'accueil »</strong>.</span>
+    <button id="ios-dismiss" class="install-x" aria-label="Fermer">✕</button>
+  </div>
+
   <!-- Bandeau de sécurité non-bloquant (n'empêche jamais l'accès) -->
   <div id="safety-banner" class="safety-banner" hidden>
     <span>⚠️ Aide à l'estimation, <strong>pas un dispositif médical</strong>. Vérifie toujours avant de saisir dans ta pompe.</span>

@@ -29,6 +29,62 @@
 
   var CONF_LABEL = { high: 'Confiance élevée', medium: 'Confiance moyenne', low: 'Confiance faible' };
 
+  // ---------- Installation PWA ----------
+  var deferredPrompt = null;
+
+  function isStandalone() {
+    return window.matchMedia('(display-mode: standalone)').matches ||
+           window.navigator.standalone === true;
+  }
+  function isIOS() {
+    return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+  }
+
+  function initInstall() {
+    // Déjà installée / lancée en mode app : rien à proposer.
+    if (isStandalone()) return;
+
+    var banner = $('install-banner');
+    var btn = $('install-btn');
+
+    // Android/Chrome : on capture l'invite native et on montre notre bouton.
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      deferredPrompt = e;
+      banner.hidden = false;
+    });
+
+    btn.addEventListener('click', function () {
+      if (!deferredPrompt) {
+        toast('Utilise le menu du navigateur : « Ajouter à l\'écran d\'accueil ».');
+        return;
+      }
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then(function (choice) {
+        deferredPrompt = null;
+        banner.hidden = true;
+        if (choice && choice.outcome === 'accepted') toast('Installation lancée ✓');
+      });
+    });
+
+    $('install-dismiss').addEventListener('click', function () { banner.hidden = true; });
+
+    window.addEventListener('appinstalled', function () {
+      banner.hidden = true;
+      deferredPrompt = null;
+      toast('App installée ✓');
+    });
+
+    // iOS (Safari) : pas de beforeinstallprompt → on affiche la marche à suivre.
+    if (isIOS()) {
+      var ih = $('ios-install-hint');
+      if (ih) {
+        ih.hidden = false;
+        $('ios-dismiss').addEventListener('click', function () { ih.hidden = true; });
+      }
+    }
+  }
+
   // ---------- Bandeau de sécurité (non-bloquant) ----------
   function initSafetyBanner() {
     var banner = $('safety-banner');
@@ -587,6 +643,7 @@
 
   // ---------- Init ----------
   function init() {
+    initInstall();
     initSafetyBanner();
     initTabs();
     initPhotos();
