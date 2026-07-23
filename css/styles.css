@@ -146,6 +146,7 @@ label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 5px; }
 }
 .btn-primary { background: var(--brand); border-color: var(--brand); color: #fff; }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary.btn-ready { box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.25); }
 .btn-ghost { background: none; border-color: transparent; color: var(--muted); }
 .btn-lg { width: 100%; padding: 15px; font-size: 16px; margin-bottom: 14px; }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }

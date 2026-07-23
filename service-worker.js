@@ -1,6 +1,8 @@
 /* service-worker.js — mise en cache de la coquille de l'app pour un usage hors-ligne.
-   Les appels API (Anthropic/OpenAI) ne sont jamais mis en cache. */
-var CACHE = 'diabete-v1';
+   Stratégie : network-first pour le code/les pages (on récupère toujours la dernière
+   version quand on est en ligne, le cache sert de secours hors-ligne), cache-first pour
+   les images/icônes. Les appels API (Anthropic/OpenAI) ne sont jamais mis en cache. */
+var CACHE = 'diabete-v2';
 var ASSETS = [
   './',
   './index.html',
@@ -40,13 +42,31 @@ self.addEventListener('fetch', function (e) {
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) {
     return;
   }
+
+  // Images / icônes : cache-first (rapide, elles ne changent presque jamais).
+  if (req.destination === 'image') {
+    e.respondWith(
+      caches.match(req).then(function (cached) {
+        return cached || fetch(req).then(function (res) {
+          var copy = res.clone();
+          caches.open(CACHE).then(function (c) { c.put(req, copy); });
+          return res;
+        });
+      })
+    );
+    return;
+  }
+
+  // Code, pages, manifeste : network-first pour toujours avoir la dernière version.
   e.respondWith(
-    caches.match(req).then(function (cached) {
-      return cached || fetch(req).then(function (res) {
-        var copy = res.clone();
-        caches.open(CACHE).then(function (c) { c.put(req, copy); });
-        return res;
-      }).catch(function () { return cached; });
+    fetch(req).then(function (res) {
+      var copy = res.clone();
+      caches.open(CACHE).then(function (c) { c.put(req, copy); });
+      return res;
+    }).catch(function () {
+      return caches.match(req).then(function (cached) {
+        return cached || caches.match('./index.html');
+      });
     })
   );
 });
