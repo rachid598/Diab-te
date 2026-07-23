@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14b8a6"/>
+      <stop offset="1" stop-color="#0b5750"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- assiette -->
+  <circle cx="256" cy="286" r="132" fill="none" stroke="#ffffff" stroke-width="16" opacity="0.9"/>
+  <circle cx="256" cy="286" r="96" fill="#ffffff" opacity="0.14"/>
+  <!-- goutte de sang -->
+  <path d="M256 96 C300 168 330 200 330 246 a74 74 0 0 1 -148 0 C182 200 212 168 256 96 Z" fill="#ffffff"/>
+  <path d="M256 150 C282 194 300 214 300 244 a44 44 0 0 1 -88 0 C212 214 230 194 256 150 Z" fill="#ef4444" opacity="0.85"/>
+</svg>
