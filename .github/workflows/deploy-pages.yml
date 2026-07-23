@@ -1,0 +1,46 @@
+name: Deploy to GitHub Pages
+
+# Déploie le site statique (PWA) sur GitHub Pages à chaque push sur la branche par défaut.
+on:
+  push:
+    branches:
+      - claude/meal-carb-estimator-app-twxpqp
+  workflow_dispatch:
+
+# Autorisations nécessaires pour publier sur Pages via GITHUB_TOKEN.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Un seul déploiement à la fois ; on n'annule pas un déploiement en cours.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        # enablement: true active automatiquement Pages (source = GitHub Actions)
+        # si ce n'est pas déjà fait.
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # On publie la racine du dépôt (index.html est à la racine).
+          path: .
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
