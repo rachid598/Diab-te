@@ -31,13 +31,22 @@
 
   // ---------- Disclaimer ----------
   function initDisclaimer() {
-    if (Storage.disclaimerAccepted()) return;
     var gate = $('disclaimer-gate');
+    if (Storage.disclaimerAccepted()) { gate.hidden = true; return; }
     gate.hidden = false;
-    $('disclaimer-check').addEventListener('change', function (e) {
-      $('disclaimer-accept').disabled = !e.target.checked;
+    var check = $('disclaimer-check');
+    var accept = $('disclaimer-accept');
+    accept.disabled = false; // toujours cliquable : on valide au clic (plus robuste)
+    // Retour visuel discret quand la case est cochée.
+    check.addEventListener('change', function () {
+      accept.classList.toggle('btn-ready', check.checked);
     });
-    $('disclaimer-accept').addEventListener('click', function () {
+    accept.addEventListener('click', function () {
+      if (!check.checked) {
+        toast('Coche la case pour confirmer avant de continuer.');
+        try { check.focus(); } catch (e) {}
+        return;
+      }
       Storage.acceptDisclaimer();
       gate.hidden = true;
     });
