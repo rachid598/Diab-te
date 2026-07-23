@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f766e" />
+  <title>Diab'ète — Estimateur de glucides</title>
+  <meta name="description" content="Estime les glucides d'un repas à partir d'une photo et convertit en parts de glucides pour ta pompe à insuline." />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <!-- ============ Écran de sécurité / première ouverture ============ -->
+  <div id="disclaimer-gate" class="gate" hidden>
+    <div class="gate-card">
+      <h1>⚠️ À lire avant d'utiliser</h1>
+      <p><strong>Cet outil est une aide à l'estimation, pas un dispositif médical.</strong></p>
+      <ul>
+        <li>Une estimation de glucides à partir d'une photo comporte toujours une marge d'erreur. Les meilleures méthodes atteignent ~5 à 15 g d'erreur ; ce n'est <em>pas</em> infaillible.</li>
+        <li>Vérifie toujours le résultat avec ton propre jugement avant de le saisir dans ta pompe.</li>
+        <li>En cas de doute, contrôle ta glycémie, applique la méthode enseignée par ton équipe soignante et corrige si besoin.</li>
+        <li>Ne modifie jamais tes réglages (ratio, cible) sans ton diabétologue.</li>
+      </ul>
+      <label class="check">
+        <input type="checkbox" id="disclaimer-check" />
+        <span>J'ai compris : je reste responsable de la dose finale.</span>
+      </label>
+      <button id="disclaimer-accept" class="btn btn-primary" disabled>Continuer</button>
+    </div>
+  </div>
+
+  <!-- ============ En-tête ============ -->
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-logo">🩸</span>
+      <div>
+        <div class="brand-name">Diab'ète</div>
+        <div class="brand-sub">Estimateur de glucides</div>
+      </div>
+    </div>
+    <button id="open-settings" class="icon-btn" aria-label="Réglages">⚙️</button>
+  </header>
+
+  <!-- ============ Onglets ============ -->
+  <nav class="tabs">
+    <button class="tab active" data-tab="analyze">📷 Photo</button>
+    <button class="tab" data-tab="manual">✍️ Manuel</button>
+    <button class="tab" data-tab="history">🕑 Historique</button>
+  </nav>
+
+  <main>
+    <!-- ============ Onglet Analyse photo ============ -->
+    <section id="tab-analyze" class="tab-panel active">
+      <div class="card">
+        <h2>1. Photographie ton repas</h2>
+        <p class="hint">Astuce précision : une vue du dessus <em>et</em> une vue de côté aident à estimer le volume. Pose un objet-repère à côté de l'assiette.</p>
+
+        <div id="thumbs" class="thumbs"></div>
+
+        <div class="btn-row">
+          <label class="btn btn-primary">
+            📷 Prendre / ajouter
+            <input id="camera-input" type="file" accept="image/*" capture="environment" hidden />
+          </label>
+          <label class="btn">
+            🖼️ Galerie
+            <input id="gallery-input" type="file" accept="image/*" multiple hidden />
+          </label>
+          <button id="clear-photos" class="btn btn-ghost" hidden>Effacer</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>2. Repère d'échelle <span class="tag">recommandé</span></h2>
+        <p class="hint">Un objet de taille connue dans la photo réduit fortement l'erreur de portion.</p>
+        <select id="reference-object" class="input">
+          <option value="none">Aucun repère</option>
+          <option value="carte bancaire (85 mm de large)">Carte bancaire (8,5 cm)</option>
+          <option value="fourchette standard (~19 cm)">Fourchette (~19 cm)</option>
+          <option value="cuillère à soupe (~19 cm)">Cuillère à soupe (~19 cm)</option>
+          <option value="pièce de 2 € (25,75 mm)">Pièce de 2 € (2,6 cm)</option>
+          <option value="assiette">Assiette (préciser Ø)</option>
+        </select>
+        <div id="plate-diameter-wrap" class="inline-field" hidden>
+          <label>Diamètre de l'assiette (cm)</label>
+          <input id="plate-diameter" class="input small" type="number" inputmode="decimal" min="10" max="40" step="0.5" placeholder="ex. 26" />
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>3. Précisions <span class="tag">optionnel</span></h2>
+        <p class="hint">Ce que tu sais déjà améliore l'estimation (ex. « riz basmati ~150 g cuit, pain 60 g, yaourt nature »).</p>
+        <textarea id="user-notes" class="input" rows="3" placeholder="Décris les aliments ou quantités connues…"></textarea>
+      </div>
+
+      <button id="estimate-btn" class="btn btn-primary btn-lg" disabled>🔎 Estimer les glucides</button>
+
+      <div id="analyze-status" class="status" hidden></div>
+      <div id="results" class="results" hidden></div>
+    </section>
+
+    <!-- ============ Onglet Manuel ============ -->
+    <section id="tab-manual" class="tab-panel">
+      <div class="card">
+        <h2>Mode manuel assisté</h2>
+        <p class="hint">Fonctionne hors-ligne, sans clé API. Ajoute chaque aliment et sa portion.</p>
+        <input id="food-search" class="input" type="text" placeholder="Rechercher un aliment (ex. riz, pain, pomme…)" />
+        <div id="food-results" class="food-results"></div>
+      </div>
+
+      <div class="card">
+        <h2>Ton repas</h2>
+        <div id="manual-items" class="manual-items"><p class="empty">Aucun aliment ajouté.</p></div>
+      </div>
+
+      <div id="manual-total" class="results" hidden></div>
+    </section>
+
+    <!-- ============ Onglet Historique ============ -->
+    <section id="tab-history" class="tab-panel">
+      <div class="card">
+        <h2>Historique</h2>
+        <p class="hint">Compare tes estimations à la réalité pour affiner ton œil au fil du temps.</p>
+        <div id="history-list" class="history-list"><p class="empty">Aucune estimation enregistrée.</p></div>
+        <button id="clear-history" class="btn btn-ghost" hidden>Vider l'historique</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ Réglages (modale) ============ -->
+  <div id="settings-modal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Réglages</h2>
+        <button id="close-settings" class="icon-btn" aria-label="Fermer">✕</button>
+      </div>
+
+      <h3>Moteur d'estimation IA</h3>
+      <label>Fournisseur</label>
+      <select id="set-provider" class="input">
+        <option value="claude">Claude (Anthropic) — par défaut</option>
+        <option value="openai">OpenAI (GPT vision)</option>
+      </select>
+
+      <label>Clé API <span class="tag">stockée uniquement sur cet appareil</span></label>
+      <input id="set-apikey" class="input" type="password" placeholder="sk-…" autocomplete="off" />
+      <p class="hint" id="apikey-hint"></p>
+
+      <label>Modèle</label>
+      <input id="set-model" class="input" type="text" placeholder="claude-sonnet-5" />
+      <p class="hint" id="model-hint"></p>
+
+      <hr />
+      <h3>Parts de glucides</h3>
+      <label>1 part = ? grammes de glucides</label>
+      <input id="set-partsize" class="input small" type="number" min="5" max="20" step="1" />
+
+      <label class="check">
+        <input type="checkbox" id="set-round-half" />
+        <span>Arrondir les parts au 0,5 le plus proche</span>
+      </label>
+
+      <hr />
+      <div class="btn-row">
+        <button id="save-settings" class="btn btn-primary">Enregistrer</button>
+        <button id="clear-key" class="btn btn-ghost">Effacer la clé</button>
+      </div>
+      <p class="hint tiny">Sécurité : la clé et les photos ne quittent ton téléphone que pour l'appel direct au fournisseur d'IA que tu as choisi. Rien n'est envoyé ailleurs, aucune donnée n'est stockée sur un serveur.</p>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="js/storage.js"></script>
+  <script src="js/foods.js"></script>
+  <script src="js/estimator.js"></script>
+  <script src="js/camera.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
