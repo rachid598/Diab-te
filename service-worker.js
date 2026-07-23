@@ -2,7 +2,7 @@
    Stratégie : network-first pour le code/les pages (on récupère toujours la dernière
    version quand on est en ligne, le cache sert de secours hors-ligne), cache-first pour
    les images/icônes. Les appels API (Anthropic/OpenAI) ne sont jamais mis en cache. */
-var CACHE = 'diabete-v4';
+var CACHE = 'diabete-v5';
 var ASSETS = [
   './',
   './index.html',
