@@ -267,13 +267,55 @@ label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 5px; }
 }
 
 /* ---------- Food search / manual ---------- */
-.food-results { margin-top: 10px; }
-.food-item {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 0; border-bottom: 1px solid var(--border); cursor: pointer;
+.chips {
+  display: flex; gap: 7px; overflow-x: auto; padding: 10px 0 4px;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
 }
-.food-item:hover { color: var(--brand); }
-.food-add { color: var(--brand); font-weight: 700; }
+.chips::-webkit-scrollbar { display: none; }
+.chip {
+  flex: 0 0 auto;
+  padding: 6px 13px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 13px; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+}
+.chip.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+.food-results { margin-top: 6px; max-height: 320px; overflow-y: auto; }
+.food-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.food-label { cursor: pointer; flex: 1; }
+.food-label:hover { color: var(--brand); }
+.food-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.food-add {
+  color: #fff; background: var(--brand); font-weight: 700;
+  width: 30px; height: 30px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 18px;
+}
+.food-del { background: none; border: none; cursor: pointer; font-size: 15px; opacity: 0.7; }
+
+.add-custom { width: 100%; margin-top: 12px; border: 1px dashed var(--border); }
+.custom-form { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+
+/* Contrôles portion/quantité dans le repas */
+.manual-controls { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.portion-select { min-width: 130px; }
+.stepper { display: inline-flex; align-items: center; gap: 2px; }
+.step-btn {
+  width: 30px; height: 30px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  font-size: 18px; font-weight: 700; cursor: pointer; line-height: 1;
+}
+.step-qty { min-width: 26px; text-align: center; font-weight: 700; }
+.grams-eq { font-size: 12px; color: var(--muted); }
+.grams-field { font-size: 13px; color: var(--muted); }
+.grams-field .manual-grams { width: 70px; }
 .manual-items .empty, .history-list .empty, .food-results .empty { color: var(--muted); font-size: 13px; }
 
 /* ---------- History ---------- */

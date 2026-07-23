@@ -260,28 +260,105 @@
   }
 
   // ---------- Mode manuel ----------
+  var currentCat = 'Tous';
+
   function initManual() {
     var search = $('food-search');
     search.addEventListener('input', function () { renderFoodResults(search.value); });
+    initCustomFoodForm();
+    renderChips();
     renderFoodResults('');
+  }
+
+  // Grammes effectifs d'un aliment du repas (portion × quantité, ou grammes directs).
+  function itemGrams(it) {
+    if (it.mode === 'grams') return it.grams || 0;
+    var p = it.portions[it.portionIndex];
+    return (p ? p[1] : 0) * (it.qty || 1);
+  }
+
+  function renderChips() {
+    var wrap = $('cat-chips');
+    wrap.innerHTML = '';
+    Foods.activeCategories().forEach(function (c) {
+      var b = document.createElement('button');
+      b.className = 'chip' + (c === currentCat ? ' active' : '');
+      b.textContent = c;
+      b.addEventListener('click', function () {
+        currentCat = c;
+        renderChips();
+        renderFoodResults($('food-search').value);
+      });
+      wrap.appendChild(b);
+    });
   }
 
   function renderFoodResults(q) {
     var box = $('food-results');
-    var list = Foods.search(q);
-    if (!list.length) { box.innerHTML = '<p class="empty">Aucun aliment trouvé. Utilise le mode photo ou ajuste ta recherche.</p>'; return; }
+    var list = Foods.search(q, currentCat);
+    if (!list.length) {
+      box.innerHTML = '<p class="empty">Aucun aliment. Essaie une autre recherche ou ajoute un aliment personnalisé ci-dessous.</p>';
+      return;
+    }
     box.innerHTML = '';
     list.forEach(function (f) {
       var el = document.createElement('div');
       el.className = 'food-item';
-      el.innerHTML = '<span>' + escapeHtml(f.n) + ' <span class="item-detail">(' + f.carb + ' g/100 g)</span></span>' +
-                     '<span class="food-add">+ ajouter</span>';
-      el.addEventListener('click', function () {
-        manualItems.push({ name: f.n, carb: f.carb, grams: f.portion });
-        renderManualItems();
-        toast(f.n + ' ajouté (' + f.portion + ' g)');
-      });
+      var perso = f.custom ? ' <span class="tag">perso</span>' : '';
+      var del = f.custom ? '<button class="food-del" aria-label="Supprimer">🗑️</button>' : '';
+      el.innerHTML =
+        '<span class="food-label">' + escapeHtml(f.n) + perso +
+        ' <span class="item-detail">(' + f.carb + ' g/100 g)</span></span>' +
+        '<span class="food-actions">' + del + '<span class="food-add">＋</span></span>';
+      el.querySelector('.food-label').addEventListener('click', function () { addFoodToMeal(f); });
+      el.querySelector('.food-add').addEventListener('click', function (e) { e.stopPropagation(); addFoodToMeal(f); });
+      if (f.custom) {
+        el.querySelector('.food-del').addEventListener('click', function (e) {
+          e.stopPropagation();
+          Storage.deleteCustomFood(f.id);
+          renderChips();
+          renderFoodResults($('food-search').value);
+          toast('Aliment supprimé.');
+        });
+      }
       box.appendChild(el);
+    });
+  }
+
+  function addFoodToMeal(f) {
+    var portions = (f.portions && f.portions.length) ? f.portions.slice() : [];
+    manualItems.push({
+      name: f.n, carb: f.carb, custom: !!f.custom,
+      portions: portions,
+      mode: portions.length ? 'preset' : 'grams',
+      portionIndex: 0,
+      qty: 1,
+      grams: portions.length ? 0 : 100
+    });
+    renderManualItems();
+    toast(f.n + ' ajouté.');
+  }
+
+  function initCustomFoodForm() {
+    $('add-custom-toggle').addEventListener('click', function () {
+      var f = $('custom-form');
+      f.hidden = !f.hidden;
+    });
+    $('cf-cancel').addEventListener('click', function () { $('custom-form').hidden = true; });
+    $('cf-save').addEventListener('click', function () {
+      var name = $('cf-name').value.trim();
+      var carb = parseFloat(($('cf-carb').value || '').replace(',', '.'));
+      var portion = parseFloat($('cf-portion').value);
+      if (!name) { toast('Donne un nom à l\'aliment.'); return; }
+      if (!(carb >= 0 && carb <= 100 && isFinite(carb))) { toast('Indique les glucides pour 100 g (entre 0 et 100).'); return; }
+      var portions = (portion > 0 && isFinite(portion)) ? [['1 portion', Math.round(portion)]] : [];
+      Storage.addCustomFood({ n: name, carb: Math.round(carb * 10) / 10, portions: portions });
+      $('cf-name').value = ''; $('cf-carb').value = ''; $('cf-portion').value = '';
+      $('custom-form').hidden = true;
+      currentCat = 'Perso';
+      renderChips();
+      renderFoodResults('');
+      toast('Aliment « ' + name + ' » enregistré.');
     });
   }
 
@@ -294,25 +371,81 @@
     }
     wrap.innerHTML = '';
     manualItems.forEach(function (it, idx) {
-      var carbs = Math.round(it.grams * it.carb / 100);
+      var grams = itemGrams(it);
+      var carbs = Math.round(grams * it.carb / 100);
+
+      // Sélecteur de portion : chaque mesure courante + « Grammes… »
+      var opts = it.portions.map(function (p, i) {
+        var sel = (it.mode === 'preset' && it.portionIndex === i) ? ' selected' : '';
+        return '<option value="' + i + '"' + sel + '>' + escapeHtml(p[0]) + ' (' + p[1] + ' g)</option>';
+      }).join('');
+      opts += '<option value="g"' + (it.mode === 'grams' ? ' selected' : '') + '>Grammes…</option>';
+
+      // Contrôle de quantité : stepper (mode portion) ou champ grammes (mode grammes)
+      var control;
+      if (it.mode === 'grams') {
+        control = '<span class="grams-field"><input class="input small manual-grams" type="number" inputmode="numeric" min="0" step="5" value="' +
+                  Math.round(grams) + '" data-i="' + idx + '"> g</span>';
+      } else {
+        control = '<span class="stepper">' +
+                  '<button class="step-btn" data-dec="' + idx + '" aria-label="Moins">−</button>' +
+                  '<span class="step-qty">' + (it.qty || 1) + '</span>' +
+                  '<button class="step-btn" data-inc="' + idx + '" aria-label="Plus">+</button>' +
+                  '</span><span class="grams-eq">= ' + Math.round(grams) + ' g</span>';
+      }
+
       var row = document.createElement('div');
-      row.className = 'item-row';
+      row.className = 'item-row manual-row';
       row.innerHTML =
         '<div class="item-main">' +
         '  <div class="item-name">' + escapeHtml(it.name) + '</div>' +
-        '  <div class="item-detail"><input class="input small manual-grams" type="number" min="0" step="5" value="' +
-             it.grams + '" data-i="' + idx + '"> g × ' + it.carb + ' g/100 g</div>' +
+        '  <div class="manual-controls">' +
+        '    <select class="input small portion-select" data-i="' + idx + '">' + opts + '</select>' +
+        '    ' + control +
+        '  </div>' +
         '</div>' +
         '<div class="item-carb">' + carbs + ' g</div>' +
         '<button class="item-remove" data-rm="' + idx + '" aria-label="Retirer">🗑️</button>';
       wrap.appendChild(row);
     });
+
+    // Changement de portion / passage en grammes
+    wrap.querySelectorAll('.portion-select').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        var it = manualItems[parseInt(sel.dataset.i, 10)];
+        if (sel.value === 'g') {
+          if (it.mode !== 'grams') it.grams = itemGrams(it); // conserve la valeur courante
+          it.mode = 'grams';
+        } else {
+          it.mode = 'preset';
+          it.portionIndex = parseInt(sel.value, 10);
+        }
+        renderManualItems();
+      });
+    });
+    // Steppers +/−
+    wrap.querySelectorAll('[data-inc]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var it = manualItems[parseInt(b.dataset.inc, 10)];
+        it.qty = (it.qty || 1) + 1;
+        renderManualItems();
+      });
+    });
+    wrap.querySelectorAll('[data-dec]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var it = manualItems[parseInt(b.dataset.dec, 10)];
+        it.qty = Math.max(1, (it.qty || 1) - 1);
+        renderManualItems();
+      });
+    });
+    // Saisie directe en grammes
     wrap.querySelectorAll('.manual-grams').forEach(function (inp) {
       inp.addEventListener('change', function () {
         manualItems[parseInt(inp.dataset.i, 10)].grams = parseFloat(inp.value) || 0;
         renderManualItems();
       });
     });
+    // Retrait d'un aliment
     wrap.querySelectorAll('.item-remove').forEach(function (b) {
       b.addEventListener('click', function () {
         manualItems.splice(parseInt(b.dataset.rm, 10), 1);
@@ -323,7 +456,7 @@
   }
 
   function renderManualTotal() {
-    var total = manualItems.reduce(function (s, it) { return s + it.grams * it.carb / 100; }, 0);
+    var total = manualItems.reduce(function (s, it) { return s + itemGrams(it) * it.carb / 100; }, 0);
     total = Math.round(total);
     var parts = partsFrom(total);
     var el = $('manual-total');
@@ -339,7 +472,7 @@
       Storage.addHistory({
         date: Date.now(), source: 'manuel', totalCarbsG: total,
         parts: parts, partSizeG: settings.partSizeG,
-        items: manualItems.map(function (it) { return { name: it.name, carbsG: Math.round(it.grams * it.carb / 100) }; })
+        items: manualItems.map(function (it) { return { name: it.name, carbsG: Math.round(itemGrams(it) * it.carb / 100) }; })
       });
       toast('Enregistré dans l\'historique.');
     });

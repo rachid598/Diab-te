@@ -94,9 +94,24 @@
     <section id="tab-manual" class="tab-panel">
       <div class="card">
         <h2>Mode manuel assisté</h2>
-        <p class="hint">Fonctionne hors-ligne, sans clé API. Ajoute chaque aliment et sa portion.</p>
-        <input id="food-search" class="input" type="text" placeholder="Rechercher un aliment (ex. riz, pain, pomme…)" />
+        <p class="hint">Fonctionne hors-ligne, sans clé API. Choisis un aliment puis sa portion courante.</p>
+        <input id="food-search" class="input" type="text" placeholder="Rechercher (ex. riz, pain, pomme…)" />
+        <div id="cat-chips" class="chips"></div>
         <div id="food-results" class="food-results"></div>
+        <button id="add-custom-toggle" class="btn btn-ghost add-custom">＋ Ajouter un aliment personnalisé</button>
+
+        <div id="custom-form" class="custom-form" hidden>
+          <label>Nom de l'aliment</label>
+          <input id="cf-name" class="input" type="text" placeholder="ex. Mon pain complet" />
+          <label>Glucides pour 100 g (sur l'emballage)</label>
+          <input id="cf-carb" class="input small" type="number" inputmode="decimal" min="0" max="100" step="0.1" placeholder="g / 100 g" />
+          <label>Poids d'une portion (g) <span class="tag">optionnel</span></label>
+          <input id="cf-portion" class="input small" type="number" inputmode="numeric" min="1" step="1" placeholder="ex. 50" />
+          <div class="btn-row">
+            <button id="cf-save" class="btn btn-primary">Enregistrer l'aliment</button>
+            <button id="cf-cancel" class="btn btn-ghost">Annuler</button>
+          </div>
+        </div>
       </div>
 
       <div class="card">
