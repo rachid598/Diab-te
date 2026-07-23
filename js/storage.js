@@ -6,7 +6,8 @@
   var KEYS = {
     settings: 'diabete.settings.v1',
     history: 'diabete.history.v1',
-    disclaimer: 'diabete.disclaimer.v1'
+    disclaimer: 'diabete.disclaimer.v1',
+    customFoods: 'diabete.customfoods.v1'
   };
 
   var DEFAULT_SETTINGS = {
@@ -66,6 +67,25 @@
     },
     acceptDisclaimer: function () {
       write(KEYS.disclaimer, true);
+    },
+
+    // ----- Aliments personnalisés -----
+    getCustomFoods: function () {
+      return read(KEYS.customFoods, []);
+    },
+    addCustomFood: function (food) {
+      var list = this.getCustomFoods();
+      food.id = 'c' + Date.now();
+      food.cat = 'Perso';
+      food.custom = true;
+      list.unshift(food);
+      write(KEYS.customFoods, list);
+      return list;
+    },
+    deleteCustomFood: function (id) {
+      var list = this.getCustomFoods().filter(function (f) { return f.id !== id; });
+      write(KEYS.customFoods, list);
+      return list;
     }
   };
 
