@@ -14,25 +14,6 @@
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-  <!-- ============ Écran de sécurité / première ouverture ============ -->
-  <div id="disclaimer-gate" class="gate" hidden>
-    <div class="gate-card">
-      <h1>⚠️ À lire avant d'utiliser</h1>
-      <p><strong>Cet outil est une aide à l'estimation, pas un dispositif médical.</strong></p>
-      <ul>
-        <li>Une estimation de glucides à partir d'une photo comporte toujours une marge d'erreur. Les meilleures méthodes atteignent ~5 à 15 g d'erreur ; ce n'est <em>pas</em> infaillible.</li>
-        <li>Vérifie toujours le résultat avec ton propre jugement avant de le saisir dans ta pompe.</li>
-        <li>En cas de doute, contrôle ta glycémie, applique la méthode enseignée par ton équipe soignante et corrige si besoin.</li>
-        <li>Ne modifie jamais tes réglages (ratio, cible) sans ton diabétologue.</li>
-      </ul>
-      <label class="check">
-        <input type="checkbox" id="disclaimer-check" />
-        <span>J'ai compris : je reste responsable de la dose finale.</span>
-      </label>
-      <button id="disclaimer-accept" class="btn btn-primary">Continuer</button>
-    </div>
-  </div>
-
   <!-- ============ En-tête ============ -->
   <header class="app-header">
     <div class="brand">
@@ -51,6 +32,12 @@
     <button class="tab" data-tab="manual">✍️ Manuel</button>
     <button class="tab" data-tab="history">🕑 Historique</button>
   </nav>
+
+  <!-- Bandeau de sécurité non-bloquant (n'empêche jamais l'accès) -->
+  <div id="safety-banner" class="safety-banner" hidden>
+    <span>⚠️ Aide à l'estimation, <strong>pas un dispositif médical</strong>. Vérifie toujours avant de saisir dans ta pompe.</span>
+    <button id="safety-dismiss" aria-label="Fermer">✕</button>
+  </div>
 
   <main>
     <!-- ============ Onglet Analyse photo ============ -->

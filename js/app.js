@@ -29,27 +29,18 @@
 
   var CONF_LABEL = { high: 'Confiance élevée', medium: 'Confiance moyenne', low: 'Confiance faible' };
 
-  // ---------- Disclaimer ----------
-  function initDisclaimer() {
-    var gate = $('disclaimer-gate');
-    if (Storage.disclaimerAccepted()) { gate.hidden = true; return; }
-    gate.hidden = false;
-    var check = $('disclaimer-check');
-    var accept = $('disclaimer-accept');
-    accept.disabled = false; // toujours cliquable : on valide au clic (plus robuste)
-    // Retour visuel discret quand la case est cochée.
-    check.addEventListener('change', function () {
-      accept.classList.toggle('btn-ready', check.checked);
-    });
-    accept.addEventListener('click', function () {
-      if (!check.checked) {
-        toast('Coche la case pour confirmer avant de continuer.');
-        try { check.focus(); } catch (e) {}
-        return;
-      }
-      Storage.acceptDisclaimer();
-      gate.hidden = true;
-    });
+  // ---------- Bandeau de sécurité (non-bloquant) ----------
+  function initSafetyBanner() {
+    var banner = $('safety-banner');
+    if (!banner) return;
+    if (!Storage.disclaimerAccepted()) banner.hidden = false;
+    var dismiss = $('safety-dismiss');
+    if (dismiss) {
+      dismiss.addEventListener('click', function () {
+        banner.hidden = true;
+        Storage.acceptDisclaimer();
+      });
+    }
   }
 
   // ---------- Onglets ----------
@@ -447,13 +438,23 @@
 
   function registerSW() {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('service-worker.js').catch(function () {});
+      // Recharge une seule fois quand une nouvelle version prend le contrôle,
+      // pour que les correctifs s'appliquent sans manip du côté utilisateur.
+      var refreshing = false;
+      navigator.serviceWorker.addEventListener('controllerchange', function () {
+        if (refreshing) return;
+        refreshing = true;
+        window.location.reload();
+      });
+      navigator.serviceWorker.register('service-worker.js').then(function (reg) {
+        if (reg && reg.update) { try { reg.update(); } catch (e) {} }
+      }).catch(function () {});
     }
   }
 
   // ---------- Init ----------
   function init() {
-    initDisclaimer();
+    initSafetyBanner();
     initTabs();
     initPhotos();
     initEstimate();
