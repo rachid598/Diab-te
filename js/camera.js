@@ -1,11 +1,12 @@
-/* camera.js — capture/lecture des images et compression avant envoi.
-   On redimensionne à ~1280 px max pour réduire le coût/latence tout en gardant
-   assez de détail pour l'estimation des portions. */
+/* camera.js — capture/lecture des images et vidéos, compression avant envoi.
+   Photos : redimensionnées à ~1280 px max. Vidéo : on extrait plusieurs images
+   (plans) réparties dans la durée, qu'on envoie comme angles multiples au modèle. */
 (function () {
   'use strict';
 
   var MAX_DIM = 1280;
   var JPEG_QUALITY = 0.85;
+  var MAX_ANGLES = 6;
 
   // Lit un File image -> { base64, mediaType, previewUrl }
   function processFile(file) {
@@ -16,19 +17,8 @@
       var url = URL.createObjectURL(file);
       var img = new Image();
       img.onload = function () {
-        var w = img.naturalWidth, h = img.naturalHeight;
-        var scale = Math.min(1, MAX_DIM / Math.max(w, h));
-        var cw = Math.round(w * scale), ch = Math.round(h * scale);
-
-        var canvas = document.createElement('canvas');
-        canvas.width = cw; canvas.height = ch;
-        var ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, cw, ch);
+        resolve(drawToJpeg(img, img.naturalWidth, img.naturalHeight));
         URL.revokeObjectURL(url);
-
-        var dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
-        var base64 = dataUrl.split(',')[1];
-        resolve({ base64: base64, mediaType: 'image/jpeg', previewUrl: dataUrl });
       };
       img.onerror = function () {
         URL.revokeObjectURL(url);
@@ -38,11 +28,117 @@
     });
   }
 
+  // Dessine une source (image ou vidéo) sur un canvas et renvoie un JPEG compressé.
+  function drawToJpeg(source, w, h) {
+    var scale = Math.min(1, MAX_DIM / Math.max(w, h));
+    var cw = Math.round(w * scale), ch = Math.round(h * scale);
+    var canvas = document.createElement('canvas');
+    canvas.width = cw; canvas.height = ch;
+    canvas.getContext('2d').drawImage(source, 0, 0, cw, ch);
+    var dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+    return { base64: dataUrl.split(',')[1], mediaType: 'image/jpeg', previewUrl: dataUrl };
+  }
+
+  /* Extrait jusqu'à maxFrames images réparties dans une vidéo, par LECTURE +
+     échantillonnage (plus robuste que le seek selon les navigateurs / vidéos
+     mobiles à durée « infinie »). Retourne une Promise d'un tableau
+     de { base64, mediaType, previewUrl }. */
+  function processVideo(file, maxFrames) {
+    return new Promise(function (resolve, reject) {
+      if (!file || !/^video\//.test(file.type)) {
+        return reject(new Error('Fichier non vidéo.'));
+      }
+      var n = Math.max(1, Math.min(maxFrames || 4, 5));
+      var url = URL.createObjectURL(file);
+      var video = document.createElement('video');
+      video.muted = true;
+      video.defaultMuted = true;
+      video.playsInline = true;
+      video.setAttribute('muted', '');
+      video.setAttribute('playsinline', '');
+      video.preload = 'auto';
+      // Hors écran mais rendu (display:none empêche la capture sur certains navigateurs).
+      video.setAttribute('style', 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;');
+      document.body.appendChild(video);
+
+      var frames = [];
+      var done = false;
+      var timer = null;
+
+      function cleanup() {
+        if (done) return;
+        done = true;
+        if (timer) clearInterval(timer);
+        try { video.pause(); } catch (e) {}
+        try { document.body.removeChild(video); } catch (e) {}
+        URL.revokeObjectURL(url);
+      }
+      function fail(msg) { cleanup(); reject(new Error(msg)); }
+      function finish() { cleanup(); resolve(frames); }
+
+      function capture() {
+        var w = video.videoWidth, h = video.videoHeight;
+        if (w && h) frames.push(drawToJpeg(video, w, h));
+      }
+
+      function startSampling() {
+        var d = video.duration;
+        // Intervalle : réparti sur la durée si connue, sinon cadence fixe.
+        var interval = (isFinite(d) && d > 0)
+          ? Math.min(3000, Math.max(150, (d / (n + 1)) * 1000))
+          : 350;
+        capture(); // une première image tout de suite
+        if (frames.length >= n) return finish();
+        timer = setInterval(function () {
+          if (done) return;
+          capture();
+          if (frames.length >= n) finish();
+        }, interval);
+      }
+
+      var started = false;
+      function begin() {
+        if (started) return;
+        started = true;
+        startSampling();
+      }
+
+      video.onended = function () {
+        if (done) return;
+        if (!frames.length) capture();
+        finish();
+      };
+      video.onerror = function () { fail('Impossible de lire la vidéo.'); };
+
+      video.onloadeddata = function () {
+        // Lance la lecture (muette) puis échantillonne pendant qu'elle défile.
+        var p = video.play();
+        if (p && p.then) {
+          p.then(begin).catch(function () {
+            // Lecture auto refusée : on capture au moins l'image courante.
+            capture();
+            finish();
+          });
+        } else {
+          begin();
+        }
+      };
+      video.onplaying = begin;
+
+      // Filet de sécurité : si rien n'aboutit en 20 s, on rend ce qu'on a.
+      setTimeout(function () { if (!done) finish(); }, 20000);
+
+      video.src = url;
+      try { video.load(); } catch (e) {}
+    });
+  }
+
   window.Camera = {
-    MAX_ANGLES: 4,
+    MAX_ANGLES: MAX_ANGLES,
     processFile: processFile,
     processFiles: function (files) {
       return Promise.all(Array.prototype.slice.call(files).map(processFile));
-    }
+    },
+    processVideo: processVideo
   };
 })();
