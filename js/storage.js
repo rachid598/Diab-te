@@ -10,6 +10,24 @@
     customFoods: 'diabete.customfoods.v1'
   };
 
+  // Catalogue de modèles par fournisseur. stars = indice de qualité/précision (1 à 3).
+  var MODEL_CATALOG = {
+    claude: [
+      { id: 'claude-opus-4-8', label: 'Opus 4.8', note: 'précision max', stars: 3 },
+      { id: 'claude-sonnet-5', label: 'Sonnet 5', note: 'équilibré · recommandé', stars: 2 },
+      { id: 'claude-haiku-4-5', label: 'Haiku 4.5', note: 'rapide · économique', stars: 1 }
+    ],
+    gemini: [
+      { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', note: 'rapide · gratuit', stars: 2 },
+      { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash', note: 'rapide · gratuit', stars: 1 },
+      { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro', note: 'plus fin · quota gratuit limité', stars: 3 }
+    ],
+    openai: [
+      { id: 'gpt-4o', label: 'GPT-4o', note: 'équilibré · vision', stars: 2 },
+      { id: 'gpt-4o-mini', label: 'GPT-4o mini', note: 'rapide · économique', stars: 1 }
+    ]
+  };
+
   // Modèles par défaut suggérés par fournisseur.
   var DEFAULT_MODELS = {
     claude: 'claude-sonnet-5',
@@ -19,6 +37,7 @@
 
   var DEFAULT_SETTINGS = {
     provider: 'claude',                                   // fournisseur actif
+    compareProvider: '',                                  // 2ᵉ avis (vide = aucun)
     apiKeys: { claude: '', gemini: '', openai: '' },      // une clé par fournisseur
     models: {                                             // un modèle par fournisseur
       claude: DEFAULT_MODELS.claude,
@@ -43,6 +62,7 @@
 
   var Storage = {
     DEFAULT_MODELS: DEFAULT_MODELS,
+    MODEL_CATALOG: MODEL_CATALOG,
 
     getSettings: function () {
       var s = read(KEYS.settings, {}) || {};

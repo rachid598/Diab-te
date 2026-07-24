@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '13'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '14'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -217,7 +217,6 @@
     var resultsEl = $('results');
     resultsEl.hidden = true;
     status.hidden = false;
-    status.innerHTML = '<div class="spinner"></div>Analyse en cours… mesure des portions via le repère, calcul des glucides. Le raisonnement approfondi peut prendre 10 à 30 s.';
     $('estimate-btn').disabled = true;
 
     var ctx = {
@@ -227,6 +226,30 @@
       imageCount: images.length
     };
 
+    var cmp = settings.compareProvider;
+    var wantCompare = cmp && cmp !== settings.provider &&
+                      $('compare-wrap') && !$('compare-wrap').hidden && $('compare-toggle').checked;
+
+    if (wantCompare) {
+      status.innerHTML = '<div class="spinner"></div>Double analyse en cours (' +
+        (PROVIDER_NAME[settings.provider] || settings.provider) + ' + ' +
+        (PROVIDER_NAME[cmp] || cmp) + ')… cela peut prendre 20 à 40 s.';
+      // On lance les deux fournisseurs en parallèle ; chacun peut échouer indépendamment.
+      var wrap = function (p) {
+        return Estimator.estimateWith(p, images, ctx, settings)
+          .then(function (r) { return { ok: true, provider: p, result: r }; })
+          .catch(function (e) { return { ok: false, provider: p, error: e.message }; });
+      };
+      Promise.all([wrap(settings.provider), wrap(cmp)]).then(function (pair) {
+        status.hidden = true;
+        var a = pair[0], b = pair[1];
+        if (!a.ok && !b.ok) { toast(a.error || b.error); return; }
+        renderCompare(a, b);
+      }).then(function () { updateEstimateBtn(); });
+      return;
+    }
+
+    status.innerHTML = '<div class="spinner"></div>Analyse en cours… mesure des portions via le repère, calcul des glucides. Le raisonnement approfondi peut prendre 10 à 30 s.';
     Estimator.estimate(images, ctx, settings).then(function (result) {
       lastResult = result;
       status.hidden = true;
@@ -237,6 +260,57 @@
     }).then(function () {
       updateEstimateBtn();
     });
+  }
+
+  // Affiche les deux avis côte à côte, avec un bouton « Utiliser cet avis ».
+  function renderCompare(a, b) {
+    var el = $('results');
+    function card(x) {
+      var name = PROVIDER_NAME[x.provider] || x.provider;
+      if (!x.ok) {
+        return '<div class="cmp-card cmp-fail"><div class="cmp-name">' + escapeHtml(name) + '</div>' +
+               '<div class="cmp-err">⚠️ ' + escapeHtml(x.error || 'Échec') + '</div></div>';
+      }
+      var r = x.result;
+      var parts = partsFrom(r.totalCarbsG);
+      return '<div class="cmp-card">' +
+        '<div class="cmp-name">' + escapeHtml(name) + '</div>' +
+        '<div class="cmp-parts">' + fr(parts) + ' <small>parts</small></div>' +
+        '<div class="cmp-grams">≈ ' + r.totalCarbsG + ' g</div>' +
+        '<div class="cmp-range">' + r.rangeLowG + ' – ' + r.rangeHighG + ' g</div>' +
+        '<div class="confidence conf-' + r.overallConfidence + '">' + CONF_LABEL[r.overallConfidence] + '</div>' +
+        '<button class="btn btn-primary cmp-use" data-p="' + x.provider + '">Utiliser cet avis →</button>' +
+        '</div>';
+    }
+
+    var html = '<div class="cmp-head"><h2>Deux avis</h2>' +
+      '<p class="hint">Compare les deux estimations. Choisis celle que tu retiens (tu pourras encore corriger les portions).</p></div>';
+
+    // Écart / moyenne quand les deux ont réussi.
+    if (a.ok && b.ok) {
+      var avg = Math.round((a.result.totalCarbsG + b.result.totalCarbsG) / 2);
+      var diff = Math.abs(a.result.totalCarbsG - b.result.totalCarbsG);
+      var pAvg = partsFrom(avg);
+      html += '<div class="cmp-avg">Moyenne : <strong>' + fr(pAvg) + ' parts</strong> (≈ ' + avg +
+              ' g) · écart entre les deux : ' + diff + ' g</div>';
+    }
+
+    html += '<div class="cmp-grid">' + card(a) + card(b) + '</div>';
+    el.innerHTML = html;
+    el.hidden = false;
+
+    // Stocke les résultats pour la sélection.
+    var results = {};
+    if (a.ok) results[a.provider] = a.result;
+    if (b.ok) results[b.provider] = b.result;
+
+    el.querySelectorAll('.cmp-use').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        lastResult = results[btn.dataset.p];
+        renderResults(lastResult); // remplace l'affichage par le détail éditable
+      });
+    });
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   // Recalcule le total à partir des items édités.
@@ -625,6 +699,10 @@
   }
 
   // ---------- Réglages ----------
+  var PROVIDER_NAME = { claude: 'Claude', gemini: 'Gemini', openai: 'ChatGPT' };
+  var KEY_FIELD = { claude: 'set-key-claude', gemini: 'set-key-gemini', openai: 'set-key-openai' };
+  var CUSTOM_VALUE = '__custom__';
+
   function initSettings() {
     $('open-settings').addEventListener('click', openSettings);
     $('close-settings').addEventListener('click', function () { $('settings-modal').hidden = true; });
@@ -635,25 +713,70 @@
       toast('Clé du fournisseur actif vidée — clique Enregistrer pour valider.');
     });
     $('set-provider').addEventListener('change', function () {
-      updateProviderHints($('set-provider').value, true);
+      var p = $('set-provider').value;
+      var models = settings.models || {};
+      populateModelSelect(p, models[p] || Storage.DEFAULT_MODELS[p] || '');
+    });
+    // Bascule vers le champ « modèle personnalisé » quand on choisit « Autre modèle… ».
+    $('set-model').addEventListener('change', function () {
+      $('set-model-custom-wrap').hidden = $('set-model').value !== CUSTOM_VALUE;
     });
   }
 
-  var KEY_FIELD = { claude: 'set-key-claude', gemini: 'set-key-gemini', openai: 'set-key-openai' };
+  // Indice de qualité visuel (●●● = précision max, ●○○ = rapide/économique).
+  function starDots(stars) {
+    stars = Math.max(0, Math.min(3, stars || 0));
+    return '●'.repeat(stars) + '○'.repeat(3 - stars);
+  }
 
-  function updateProviderHints(provider, resetModel) {
+  // Remplit le menu déroulant des modèles pour le fournisseur choisi.
+  function populateModelSelect(provider, current) {
+    var sel = $('set-model');
+    var catalog = (Storage.MODEL_CATALOG && Storage.MODEL_CATALOG[provider]) || [];
+    sel.innerHTML = '';
+    var matched = false;
+    catalog.forEach(function (m) {
+      var opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.label + '  ' + starDots(m.stars) + ' · ' + m.note;
+      if (m.id === current) { opt.selected = true; matched = true; }
+      sel.appendChild(opt);
+    });
+    // Option « Autre modèle… » pour saisir un id récent non listé.
+    var customOpt = document.createElement('option');
+    customOpt.value = CUSTOM_VALUE;
+    customOpt.textContent = 'Autre modèle… (saisir l\'id)';
+    sel.appendChild(customOpt);
+
+    var wrap = $('set-model-custom-wrap');
+    if (!matched && current) {
+      // Modèle personnalisé enregistré : on sélectionne « Autre » et on pré-remplit.
+      sel.value = CUSTOM_VALUE;
+      $('set-model-custom').value = current;
+      wrap.hidden = false;
+    } else {
+      wrap.hidden = true;
+      $('set-model-custom').value = '';
+    }
+    $('set-model-provider-name').textContent = PROVIDER_NAME[provider] || provider;
+
     var m = $('model-hint');
     if (provider === 'openai') {
-      m.textContent = 'Ex. gpt-4o (vision). « Codex » ne lit pas les images.';
+      m.textContent = 'GPT-4o lit les images. ⚠️ « Codex » / l\'abonnement ChatGPT Pro ne donnent pas accès à l\'API.';
     } else if (provider === 'gemini') {
-      m.textContent = 'Ex. gemini-2.0-flash (rapide, offre gratuite) ou gemini-1.5-pro (plus fin).';
+      m.textContent = 'Les modèles « flash » sont rapides et gratuits ; « pro » est plus fin mais son quota gratuit est très limité.';
     } else {
-      m.textContent = 'Recommandé : claude-sonnet-5. Précision max : claude-opus-4-8.';
+      m.textContent = 'Sonnet 5 = bon équilibre. Opus 4.8 = précision maximale (raisonnement approfondi).';
     }
-    if (resetModel) {
-      var models = settings.models || {};
-      $('set-model').value = models[provider] || Storage.DEFAULT_MODELS[provider] || '';
+  }
+
+  // Renvoie l'id de modèle sélectionné (liste ou champ personnalisé).
+  function getSelectedModel(provider) {
+    var v = $('set-model').value;
+    if (v === CUSTOM_VALUE) {
+      return $('set-model-custom').value.trim() || Storage.DEFAULT_MODELS[provider];
     }
+    return v || Storage.DEFAULT_MODELS[provider];
   }
 
   function openSettings() {
@@ -664,10 +787,10 @@
     $('set-key-claude').value = keys.claude || '';
     $('set-key-gemini').value = keys.gemini || '';
     $('set-key-openai').value = keys.openai || '';
-    $('set-model').value = models[settings.provider] || Storage.DEFAULT_MODELS[settings.provider] || '';
+    populateModelSelect(settings.provider, models[settings.provider] || Storage.DEFAULT_MODELS[settings.provider] || '');
+    $('set-compare').value = settings.compareProvider || '';
     $('set-partsize').value = settings.partSizeG;
     $('set-round-half').checked = settings.roundHalf;
-    updateProviderHints(settings.provider, false);
     $('settings-modal').hidden = false;
   }
 
@@ -679,13 +802,33 @@
     settings.apiKeys.gemini = $('set-key-gemini').value.trim();
     settings.apiKeys.openai = $('set-key-openai').value.trim();
     settings.models = settings.models || {};
-    settings.models[provider] = $('set-model').value.trim() || Storage.DEFAULT_MODELS[provider];
+    settings.models[provider] = getSelectedModel(provider);
+    var cmp = $('set-compare').value;
+    settings.compareProvider = (cmp && cmp !== provider) ? cmp : '';
     var ps = parseInt($('set-partsize').value, 10);
     settings.partSizeG = (ps >= 5 && ps <= 20) ? ps : 10;
     settings.roundHalf = $('set-round-half').checked;
     Storage.saveSettings(settings);
     $('settings-modal').hidden = true;
+    updateCompareToggle();
     toast('Réglages enregistrés.');
+  }
+
+  // Affiche la case « 2ᵉ avis » sur l'écran Photo si un 2ᵉ fournisseur est configuré.
+  function updateCompareToggle() {
+    var wrap = $('compare-wrap');
+    if (!wrap) return;
+    var cmp = settings.compareProvider;
+    if (cmp && cmp !== settings.provider) {
+      wrap.hidden = false;
+      $('compare-label').textContent = '🔬 Demander un 2ᵉ avis (' +
+        (PROVIDER_NAME[settings.provider] || settings.provider) + ' + ' +
+        (PROVIDER_NAME[cmp] || cmp) + ')';
+    } else {
+      wrap.hidden = true;
+      var cb = $('compare-toggle');
+      if (cb) cb.checked = false;
+    }
   }
 
   // ---------- Divers ----------
@@ -755,6 +898,7 @@
     initManual();
     initHistory();
     initSettings();
+    updateCompareToggle();
     renderThumbs();
     updateEstimateBtn();
     registerSW();

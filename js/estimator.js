@@ -291,35 +291,50 @@
     return (c === 'high' || c === 'medium' || c === 'low') ? c : 'medium';
   }
 
-  var Estimator = {
-    /* images: [{base64, mediaType}], ctx: {referenceObject, plateDiameterCm, notes, imageCount},
-       settings: {provider, apiKey, model}. Retourne une Promise du résultat normalisé. */
-    estimate: function (images, ctx, settings) {
-      var provider = settings.provider || 'claude';
-      var keys = settings.apiKeys || {};
-      var models = settings.models || {};
-      var DEF = (window.Storage && window.Storage.DEFAULT_MODELS) ||
-                { claude: 'claude-sonnet-5', gemini: 'gemini-2.0-flash', openai: 'gpt-4o' };
-      // Compat : ancien format (clé/modèle uniques) si présent.
-      var apiKey = keys[provider] || settings.apiKey || '';
-      var model = models[provider] || settings.model || DEF[provider];
+  var PROVIDER_LABEL = { claude: 'Anthropic (Claude)', gemini: 'Google (Gemini)', openai: 'OpenAI (ChatGPT)' };
 
-      var LABEL = { claude: 'Anthropic (Claude)', gemini: 'Google (Gemini)', openai: 'OpenAI (ChatGPT)' };
-      if (!apiKey) {
-        return Promise.reject(new Error('Aucune clé API ' + (LABEL[provider] || provider) +
-          '. Ajoute-la dans les Réglages, ou utilise le mode Manuel.'));
-      }
-      if (!images || !images.length) {
-        return Promise.reject(new Error('Ajoute au moins une photo.'));
-      }
-      var prompt = buildUserPrompt(ctx);
-      var callSettings = { provider: provider, apiKey: apiKey, model: model };
-      var call = provider === 'openai' ? callOpenAI
-               : provider === 'gemini' ? callGemini
-               : callClaude;
-      return call(images, prompt, callSettings).then(function (result) {
-        return sanitize(result, ctx);
-      });
+  // Lance l'estimation pour UN fournisseur donné (utilisé aussi pour le 2ᵉ avis).
+  function estimateProvider(provider, images, ctx, settings) {
+    var keys = settings.apiKeys || {};
+    var models = settings.models || {};
+    var DEF = (window.Storage && window.Storage.DEFAULT_MODELS) ||
+              { claude: 'claude-sonnet-5', gemini: 'gemini-2.0-flash', openai: 'gpt-4o' };
+    // Compat : ancien format (clé/modèle uniques) si présent.
+    var apiKey = keys[provider] || settings.apiKey || '';
+    var model = models[provider] || settings.model || DEF[provider];
+
+    if (!apiKey) {
+      return Promise.reject(new Error('Aucune clé API ' + (PROVIDER_LABEL[provider] || provider) +
+        '. Ajoute-la dans les Réglages, ou utilise le mode Manuel.'));
+    }
+    if (!images || !images.length) {
+      return Promise.reject(new Error('Ajoute au moins une photo.'));
+    }
+    var prompt = buildUserPrompt(ctx);
+    var callSettings = { provider: provider, apiKey: apiKey, model: model };
+    var call = provider === 'openai' ? callOpenAI
+             : provider === 'gemini' ? callGemini
+             : callClaude;
+    return call(images, prompt, callSettings).then(function (result) {
+      var out = sanitize(result, ctx);
+      out.provider = provider;
+      out.model = model;
+      return out;
+    });
+  }
+
+  var Estimator = {
+    PROVIDER_LABEL: PROVIDER_LABEL,
+
+    /* images: [{base64, mediaType}], ctx: {referenceObject, plateDiameterCm, notes, imageCount},
+       settings: {provider, apiKeys, models}. Retourne une Promise du résultat normalisé. */
+    estimate: function (images, ctx, settings) {
+      return estimateProvider(settings.provider || 'claude', images, ctx, settings);
+    },
+
+    // Estimation forcée sur un fournisseur précis (pour le mode « 2ᵉ avis »).
+    estimateWith: function (provider, images, ctx, settings) {
+      return estimateProvider(provider, images, ctx, settings);
     }
   };
 

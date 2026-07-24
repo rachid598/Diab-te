@@ -109,6 +109,11 @@
         <textarea id="user-notes" class="input" rows="3" placeholder="Décris les aliments ou quantités connues…"></textarea>
       </div>
 
+      <label id="compare-wrap" class="check compare-toggle" hidden>
+        <input type="checkbox" id="compare-toggle" />
+        <span id="compare-label">🔬 Demander un 2ᵉ avis</span>
+      </label>
+
       <button id="estimate-btn" class="btn btn-primary btn-lg" disabled>🔎 Estimer les glucides</button>
 
       <div id="analyze-status" class="status" hidden></div>
@@ -166,49 +171,68 @@
         <button id="close-settings" class="icon-btn" aria-label="Fermer">✕</button>
       </div>
 
-      <h3>Moteur d'estimation IA</h3>
-      <label>Fournisseur actif</label>
-      <select id="set-provider" class="input">
-        <option value="claude">Claude (Anthropic)</option>
-        <option value="gemini">Google Gemini</option>
-        <option value="openai">OpenAI (ChatGPT)</option>
-      </select>
-      <p class="hint tiny">C'est le fournisseur utilisé pour l'analyse photo. Tes clés sont stockées <strong>uniquement sur cet appareil</strong>.</p>
+      <!-- Fournisseur & modèle -->
+      <div class="set-group">
+        <h3>Analyse par IA</h3>
+        <label>Fournisseur actif</label>
+        <select id="set-provider" class="input">
+          <option value="claude">Claude (Anthropic)</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="openai">OpenAI (ChatGPT)</option>
+        </select>
 
-      <label>Clé API Anthropic (Claude)</label>
-      <input id="set-key-claude" class="input" type="password" placeholder="sk-ant-…" autocomplete="off" />
-      <p class="hint tiny">console.anthropic.com — payant à l'usage (quelques centimes / analyse).</p>
-
-      <label>Clé API Google (Gemini)</label>
-      <input id="set-key-gemini" class="input" type="password" placeholder="AIza…" autocomplete="off" />
-      <p class="hint tiny">aistudio.google.com/apikey — <strong>offre gratuite</strong> généreuse pour un usage perso.</p>
-
-      <label>Clé API OpenAI (ChatGPT)</label>
-      <input id="set-key-openai" class="input" type="password" placeholder="sk-…" autocomplete="off" />
-      <p class="hint tiny">platform.openai.com/api-keys — payant à l'usage. ⚠️ L'abonnement <strong>ChatGPT Pro ne donne pas accès à l'API</strong> : impossible de l'utiliser ici sans clé API.</p>
-
-      <label>Modèle (du fournisseur actif)</label>
-      <input id="set-model" class="input" type="text" placeholder="claude-sonnet-5" />
-      <p class="hint tiny" id="model-hint"></p>
-
-      <hr />
-      <h3>Parts de glucides</h3>
-      <label>1 part = ? grammes de glucides</label>
-      <input id="set-partsize" class="input small" type="number" min="5" max="20" step="1" />
-
-      <label class="check">
-        <input type="checkbox" id="set-round-half" />
-        <span>Arrondir les parts au 0,5 le plus proche</span>
-      </label>
-
-      <hr />
-      <div class="btn-row">
-        <button id="save-settings" class="btn btn-primary">Enregistrer</button>
-        <button id="clear-key" class="btn btn-ghost">Effacer la clé active</button>
+        <label>Modèle (<span id="set-model-provider-name">Claude</span>)</label>
+        <select id="set-model" class="input"></select>
+        <div id="set-model-custom-wrap" class="inline-field" hidden>
+          <input id="set-model-custom" class="input" type="text" placeholder="id du modèle (ex. gemini-2.5-flash)" />
+        </div>
+        <p class="hint tiny" id="model-hint"></p>
       </div>
-      <p class="hint tiny">Sécurité : la clé et les photos ne quittent ton téléphone que pour l'appel direct au fournisseur d'IA que tu as choisi. Rien n'est envoyé ailleurs, aucune donnée n'est stockée sur un serveur.</p>
 
-      <hr />
+      <!-- 2ᵉ avis -->
+      <div class="set-group">
+        <h3>2ᵉ avis <span class="tag">optionnel</span></h3>
+        <label>Comparer avec un 2ᵉ fournisseur</label>
+        <select id="set-compare" class="input">
+          <option value="">Aucun (un seul avis)</option>
+          <option value="claude">Claude</option>
+          <option value="gemini">Gemini</option>
+          <option value="openai">OpenAI (ChatGPT)</option>
+        </select>
+        <p class="hint tiny">Active une case « 2ᵉ avis » sous le bouton Estimer : l'app interroge deux fournisseurs et affiche les deux estimations côte à côte (utile pour recouper).</p>
+      </div>
+
+      <!-- Clés API -->
+      <div class="set-group">
+        <h3>Clés API <span class="tag">sur cet appareil</span></h3>
+        <label>Anthropic (Claude)</label>
+        <input id="set-key-claude" class="input" type="password" placeholder="sk-ant-…" autocomplete="off" />
+        <p class="hint tiny">console.anthropic.com — payant à l'usage.</p>
+
+        <label>Google (Gemini)</label>
+        <input id="set-key-gemini" class="input" type="password" placeholder="AIza…" autocomplete="off" />
+        <p class="hint tiny">aistudio.google.com/apikey — <strong>offre gratuite</strong>.</p>
+
+        <label>OpenAI (ChatGPT)</label>
+        <input id="set-key-openai" class="input" type="password" placeholder="sk-…" autocomplete="off" />
+        <p class="hint tiny">platform.openai.com/api-keys — payant. ⚠️ L'abonnement <strong>ChatGPT Pro ne donne pas accès à l'API</strong>.</p>
+
+        <button id="clear-key" class="btn btn-ghost" style="margin-top:10px">Effacer la clé du fournisseur actif</button>
+      </div>
+
+      <!-- Parts -->
+      <div class="set-group">
+        <h3>Parts de glucides</h3>
+        <label>1 part = ? grammes</label>
+        <input id="set-partsize" class="input small" type="number" min="5" max="20" step="1" />
+        <label class="check">
+          <input type="checkbox" id="set-round-half" />
+          <span>Arrondir les parts au 0,5 le plus proche</span>
+        </label>
+      </div>
+
+      <button id="save-settings" class="btn btn-primary btn-lg" style="margin-bottom:12px">Enregistrer</button>
+      <p class="hint tiny">Sécurité : les clés et les photos ne quittent ton téléphone que pour l'appel direct au fournisseur choisi. Rien n'est stocké sur un serveur.</p>
       <p class="hint tiny app-version-line" id="app-version">Version…</p>
     </div>
   </div>
