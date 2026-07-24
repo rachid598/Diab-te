@@ -167,19 +167,29 @@
       </div>
 
       <h3>Moteur d'estimation IA</h3>
-      <label>Fournisseur</label>
+      <label>Fournisseur actif</label>
       <select id="set-provider" class="input">
-        <option value="claude">Claude (Anthropic) — par défaut</option>
-        <option value="openai">OpenAI (GPT vision)</option>
+        <option value="claude">Claude (Anthropic)</option>
+        <option value="gemini">Google Gemini</option>
+        <option value="openai">OpenAI (ChatGPT)</option>
       </select>
+      <p class="hint tiny">C'est le fournisseur utilisé pour l'analyse photo. Tes clés sont stockées <strong>uniquement sur cet appareil</strong>.</p>
 
-      <label>Clé API <span class="tag">stockée uniquement sur cet appareil</span></label>
-      <input id="set-apikey" class="input" type="password" placeholder="sk-…" autocomplete="off" />
-      <p class="hint" id="apikey-hint"></p>
+      <label>Clé API Anthropic (Claude)</label>
+      <input id="set-key-claude" class="input" type="password" placeholder="sk-ant-…" autocomplete="off" />
+      <p class="hint tiny">console.anthropic.com — payant à l'usage (quelques centimes / analyse).</p>
 
-      <label>Modèle</label>
+      <label>Clé API Google (Gemini)</label>
+      <input id="set-key-gemini" class="input" type="password" placeholder="AIza…" autocomplete="off" />
+      <p class="hint tiny">aistudio.google.com/apikey — <strong>offre gratuite</strong> généreuse pour un usage perso.</p>
+
+      <label>Clé API OpenAI (ChatGPT)</label>
+      <input id="set-key-openai" class="input" type="password" placeholder="sk-…" autocomplete="off" />
+      <p class="hint tiny">platform.openai.com/api-keys — payant à l'usage. ⚠️ L'abonnement <strong>ChatGPT Pro ne donne pas accès à l'API</strong> : impossible de l'utiliser ici sans clé API.</p>
+
+      <label>Modèle (du fournisseur actif)</label>
       <input id="set-model" class="input" type="text" placeholder="claude-sonnet-5" />
-      <p class="hint" id="model-hint"></p>
+      <p class="hint tiny" id="model-hint"></p>
 
       <hr />
       <h3>Parts de glucides</h3>
@@ -194,7 +204,7 @@
       <hr />
       <div class="btn-row">
         <button id="save-settings" class="btn btn-primary">Enregistrer</button>
-        <button id="clear-key" class="btn btn-ghost">Effacer la clé</button>
+        <button id="clear-key" class="btn btn-ghost">Effacer la clé active</button>
       </div>
       <p class="hint tiny">Sécurité : la clé et les photos ne quittent ton téléphone que pour l'appel direct au fournisseur d'IA que tu as choisi. Rien n'est envoyé ailleurs, aucune donnée n'est stockée sur un serveur.</p>
 

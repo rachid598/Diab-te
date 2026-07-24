@@ -10,18 +10,23 @@
     customFoods: 'diabete.customfoods.v1'
   };
 
-  var DEFAULT_SETTINGS = {
-    provider: 'claude',
-    apiKey: '',
-    model: 'claude-sonnet-5',
-    partSizeG: 10,       // 1 part = 10 g (standard France)
-    roundHalf: true      // arrondir les parts au 0,5
-  };
-
   // Modèles par défaut suggérés par fournisseur.
   var DEFAULT_MODELS = {
     claude: 'claude-sonnet-5',
+    gemini: 'gemini-2.0-flash',
     openai: 'gpt-4o'
+  };
+
+  var DEFAULT_SETTINGS = {
+    provider: 'claude',                                   // fournisseur actif
+    apiKeys: { claude: '', gemini: '', openai: '' },      // une clé par fournisseur
+    models: {                                             // un modèle par fournisseur
+      claude: DEFAULT_MODELS.claude,
+      gemini: DEFAULT_MODELS.gemini,
+      openai: DEFAULT_MODELS.openai
+    },
+    partSizeG: 10,       // 1 part = 10 g (standard France)
+    roundHalf: true      // arrondir les parts au 0,5
   };
 
   function read(key, fallback) {
@@ -40,8 +45,14 @@
     DEFAULT_MODELS: DEFAULT_MODELS,
 
     getSettings: function () {
-      var s = read(KEYS.settings, {});
-      var merged = Object.assign({}, DEFAULT_SETTINGS, s || {});
+      var s = read(KEYS.settings, {}) || {};
+      var merged = Object.assign({}, DEFAULT_SETTINGS, s);
+      // Objets complets (sans muter les valeurs par défaut).
+      merged.apiKeys = Object.assign({}, DEFAULT_SETTINGS.apiKeys, s.apiKeys || {});
+      merged.models = Object.assign({}, DEFAULT_SETTINGS.models, s.models || {});
+      // Migration depuis l'ancien format (clé/modèle uniques).
+      if (s.apiKey && !s.apiKeys) merged.apiKeys[s.provider || 'claude'] = s.apiKey;
+      if (s.model && !s.models) merged.models[s.provider || 'claude'] = s.model;
       return merged;
     },
     saveSettings: function (s) {
