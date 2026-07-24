@@ -162,6 +162,33 @@
     });
   }
 
+  function callGemini(images, prompt, settings) {
+    var parts = images.map(function (img) {
+      return { inline_data: { mime_type: img.mediaType, data: img.base64 } };
+    });
+    parts.push({ text: prompt });
+    var model = settings.model || 'gemini-2.0-flash';
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
+      encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(settings.apiKey);
+
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{ role: 'user', parts: parts }],
+        generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 4000 }
+      })
+    }).then(handleResponse).then(function (data) {
+      if (data.error) throw new Error(data.error.message || 'Erreur API Gemini.');
+      var cand = data.candidates && data.candidates[0];
+      var text = (cand && cand.content && cand.content.parts)
+        ? cand.content.parts.map(function (p) { return p.text || ''; }).join('')
+        : '';
+      return parseJson(text);
+    });
+  }
+
   function callOpenAI(images, prompt, settings) {
     var userContent = [{ type: 'text', text: prompt }];
     images.forEach(function (img) {
@@ -268,15 +295,29 @@
     /* images: [{base64, mediaType}], ctx: {referenceObject, plateDiameterCm, notes, imageCount},
        settings: {provider, apiKey, model}. Retourne une Promise du résultat normalisé. */
     estimate: function (images, ctx, settings) {
-      if (!settings.apiKey) {
-        return Promise.reject(new Error('Aucune clé API. Ajoute-la dans les Réglages, ou utilise le mode Manuel.'));
+      var provider = settings.provider || 'claude';
+      var keys = settings.apiKeys || {};
+      var models = settings.models || {};
+      var DEF = (window.Storage && window.Storage.DEFAULT_MODELS) ||
+                { claude: 'claude-sonnet-5', gemini: 'gemini-2.0-flash', openai: 'gpt-4o' };
+      // Compat : ancien format (clé/modèle uniques) si présent.
+      var apiKey = keys[provider] || settings.apiKey || '';
+      var model = models[provider] || settings.model || DEF[provider];
+
+      var LABEL = { claude: 'Anthropic (Claude)', gemini: 'Google (Gemini)', openai: 'OpenAI (ChatGPT)' };
+      if (!apiKey) {
+        return Promise.reject(new Error('Aucune clé API ' + (LABEL[provider] || provider) +
+          '. Ajoute-la dans les Réglages, ou utilise le mode Manuel.'));
       }
       if (!images || !images.length) {
         return Promise.reject(new Error('Ajoute au moins une photo.'));
       }
       var prompt = buildUserPrompt(ctx);
-      var call = settings.provider === 'openai' ? callOpenAI : callClaude;
-      return call(images, prompt, settings).then(function (result) {
+      var callSettings = { provider: provider, apiKey: apiKey, model: model };
+      var call = provider === 'openai' ? callOpenAI
+               : provider === 'gemini' ? callGemini
+               : callClaude;
+      return call(images, prompt, callSettings).then(function (result) {
         return sanitize(result, ctx);
       });
     }

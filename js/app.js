@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '11'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '12'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -628,33 +628,41 @@
     $('close-settings').addEventListener('click', function () { $('settings-modal').hidden = true; });
     $('save-settings').addEventListener('click', saveSettingsFromForm);
     $('clear-key').addEventListener('click', function () {
-      $('set-apikey').value = '';
-      settings.apiKey = '';
-      Storage.saveSettings(settings);
-      toast('Clé effacée.');
+      var field = KEY_FIELD[$('set-provider').value];
+      if (field) $(field).value = '';
+      toast('Clé du fournisseur actif vidée — clique Enregistrer pour valider.');
     });
     $('set-provider').addEventListener('change', function () {
       updateProviderHints($('set-provider').value, true);
     });
   }
 
+  var KEY_FIELD = { claude: 'set-key-claude', gemini: 'set-key-gemini', openai: 'set-key-openai' };
+
   function updateProviderHints(provider, resetModel) {
+    var m = $('model-hint');
     if (provider === 'openai') {
-      $('apikey-hint').innerHTML = 'Crée une clé sur <strong>platform.openai.com/api-keys</strong>.';
-      $('model-hint').textContent = 'Ex. gpt-4o (vision). Pas « codex » : il ne lit pas les images.';
-      if (resetModel) $('set-model').value = Storage.DEFAULT_MODELS.openai;
+      m.textContent = 'Ex. gpt-4o (vision). « Codex » ne lit pas les images.';
+    } else if (provider === 'gemini') {
+      m.textContent = 'Ex. gemini-2.0-flash (rapide, offre gratuite) ou gemini-1.5-pro (plus fin).';
     } else {
-      $('apikey-hint').innerHTML = 'Crée une clé sur <strong>console.anthropic.com</strong>.';
-      $('model-hint').textContent = 'Recommandé : claude-sonnet-5. Pour un max de précision : claude-opus-4-8.';
-      if (resetModel) $('set-model').value = Storage.DEFAULT_MODELS.claude;
+      m.textContent = 'Recommandé : claude-sonnet-5. Précision max : claude-opus-4-8.';
+    }
+    if (resetModel) {
+      var models = settings.models || {};
+      $('set-model').value = models[provider] || Storage.DEFAULT_MODELS[provider] || '';
     }
   }
 
   function openSettings() {
     settings = Storage.getSettings();
+    var keys = settings.apiKeys || {};
+    var models = settings.models || {};
     $('set-provider').value = settings.provider;
-    $('set-apikey').value = settings.apiKey;
-    $('set-model').value = settings.model;
+    $('set-key-claude').value = keys.claude || '';
+    $('set-key-gemini').value = keys.gemini || '';
+    $('set-key-openai').value = keys.openai || '';
+    $('set-model').value = models[settings.provider] || Storage.DEFAULT_MODELS[settings.provider] || '';
     $('set-partsize').value = settings.partSizeG;
     $('set-round-half').checked = settings.roundHalf;
     updateProviderHints(settings.provider, false);
@@ -662,9 +670,14 @@
   }
 
   function saveSettingsFromForm() {
-    settings.provider = $('set-provider').value;
-    settings.apiKey = $('set-apikey').value.trim();
-    settings.model = $('set-model').value.trim() || Storage.DEFAULT_MODELS[settings.provider];
+    var provider = $('set-provider').value;
+    settings.provider = provider;
+    settings.apiKeys = settings.apiKeys || {};
+    settings.apiKeys.claude = $('set-key-claude').value.trim();
+    settings.apiKeys.gemini = $('set-key-gemini').value.trim();
+    settings.apiKeys.openai = $('set-key-openai').value.trim();
+    settings.models = settings.models || {};
+    settings.models[provider] = $('set-model').value.trim() || Storage.DEFAULT_MODELS[provider];
     var ps = parseInt($('set-partsize').value, 10);
     settings.partSizeG = (ps >= 5 && ps <= 20) ? ps : 10;
     settings.roundHalf = $('set-round-half').checked;
