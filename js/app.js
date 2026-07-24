@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '17'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '18'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -360,6 +360,19 @@
     '</div>';
   }
 
+  /* Rappel de la tendance personnelle au moment où ça compte (avant de doser).
+     Purement informatif : on NE corrige PAS le chiffre automatiquement — c'est à
+     l'utilisateur d'ajuster s'il le juge pertinent. */
+  function biasHintHtml(totalG) {
+    var bias = Storage.getBias();
+    if (bias.count < 3 || Math.abs(bias.pct) < 5) return '';
+    var adjusted = Math.round(totalG * bias.meanRatio);
+    var sens = bias.pct > 0 ? 'sous-estimes' : 'sur-estimes';
+    return '<div class="bias-hint">🎯 D\'après tes ' + bias.count + ' repas corrigés, tu ' + sens +
+      ' d\'environ ' + Math.abs(bias.pct) + ' % : le réel serait plutôt autour de <strong>' +
+      adjusted + ' g</strong> (' + fr(partsFrom(adjusted)) + ' parts). À toi de juger.</div>';
+  }
+
   function renderResults(r) {
     var el = $('results');
     var parts = partsFrom(r.totalCarbsG);
@@ -372,6 +385,7 @@
     html += '  <div class="confidence conf-' + r.overallConfidence + '">' + CONF_LABEL[r.overallConfidence] + '</div>';
     html += '  <div class="pump-hint">💉 À saisir dans ta pompe : <strong>' + r.totalCarbsG +
             ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>). Ta pompe calcule le bolus.</div>';
+    html += biasHintHtml(r.totalCarbsG);
     html += '</div>';
 
     // Détail par aliment (grammes éditables)
@@ -471,8 +485,121 @@
     var search = $('food-search');
     search.addEventListener('input', function () { renderFoodResults(search.value); });
     initCustomFoodForm();
+    initOnlineTools();
     renderChips();
     renderFoodResults('');
+  }
+
+  // ---------- Recherche en ligne (OpenFoodFacts) + code-barres ----------
+  var scanBusy = false, lastScanCode = null, lastScanAt = 0;
+
+  function initOnlineTools() {
+    $('off-search-btn').addEventListener('click', function () { runOffSearch($('food-search').value); });
+    $('barcode-btn').addEventListener('click', openBarcode);
+    $('close-barcode').addEventListener('click', closeBarcode);
+    $('barcode-manual-go').addEventListener('click', function () {
+      var code = ($('barcode-manual').value || '').replace(/\D/g, '');
+      if (code) processBarcode(code);
+      else toast('Saisis un code-barres.');
+    });
+  }
+
+  function runOffSearch(query) {
+    query = (query || '').trim();
+    if (query.length < 2) { toast('Tape au moins 2 lettres avant de chercher en ligne.'); return; }
+    var status = $('off-status'), box = $('off-results');
+    box.hidden = true;
+    status.hidden = false;
+    status.innerHTML = '<div class="spinner"></div>Recherche « ' + escapeHtml(query) + ' » dans OpenFoodFacts…';
+    OFF.search(query).then(function (list) {
+      status.hidden = true;
+      renderOffResults(list);
+    }).catch(function (e) {
+      status.hidden = true;
+      toast(e.message);
+    });
+  }
+
+  function renderOffResults(list) {
+    var box = $('off-results');
+    box.hidden = false;
+    if (!list.length) {
+      box.innerHTML = '<p class="empty">Aucun produit trouvé en ligne. Essaie un autre mot, ou un code-barres.</p>';
+      return;
+    }
+    box.innerHTML = '<div class="off-head">' + list.length + ' produit(s) en ligne :</div>';
+    list.forEach(function (f) {
+      var el = document.createElement('div');
+      el.className = 'food-item off-item';
+      var brand = f.brand ? ' <span class="off-brand">' + escapeHtml(f.brand) + '</span>' : '';
+      el.innerHTML =
+        '<span class="food-label">' + escapeHtml(f.n) + brand +
+        ' <span class="item-detail">(' + fr(f.carb) + ' g/100 g)</span></span>' +
+        '<span class="food-actions"><span class="food-add">＋</span></span>';
+      var add = function () { addOffFood(f); };
+      el.querySelector('.food-label').addEventListener('click', add);
+      el.querySelector('.food-add').addEventListener('click', function (e) { e.stopPropagation(); add(); });
+      box.appendChild(el);
+    });
+  }
+
+  // Ajoute un produit OFF au repas (portion = taille de service si connue).
+  function addOffFood(f) {
+    var portions = f.serving ? [['1 portion', f.serving]] : [];
+    var name = f.n + (f.brand ? ' (' + f.brand + ')' : '');
+    addFoodToMeal({ n: name, carb: f.carb, portions: portions, custom: false });
+  }
+
+  function openBarcode() {
+    $('barcode-manual').value = '';
+    scanBusy = false; lastScanCode = null; lastScanAt = 0;
+    $('barcode-status').hidden = true;
+    $('barcode-modal').hidden = false;
+    var video = $('barcode-video');
+    if (Barcode.supported()) {
+      Barcode.start(video, function (code) {
+        var now = Date.now();
+        if (scanBusy) return;
+        if (code === lastScanCode && now - lastScanAt < 3000) return;
+        lastScanCode = code; lastScanAt = now;
+        processBarcode(code);
+      }, function (err) {
+        showBarcodeStatus('📷 ' + err.message);
+      });
+    } else {
+      showBarcodeStatus('Scan caméra indisponible ici. Saisis le code-barres à la main ci-dessous.');
+    }
+  }
+
+  function closeBarcode() {
+    try { Barcode.stop(); } catch (e) {}
+    scanBusy = false;
+    $('barcode-modal').hidden = true;
+  }
+
+  function showBarcodeStatus(msg) {
+    var s = $('barcode-status');
+    s.hidden = false;
+    s.innerHTML = msg;
+  }
+
+  function processBarcode(code) {
+    scanBusy = true;
+    showBarcodeStatus('<div class="spinner"></div>Recherche du produit ' + escapeHtml(code) + '…');
+    return OFF.lookupBarcode(code).then(function (f) {
+      if (!f) {
+        showBarcodeStatus('Produit introuvable ou sans glucides connus pour ' + escapeHtml(code) +
+          '. Vise à nouveau, ou saisis un autre code.');
+        scanBusy = false;
+        return;
+      }
+      closeBarcode();
+      addOffFood(f);
+      toast(f.n + ' ajouté (' + fr(f.carb) + ' g/100 g).');
+    }).catch(function (e) {
+      showBarcodeStatus(e.message);
+      scanBusy = false;
+    });
   }
 
   // Grammes effectifs d'un aliment du repas (portion × quantité, ou grammes directs).
@@ -715,18 +842,30 @@
       ' · moyenne <strong>' + fr(avgParts) + ' parts</strong>';
     list.appendChild(summary);
 
+    // Apprentissage : biais personnel calculé sur les repas où le réel est saisi.
+    list.appendChild(buildBiasCard());
+
     h.forEach(function (e) {
       var d = new Date(e.date);
       var dateStr = d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
       var names = (e.items || []).map(function (it) { return it.name; }).join(', ');
       var item = document.createElement('div');
       item.className = 'history-item';
+
       item.innerHTML =
         '<button class="history-del" data-del="' + e.date + '" aria-label="Supprimer">🗑️</button>' +
         '<div class="history-date">' + dateStr + ' · ' + (e.source === 'photo' ? '📷 photo' : '✍️ manuel') + '</div>' +
         '<div class="history-total"><b>' + fr(partsFromStored(e)) + ' parts</b> · ' + e.totalCarbsG + ' g</div>' +
-        '<div class="item-detail">' + escapeHtml(names || '—') + '</div>';
+        '<div class="item-detail">' + escapeHtml(names || '—') + '</div>' +
+        '<div class="history-real-line" data-line="' + e.date + '" hidden></div>' +
+        '<div class="history-real">' +
+        '  <label>Glucides réels</label>' +
+        '  <input class="input small real-input" type="number" inputmode="numeric" min="0" step="1" ' +
+        '         placeholder="g" value="' + (e.realCarbsG != null ? e.realCarbsG : '') + '" data-real="' + e.date + '">' +
+        '  <span class="real-unit">g</span>' +
+        '</div>';
       list.appendChild(item);
+      updateRealLine(e.date, e.totalCarbsG, e.realCarbsG);
     });
 
     list.querySelectorAll('.history-del').forEach(function (b) {
@@ -735,7 +874,87 @@
         renderHistory();
       });
     });
+    /* Saisie du réel. On met à jour UNIQUEMENT la ligne concernée et la carte de
+       biais : re-rendre toute la liste ferait perdre la saisie en cours dans un
+       autre champ (le 'change' se déclenche au moment où l'on quitte le champ). */
+    list.querySelectorAll('.real-input').forEach(function (inp) {
+      var commit = function (announce) {
+        var date = Number(inp.dataset.real);
+        var v = inp.value.trim();
+        var real = v === '' ? null : parseFloat(v);
+        if (real != null && (!isFinite(real) || real < 0)) return;
+        Storage.setHistoryReal(date, real);
+        var entry = Storage.getHistory().filter(function (x) { return x.date === date; })[0];
+        if (entry) updateRealLine(date, entry.totalCarbsG, entry.realCarbsG);
+        refreshBiasCard();
+        if (announce) toast(real == null ? 'Valeur réelle effacée.' : 'Réel enregistré — l\'app apprend ton biais.');
+      };
+      // Sauvegarde pendant la frappe (rien n'est perdu si l'app est fermée),
+      // puis confirmation visible quand on quitte le champ.
+      inp.addEventListener('input', function () {
+        clearTimeout(inp._t);
+        inp._t = setTimeout(function () { commit(false); }, 600);
+      });
+      inp.addEventListener('change', function () {
+        clearTimeout(inp._t);
+        commit(true);
+      });
+    });
     $('clear-history').hidden = false;
+  }
+
+  // Met à jour l'écart estimé/réel d'une seule ligne d'historique.
+  function updateRealLine(date, estG, realG) {
+    var el = document.querySelector('[data-line="' + date + '"]');
+    if (!el) return;
+    if (realG == null) { el.hidden = true; el.textContent = ''; return; }
+    var delta = realG - estG;
+    var sign = delta > 0 ? '+' : '';
+    el.className = 'history-real-line ' + (Math.abs(delta) <= 5 ? 'ok' : 'off');
+    el.innerHTML = 'Réel : <strong>' + realG + ' g</strong> (' + sign + delta + ' g vs estimation)';
+    el.hidden = false;
+  }
+
+  // Remplace la carte de biais sans toucher au reste de la liste.
+  function refreshBiasCard() {
+    var old = document.querySelector('.bias-card');
+    if (old && old.parentNode) old.parentNode.replaceChild(buildBiasCard(), old);
+  }
+
+  // Carte « apprentissage » : montre la tendance personnelle (sous/sur-estimation).
+  function buildBiasCard() {
+    var bias = Storage.getBias();
+    var card = document.createElement('div');
+    card.className = 'bias-card';
+    if (bias.count < 3) {
+      var left = 3 - bias.count;
+      card.innerHTML = '<div class="bias-title">🎯 Apprentissage</div>' +
+        '<div class="bias-text">Saisis les <strong>glucides réels</strong> sous chaque repas (étiquette, pesée, ' +
+        'ou ton comptage vérifié). Encore <strong>' + left + '</strong> repas' + (left > 1 ? '' : '') +
+        ' pour calculer ta tendance personnelle.</div>';
+      return card;
+    }
+    var pct = bias.pct;
+    var abs = Math.abs(pct);
+    var verdict, cls;
+    if (abs < 5) {
+      verdict = 'Tes estimations sont <strong>justes</strong> (écart moyen &lt; 5 %). Continue comme ça.';
+      cls = 'good';
+    } else if (pct > 0) {
+      verdict = 'Tu as tendance à <strong>SOUS-estimer d\'environ ' + abs + ' %</strong>. ' +
+        'Sur une estimation à 60 g, le réel tourne plutôt autour de ' + Math.round(60 * bias.meanRatio) + ' g.';
+      cls = 'warn';
+    } else {
+      verdict = 'Tu as tendance à <strong>SUR-estimer d\'environ ' + abs + ' %</strong>. ' +
+        'Sur une estimation à 60 g, le réel tourne plutôt autour de ' + Math.round(60 * bias.meanRatio) + ' g.';
+      cls = 'warn';
+    }
+    card.className = 'bias-card ' + cls;
+    card.innerHTML = '<div class="bias-title">🎯 Ta tendance personnelle</div>' +
+      '<div class="bias-text">' + verdict + '</div>' +
+      '<div class="bias-meta">Calculé sur ' + bias.count + ' repas avec valeur réelle. ' +
+      'Indicatif — ne remplace pas ton jugement.</div>';
+    return card;
   }
   // Recalcule les parts avec la taille de part actuelle si elle a changé.
   function partsFromStored(e) { return partsFrom(e.totalCarbsG); }

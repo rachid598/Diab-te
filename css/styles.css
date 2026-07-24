@@ -355,6 +355,43 @@ select.input { -webkit-appearance: none; appearance: none;
   font-size: 17px; cursor: pointer; opacity: .6; padding: 4px; }
 .history-del:hover { opacity: 1; }
 
+/* Apprentissage post-repas : saisie du réel + biais personnel */
+.history-real { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.history-real label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.history-real .real-input { width: 84px; }
+.real-unit { font-size: 12px; color: var(--muted); }
+.history-real-line { font-size: 12.5px; font-weight: 700; margin-top: 6px; }
+.history-real-line.ok { color: var(--ok); }
+.history-real-line.off { color: #b45309; }
+@media (prefers-color-scheme: dark) { .history-real-line.off { color: var(--accent); } }
+
+.bias-card { background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 13px 14px; margin-bottom: 12px; }
+.bias-card.good { background: color-mix(in srgb, var(--ok) 12%, var(--surface)); border-color: var(--ok); }
+.bias-card.warn { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); border-color: var(--accent); }
+.bias-title { font-size: 13px; font-weight: 800; margin-bottom: 4px; }
+.bias-text { font-size: 13.5px; line-height: 1.5; }
+.bias-meta { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
+
+.bias-hint { margin-top: 12px; font-size: 13px; line-height: 1.5; text-align: left;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border: 1px solid var(--accent); border-radius: var(--r); padding: 10px 12px; }
+
+/* ---------- Recherche en ligne (OpenFoodFacts) & code-barres ---------- */
+.online-tools { display: flex; gap: 8px; margin-top: 10px; }
+.online-tools .btn { flex: 1; font-size: 13.5px; padding-left: 8px; padding-right: 8px; white-space: nowrap; }
+.off-results { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+.off-head { font-size: 12px; font-weight: 700; color: var(--brand); margin-bottom: 6px; }
+.off-brand { font-size: 11.5px; color: var(--faint); font-weight: 600; }
+
+.scan-card { max-width: 520px; }
+.scan-frame { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #000;
+  border-radius: var(--r); overflow: hidden; margin: 10px 0; }
+.scan-video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scan-line { position: absolute; left: 8%; right: 8%; top: 50%; height: 2px;
+  background: #ef4444; box-shadow: 0 0 12px #ef4444; opacity: .9; }
+#barcode-manual { flex: 1; }
+
 /* ---------- Empty states ---------- */
 .empty {
   color: var(--muted); font-size: 13.5px; text-align: center; padding: 18px 8px;

@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=17" />
+  <link rel="stylesheet" href="css/styles.css?v=18" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -128,6 +128,15 @@
         <input id="food-search" class="input" type="text" placeholder="Rechercher (ex. riz, pain, pomme…)" />
         <div id="cat-chips" class="chips"></div>
         <div id="food-results" class="food-results"></div>
+
+        <div class="online-tools">
+          <button id="off-search-btn" class="btn btn-ghost">🌐 Produit emballé</button>
+          <button id="barcode-btn" class="btn btn-ghost">📷 Code-barres</button>
+        </div>
+        <p class="hint tiny">Recherche en ligne dans la base ouverte <strong>OpenFoodFacts</strong> (glucides exacts des produits emballés).</p>
+        <div id="off-status" class="status" hidden></div>
+        <div id="off-results" class="food-results off-results" hidden></div>
+
         <button id="add-custom-toggle" class="btn btn-ghost add-custom">＋ Ajouter un aliment personnalisé</button>
 
         <div id="custom-form" class="custom-form" hidden>
@@ -246,12 +255,35 @@
     </div>
   </div>
 
+  <!-- ============ Scan code-barres (modale) ============ -->
+  <div id="barcode-modal" class="modal" hidden>
+    <div class="modal-card scan-card">
+      <div class="modal-head">
+        <h2>Scanner un code-barres</h2>
+        <button id="close-barcode" class="icon-btn" aria-label="Fermer">✕</button>
+      </div>
+      <div class="scan-frame">
+        <video id="barcode-video" class="scan-video" playsinline muted></video>
+        <div class="scan-line"></div>
+      </div>
+      <p class="hint tiny">Vise le code-barres du produit. Rien ne fonctionne ? Saisis-le à la main :</p>
+      <div class="btn-row">
+        <input id="barcode-manual" class="input" type="text" inputmode="numeric" placeholder="ex. 3017620422003" autocomplete="off" />
+        <button id="barcode-manual-go" class="btn btn-primary">OK</button>
+      </div>
+      <div id="barcode-status" class="status" hidden></div>
+    </div>
+  </div>
+
   <div id="toast" class="toast" hidden></div>
 
-  <script src="js/storage.js?v=17"></script>
-  <script src="js/foods.js?v=17"></script>
-  <script src="js/estimator.js?v=17"></script>
-  <script src="js/camera.js?v=17"></script>
-  <script src="js/app.js?v=17"></script>
+  <script src="js/storage.js?v=18"></script>
+  <script src="js/foods.js?v=18"></script>
+  <script src="js/estimator.js?v=18"></script>
+  <script src="js/camera.js?v=18"></script>
+  <script src="js/off.js?v=18"></script>
+  <script src="vendor/zxing.min.js?v=18"></script>
+  <script src="js/barcode.js?v=18"></script>
+  <script src="js/app.js?v=18"></script>
 </body>
 </html>

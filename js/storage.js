@@ -98,6 +98,31 @@
       write(KEYS.history, h);
       return h;
     },
+    // Enregistre les glucides RÉELS d'un repas (pour l'apprentissage post-repas).
+    setHistoryReal: function (date, realCarbsG) {
+      var h = this.getHistory();
+      h.forEach(function (e) {
+        if (e.date === date) {
+          if (realCarbsG == null || realCarbsG === '') delete e.realCarbsG;
+          else e.realCarbsG = Math.max(0, Math.round(realCarbsG));
+        }
+      });
+      write(KEYS.history, h);
+      return h;
+    },
+    // Calcule le biais personnel : compare estimé vs réel sur les repas corrigés.
+    // Renvoie { count, meanRatio, pct } (pct > 0 = tendance à SOUS-estimer).
+    getBias: function () {
+      var h = this.getHistory();
+      var ratios = [];
+      h.forEach(function (e) {
+        var est = e.totalCarbsG, real = e.realCarbsG;
+        if (est > 0 && real != null && real > 0) ratios.push(real / est);
+      });
+      if (!ratios.length) return { count: 0, meanRatio: 1, pct: 0 };
+      var mean = ratios.reduce(function (s, r) { return s + r; }, 0) / ratios.length;
+      return { count: ratios.length, meanRatio: mean, pct: Math.round((mean - 1) * 100) };
+    },
 
     // ----- Aliments récents (mode manuel) -----
     getRecentFoods: function () {
