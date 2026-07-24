@@ -625,20 +625,48 @@
       .replace(/"/g, '&quot;');
   }
 
+  // Affiche le bandeau « Actualiser » et câble le bouton sur le worker en attente.
+  function showUpdate(worker) {
+    var banner = $('update-banner');
+    if (!banner || !worker) return;
+    banner.hidden = false;
+    var btn = $('update-btn');
+    btn.onclick = function () {
+      btn.disabled = true;
+      btn.textContent = 'Mise à jour…';
+      worker.postMessage('SKIP_WAITING'); // le nouveau worker prend le relais → reload
+    };
+  }
+
   function registerSW() {
-    if ('serviceWorker' in navigator) {
-      // Recharge une seule fois quand une nouvelle version prend le contrôle,
-      // pour que les correctifs s'appliquent sans manip du côté utilisateur.
-      var refreshing = false;
-      navigator.serviceWorker.addEventListener('controllerchange', function () {
-        if (refreshing) return;
-        refreshing = true;
-        window.location.reload();
+    if (!('serviceWorker' in navigator)) return;
+
+    // Quand la nouvelle version prend le contrôle, on recharge une seule fois.
+    var refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (refreshing) return;
+      refreshing = true;
+      window.location.reload();
+    });
+
+    navigator.serviceWorker.register('service-worker.js').then(function (reg) {
+      // Une version est déjà en attente au chargement.
+      if (reg.waiting && navigator.serviceWorker.controller) showUpdate(reg.waiting);
+
+      // Une nouvelle version vient d'être trouvée et installée.
+      reg.addEventListener('updatefound', function () {
+        var nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', function () {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            showUpdate(nw);
+          }
+        });
       });
-      navigator.serviceWorker.register('service-worker.js').then(function (reg) {
-        if (reg && reg.update) { try { reg.update(); } catch (e) {} }
-      }).catch(function () {});
-    }
+
+      // Vérifie périodiquement s'il y a une mise à jour (sessions longues).
+      setInterval(function () { try { reg.update(); } catch (e) {} }, 60 * 60 * 1000);
+    }).catch(function () {});
   }
 
   // ---------- Init ----------
