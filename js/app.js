@@ -3,6 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
+  var APP_VERSION = '7'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -669,8 +670,14 @@
     }).catch(function () {});
   }
 
+  function showVersion() {
+    var el = $('app-version');
+    if (el) el.textContent = 'Version ' + APP_VERSION + ' · Diab’ète';
+  }
+
   // ---------- Init ----------
   function init() {
+    showVersion();
     initInstall();
     initSafetyBanner();
     initTabs();
