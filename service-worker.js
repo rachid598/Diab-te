@@ -1,8 +1,10 @@
-/* service-worker.js — mise en cache de la coquille de l'app pour un usage hors-ligne.
-   Stratégie : network-first pour le code/les pages (on récupère toujours la dernière
-   version quand on est en ligne, le cache sert de secours hors-ligne), cache-first pour
-   les images/icônes. Les appels API (Anthropic/OpenAI) ne sont jamais mis en cache. */
-var CACHE = 'diabete-v5';
+/* service-worker.js — cache de la coquille pour l'usage hors-ligne.
+   Stratégie : network-first pour le code/les pages (dernière version quand en ligne,
+   cache en secours hors-ligne), cache-first pour les images/icônes.
+   Mise à jour : le nouveau worker ATTEND (pas de skipWaiting automatique). La page
+   affiche un bouton « Actualiser » et envoie le message SKIP_WAITING quand l'utilisateur
+   l'accepte. Les appels API (Anthropic/OpenAI) ne sont jamais mis en cache. */
+var CACHE = 'diabete-v6';
 var ASSETS = [
   './',
   './index.html',
@@ -17,12 +19,14 @@ var ASSETS = [
 ];
 
 self.addEventListener('install', function (e) {
+  // On pré-cache la coquille mais on N'appelle PAS skipWaiting :
+  // le nouveau worker reste en attente jusqu'à ce que l'utilisateur clique « Actualiser ».
   e.waitUntil(
     caches.open(CACHE).then(function (c) {
       return Promise.all(ASSETS.map(function (url) {
         return c.add(url).catch(function () { /* ignore les assets manquants */ });
       }));
-    }).then(function () { return self.skipWaiting(); })
+    })
   );
 });
 
@@ -32,8 +36,13 @@ self.addEventListener('activate', function (e) {
       return Promise.all(keys.map(function (k) {
         if (k !== CACHE) return caches.delete(k);
       }));
-    }).then(function () { return self.clients.claim(); })
+    })
   );
+});
+
+// La page demande la bascule vers la nouvelle version.
+self.addEventListener('message', function (e) {
+  if (e.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', function (e) {
