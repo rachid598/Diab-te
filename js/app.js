@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '8'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '9'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -132,25 +132,64 @@
       });
     });
     $('clear-photos').hidden = images.length === 0;
+    var ac = $('angle-count');
+    if (images.length) {
+      ac.hidden = false;
+      ac.textContent = images.length + ' / ' + Camera.MAX_ANGLES + ' vue' + (images.length > 1 ? 's' : '');
+    } else {
+      ac.hidden = true;
+    }
   }
 
   function updateEstimateBtn() {
     $('estimate-btn').disabled = images.length === 0;
   }
 
+  function setExtractStatus(on) {
+    var s = $('analyze-status');
+    if (on) { s.hidden = false; s.innerHTML = '<div class="spinner"></div>Extraction des images de la vidéo…'; }
+    else { s.hidden = true; }
+  }
+
   function addFiles(files) {
+    var arr = Array.prototype.slice.call(files);
+    var imgs = arr.filter(function (f) { return /^image\//.test(f.type); });
+    var vids = arr.filter(function (f) { return /^video\//.test(f.type); });
+
     var room = Camera.MAX_ANGLES - images.length;
-    if (room <= 0) { toast('Maximum ' + Camera.MAX_ANGLES + ' angles.'); return; }
-    var slice = Array.prototype.slice.call(files, 0, room);
-    Camera.processFiles(slice).then(function (results) {
-      results.forEach(function (r) { images.push(r); });
+    if (imgs.length) {
+      if (room <= 0) { toast('Maximum ' + Camera.MAX_ANGLES + ' vues.'); }
+      else {
+        Camera.processFiles(imgs.slice(0, room)).then(function (results) {
+          results.forEach(function (r) { if (images.length < Camera.MAX_ANGLES) images.push(r); });
+          renderThumbs();
+          updateEstimateBtn();
+        }).catch(function (e) { toast(e.message); });
+      }
+    }
+    vids.forEach(function (v) { addVideoFile(v); });
+  }
+
+  function addVideoFile(file) {
+    if (images.length >= Camera.MAX_ANGLES) { toast('Maximum ' + Camera.MAX_ANGLES + ' vues.'); return; }
+    setExtractStatus(true);
+    Camera.processVideo(file, Math.min(Camera.MAX_ANGLES - images.length, 5)).then(function (frames) {
+      setExtractStatus(false);
+      if (!frames.length) { toast('Aucune image nette extraite. Réessaie avec une vidéo plus stable.'); return; }
+      var added = 0;
+      frames.forEach(function (f) { if (images.length < Camera.MAX_ANGLES) { images.push(f); added++; } });
       renderThumbs();
       updateEstimateBtn();
-    }).catch(function (e) { toast(e.message); });
+      toast(added + ' image(s) extraite(s) de la vidéo.');
+    }).catch(function (e) { setExtractStatus(false); toast(e.message); });
   }
 
   function initPhotos() {
     $('camera-input').addEventListener('change', function (e) {
+      if (e.target.files.length) addFiles(e.target.files);
+      e.target.value = '';
+    });
+    $('video-input').addEventListener('change', function (e) {
       if (e.target.files.length) addFiles(e.target.files);
       e.target.value = '';
     });

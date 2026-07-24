@@ -63,18 +63,23 @@
     <section id="tab-analyze" class="tab-panel active">
       <div class="card">
         <h2>1. Photographie ton repas</h2>
-        <p class="hint">Astuce précision : une vue du dessus <em>et</em> une vue de côté aident à estimer le volume. Pose un objet-repère à côté de l'assiette.</p>
+        <p class="hint">Plus il y a d'angles, plus l'estimation est fiable : ajoute <strong>plusieurs photos</strong> (dessus + côté) ou <strong>une courte vidéo</strong> en tournant autour de l'assiette. Jusqu'à 6 vues. Pose un objet-repère à côté.</p>
 
         <div id="thumbs" class="thumbs"></div>
+        <p id="angle-count" class="angle-count" hidden></p>
 
         <div class="btn-row">
           <label class="btn btn-primary">
-            📷 Prendre / ajouter
+            📷 Photo
             <input id="camera-input" type="file" accept="image/*" capture="environment" hidden />
+          </label>
+          <label class="btn btn-primary">
+            🎥 Vidéo
+            <input id="video-input" type="file" accept="video/*" capture="environment" hidden />
           </label>
           <label class="btn">
             🖼️ Galerie
-            <input id="gallery-input" type="file" accept="image/*" multiple hidden />
+            <input id="gallery-input" type="file" accept="image/*,video/*" multiple hidden />
           </label>
           <button id="clear-photos" class="btn btn-ghost" hidden>Effacer</button>
         </div>
