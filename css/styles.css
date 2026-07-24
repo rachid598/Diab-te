@@ -394,6 +394,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
   display: flex; flex-direction: column; align-items: center; gap: 4px;
 }
 .cmp-name { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; color: var(--brand); }
+.cmp-model { font-size: 11px; color: var(--faint); font-weight: 600; word-break: break-all; }
 .cmp-parts { font-size: 34px; font-weight: 900; color: var(--brand); line-height: 1.1; }
 .cmp-parts small { font-size: 14px; font-weight: 800; color: var(--muted); }
 .cmp-grams { font-size: 16px; font-weight: 700; }

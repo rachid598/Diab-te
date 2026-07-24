@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '14'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '15'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -273,8 +273,10 @@
       }
       var r = x.result;
       var parts = partsFrom(r.totalCarbsG);
+      var modelLine = r.model ? '<div class="cmp-model">' + escapeHtml(r.model) + '</div>' : '';
       return '<div class="cmp-card">' +
         '<div class="cmp-name">' + escapeHtml(name) + '</div>' +
+        modelLine +
         '<div class="cmp-parts">' + fr(parts) + ' <small>parts</small></div>' +
         '<div class="cmp-grams">≈ ' + r.totalCarbsG + ' g</div>' +
         '<div class="cmp-range">' + r.rangeLowG + ' – ' + r.rangeHighG + ' g</div>' +
@@ -721,6 +723,15 @@
     $('set-model').addEventListener('change', function () {
       $('set-model-custom-wrap').hidden = $('set-model').value !== CUSTOM_VALUE;
     });
+    // 2ᵉ avis : afficher/remplir la liste de modèles selon le fournisseur choisi.
+    $('set-compare').addEventListener('change', function () {
+      var cp = $('set-compare').value;
+      var models = settings.models || {};
+      populateCompareModelSelect(cp, cp ? (models[cp] || Storage.DEFAULT_MODELS[cp] || '') : '');
+    });
+    $('set-compare-model').addEventListener('change', function () {
+      $('set-compare-model-custom-wrap').hidden = $('set-compare-model').value !== CUSTOM_VALUE;
+    });
   }
 
   // Indice de qualité visuel (●●● = précision max, ●○○ = rapide/économique).
@@ -729,9 +740,9 @@
     return '●'.repeat(stars) + '○'.repeat(3 - stars);
   }
 
-  // Remplit le menu déroulant des modèles pour le fournisseur choisi.
-  function populateModelSelect(provider, current) {
-    var sel = $('set-model');
+  // Remplit un <select> de modèles pour un fournisseur ; gère l'option « Autre modèle… ».
+  // Retourne true si le modèle courant correspond à une entrée du catalogue.
+  function fillModelSelect(sel, provider, current) {
     var catalog = (Storage.MODEL_CATALOG && Storage.MODEL_CATALOG[provider]) || [];
     sel.innerHTML = '';
     var matched = false;
@@ -742,16 +753,19 @@
       if (m.id === current) { opt.selected = true; matched = true; }
       sel.appendChild(opt);
     });
-    // Option « Autre modèle… » pour saisir un id récent non listé.
     var customOpt = document.createElement('option');
     customOpt.value = CUSTOM_VALUE;
     customOpt.textContent = 'Autre modèle… (saisir l\'id)';
     sel.appendChild(customOpt);
+    return matched;
+  }
 
+  // Menu déroulant des modèles du fournisseur ACTIF.
+  function populateModelSelect(provider, current) {
+    var matched = fillModelSelect($('set-model'), provider, current);
     var wrap = $('set-model-custom-wrap');
     if (!matched && current) {
-      // Modèle personnalisé enregistré : on sélectionne « Autre » et on pré-remplit.
-      sel.value = CUSTOM_VALUE;
+      $('set-model').value = CUSTOM_VALUE;
       $('set-model-custom').value = current;
       wrap.hidden = false;
     } else {
@@ -770,11 +784,29 @@
     }
   }
 
-  // Renvoie l'id de modèle sélectionné (liste ou champ personnalisé).
-  function getSelectedModel(provider) {
-    var v = $('set-model').value;
+  // Menu déroulant des modèles du 2ᵉ AVIS (masqué si aucun 2ᵉ fournisseur).
+  function populateCompareModelSelect(provider, current) {
+    var wrap = $('set-compare-model-wrap');
+    if (!provider) { wrap.hidden = true; return; }
+    wrap.hidden = false;
+    var matched = fillModelSelect($('set-compare-model'), provider, current);
+    var cw = $('set-compare-model-custom-wrap');
+    if (!matched && current) {
+      $('set-compare-model').value = CUSTOM_VALUE;
+      $('set-compare-model-custom').value = current;
+      cw.hidden = false;
+    } else {
+      cw.hidden = true;
+      $('set-compare-model-custom').value = '';
+    }
+    $('set-compare-provider-name').textContent = PROVIDER_NAME[provider] || provider;
+  }
+
+  // Renvoie l'id de modèle sélectionné dans une paire (select + champ perso).
+  function getModelFrom(selectId, customId, provider) {
+    var v = $(selectId).value;
     if (v === CUSTOM_VALUE) {
-      return $('set-model-custom').value.trim() || Storage.DEFAULT_MODELS[provider];
+      return $(customId).value.trim() || Storage.DEFAULT_MODELS[provider];
     }
     return v || Storage.DEFAULT_MODELS[provider];
   }
@@ -788,7 +820,9 @@
     $('set-key-gemini').value = keys.gemini || '';
     $('set-key-openai').value = keys.openai || '';
     populateModelSelect(settings.provider, models[settings.provider] || Storage.DEFAULT_MODELS[settings.provider] || '');
-    $('set-compare').value = settings.compareProvider || '';
+    var cp = settings.compareProvider || '';
+    $('set-compare').value = cp;
+    populateCompareModelSelect(cp, cp ? (models[cp] || Storage.DEFAULT_MODELS[cp] || '') : '');
     $('set-partsize').value = settings.partSizeG;
     $('set-round-half').checked = settings.roundHalf;
     $('settings-modal').hidden = false;
@@ -802,9 +836,14 @@
     settings.apiKeys.gemini = $('set-key-gemini').value.trim();
     settings.apiKeys.openai = $('set-key-openai').value.trim();
     settings.models = settings.models || {};
-    settings.models[provider] = getSelectedModel(provider);
+    settings.models[provider] = getModelFrom('set-model', 'set-model-custom', provider);
     var cmp = $('set-compare').value;
     settings.compareProvider = (cmp && cmp !== provider) ? cmp : '';
+    // Modèle choisi pour le 2ᵉ avis (stocké par fournisseur, comme le principal).
+    if (settings.compareProvider) {
+      settings.models[settings.compareProvider] =
+        getModelFrom('set-compare-model', 'set-compare-model-custom', settings.compareProvider);
+    }
     var ps = parseInt($('set-partsize').value, 10);
     settings.partSizeG = (ps >= 5 && ps <= 20) ? ps : 10;
     settings.roundHalf = $('set-round-half').checked;
