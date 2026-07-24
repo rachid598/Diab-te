@@ -22,7 +22,9 @@
       };
       img.onerror = function () {
         URL.revokeObjectURL(url);
-        reject(new Error('Impossible de lire l\'image.'));
+        reject(new Error('Image illisible (format non pris en charge, ex. HEIC). ' +
+          'Sur iPhone : Réglages → Appareil photo → Formats → « Le plus compatible », ' +
+          'ou reprends la photo avec le bouton 📷.'));
       };
       img.src = url;
     });
@@ -136,8 +138,18 @@
   window.Camera = {
     MAX_ANGLES: MAX_ANGLES,
     processFile: processFile,
+    // Tolérant aux échecs : une photo illisible n'annule pas les autres.
+    // Résout { results: [...ok], errors: [...messages] }.
     processFiles: function (files) {
-      return Promise.all(Array.prototype.slice.call(files).map(processFile));
+      var arr = Array.prototype.slice.call(files);
+      return Promise.allSettled(arr.map(processFile)).then(function (settled) {
+        var results = [], errors = [];
+        settled.forEach(function (s) {
+          if (s.status === 'fulfilled') results.push(s.value);
+          else errors.push((s.reason && s.reason.message) || 'Image illisible.');
+        });
+        return { results: results, errors: errors };
+      });
     },
     processVideo: processVideo
   };

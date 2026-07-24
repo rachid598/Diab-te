@@ -7,7 +7,8 @@
     settings: 'diabete.settings.v1',
     history: 'diabete.history.v1',
     disclaimer: 'diabete.disclaimer.v1',
-    customFoods: 'diabete.customfoods.v1'
+    customFoods: 'diabete.customfoods.v1',
+    recentFoods: 'diabete.recentfoods.v1'
   };
 
   // Catalogue de modèles par fournisseur. stars = indice de qualité/précision (1 à 3).
@@ -91,6 +92,26 @@
     },
     clearHistory: function () {
       write(KEYS.history, []);
+    },
+    deleteHistory: function (date) {
+      var h = this.getHistory().filter(function (e) { return e.date !== date; });
+      write(KEYS.history, h);
+      return h;
+    },
+
+    // ----- Aliments récents (mode manuel) -----
+    getRecentFoods: function () {
+      return read(KEYS.recentFoods, []);
+    },
+    addRecentFood: function (food) {
+      var list = this.getRecentFoods().filter(function (f) { return f.n !== food.n; });
+      list.unshift({
+        n: food.n, carb: food.carb,
+        portions: food.portions || [], custom: !!food.custom, id: food.id
+      });
+      if (list.length > 12) list = list.slice(0, 12);
+      write(KEYS.recentFoods, list);
+      return list;
     },
 
     disclaimerAccepted: function () {

@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '15'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '16'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -162,10 +162,16 @@
     if (imgs.length) {
       if (room <= 0) { toast('Maximum ' + Camera.MAX_ANGLES + ' vues.'); }
       else {
-        Camera.processFiles(imgs.slice(0, room)).then(function (results) {
-          results.forEach(function (r) { if (images.length < Camera.MAX_ANGLES) images.push(r); });
+        Camera.processFiles(imgs.slice(0, room)).then(function (out) {
+          out.results.forEach(function (r) { if (images.length < Camera.MAX_ANGLES) images.push(r); });
           renderThumbs();
           updateEstimateBtn();
+          // Une ou plusieurs photos illisibles : on prévient sans bloquer le reste.
+          if (out.errors.length) {
+            toast(out.results.length
+              ? out.errors.length + ' photo(s) ignorée(s) : ' + out.errors[0]
+              : out.errors[0]);
+          }
         }).catch(function (e) { toast(e.message); });
       }
     }
@@ -292,9 +298,19 @@
     if (a.ok && b.ok) {
       var avg = Math.round((a.result.totalCarbsG + b.result.totalCarbsG) / 2);
       var diff = Math.abs(a.result.totalCarbsG - b.result.totalCarbsG);
+      var rel = avg ? diff / avg : 0;
       var pAvg = partsFrom(avg);
-      html += '<div class="cmp-avg">Moyenne : <strong>' + fr(pAvg) + ' parts</strong> (≈ ' + avg +
-              ' g) · écart entre les deux : ' + diff + ' g</div>';
+      // Divergence notable : > 20 % de la moyenne ET au moins 10 g d'écart.
+      var bigGap = rel > 0.20 && diff >= 10;
+      if (bigGap) {
+        html += '<div class="cmp-warn">⚠️ Les deux IA divergent nettement : ' + diff +
+                ' g d\'écart (' + Math.round(rel * 100) + ' %). La moyenne n\'est pas fiable ici — ' +
+                'ajoute une photo <strong>de côté</strong> avec un objet-repère et relance, ' +
+                'ou regarde le détail par aliment pour trancher toi-même.</div>';
+      }
+      html += '<div class="cmp-avg' + (bigGap ? ' muted' : '') + '">Moyenne : <strong>' + fr(pAvg) +
+              ' parts</strong> (≈ ' + avg + ' g) · écart : ' + diff + ' g' +
+              (bigGap ? '' : ' · <span class="cmp-agree">avis concordants ✓</span>') + '</div>';
     }
 
     html += '<div class="cmp-grid">' + card(a) + card(b) + '</div>';
@@ -469,7 +485,10 @@
   function renderChips() {
     var wrap = $('cat-chips');
     wrap.innerHTML = '';
-    Foods.activeCategories().forEach(function (c) {
+    var cats = Foods.activeCategories();
+    // « Récents » en tête si des aliments ont déjà été utilisés.
+    if (Storage.getRecentFoods().length) cats = ['⭐ Récents'].concat(cats);
+    cats.forEach(function (c) {
       var b = document.createElement('button');
       b.className = 'chip' + (c === currentCat ? ' active' : '');
       b.textContent = c;
@@ -484,7 +503,15 @@
 
   function renderFoodResults(q) {
     var box = $('food-results');
-    var list = Foods.search(q, currentCat);
+    var list;
+    if (currentCat === '⭐ Récents') {
+      var qq = (q || '').toLowerCase();
+      list = Storage.getRecentFoods().filter(function (f) {
+        return !qq || (f.n || '').toLowerCase().indexOf(qq) !== -1;
+      });
+    } else {
+      list = Foods.search(q, currentCat);
+    }
     if (!list.length) {
       box.innerHTML = '<p class="empty">Aucun aliment. Essaie une autre recherche ou ajoute un aliment personnalisé ci-dessous.</p>';
       return;
@@ -524,6 +551,8 @@
       qty: 1,
       grams: portions.length ? 0 : 100
     });
+    Storage.addRecentFood(f); // mémorise pour la catégorie « Récents »
+    renderChips();            // fait apparaître/rafraîchir la puce « Récents »
     renderManualItems();
     toast(f.n + ' ajouté.');
   }
@@ -677,6 +706,15 @@
       return;
     }
     list.innerHTML = '';
+
+    // Résumé : nombre de repas + moyenne des parts.
+    var avgParts = h.reduce(function (s, e) { return s + partsFromStored(e); }, 0) / h.length;
+    var summary = document.createElement('div');
+    summary.className = 'history-summary';
+    summary.innerHTML = h.length + ' repas enregistré' + (h.length > 1 ? 's' : '') +
+      ' · moyenne <strong>' + fr(avgParts) + ' parts</strong>';
+    list.appendChild(summary);
+
     h.forEach(function (e) {
       var d = new Date(e.date);
       var dateStr = d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
@@ -684,10 +722,18 @@
       var item = document.createElement('div');
       item.className = 'history-item';
       item.innerHTML =
+        '<button class="history-del" data-del="' + e.date + '" aria-label="Supprimer">🗑️</button>' +
         '<div class="history-date">' + dateStr + ' · ' + (e.source === 'photo' ? '📷 photo' : '✍️ manuel') + '</div>' +
         '<div class="history-total"><b>' + fr(partsFromStored(e)) + ' parts</b> · ' + e.totalCarbsG + ' g</div>' +
         '<div class="item-detail">' + escapeHtml(names || '—') + '</div>';
       list.appendChild(item);
+    });
+
+    list.querySelectorAll('.history-del').forEach(function (b) {
+      b.addEventListener('click', function () {
+        Storage.deleteHistory(Number(b.dataset.del));
+        renderHistory();
+      });
     });
     $('clear-history').hidden = false;
   }

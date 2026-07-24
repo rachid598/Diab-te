@@ -115,6 +115,29 @@
   }
 
   // -------- Appels API --------
+  // fetch avec délai maximal : évite un spinner qui tourne à l'infini si le
+  // réseau traîne ou si le modèle reste bloqué. 120 s laisse le temps au
+  // raisonnement approfondi (Opus) tout en garantissant une sortie d'erreur.
+  var REQUEST_TIMEOUT_MS = 120000;
+  function fetchWithTimeout(url, options, ms) {
+    ms = ms || REQUEST_TIMEOUT_MS;
+    if (typeof AbortController === 'undefined') return fetch(url, options);
+    var ctrl = new AbortController();
+    var id = setTimeout(function () { ctrl.abort(); }, ms);
+    var opts = Object.assign({}, options, { signal: ctrl.signal });
+    return fetch(url, opts).then(function (r) {
+      clearTimeout(id);
+      return r;
+    }, function (err) {
+      clearTimeout(id);
+      if (err && err.name === 'AbortError') {
+        throw new Error('Délai dépassé (' + Math.round(ms / 1000) +
+          ' s) : réseau lent ou modèle occupé. Réessaie, réduis le nombre de photos, ou choisis un modèle plus rapide.');
+      }
+      throw new Error('Réseau indisponible. Vérifie ta connexion puis réessaie.');
+    });
+  }
+
   // Le raisonnement adaptatif ("thinking") améliore l'estimation géométrique, mais
   // n'est supporté que par les modèles récents. On l'active seulement pour ceux-là.
   function supportsAdaptiveThinking(model) {
@@ -143,7 +166,7 @@
       body.max_tokens = 4000; // laisse de la marge : la réflexion consomme des tokens
     }
 
-    return fetch('https://api.anthropic.com/v1/messages', {
+    return fetchWithTimeout('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -171,7 +194,7 @@
     var url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
       encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(settings.apiKey);
 
-    return fetch(url, {
+    return fetchWithTimeout(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -198,7 +221,7 @@
       });
     });
 
-    return fetch('https://api.openai.com/v1/chat/completions', {
+    return fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
