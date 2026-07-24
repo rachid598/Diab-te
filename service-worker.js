@@ -4,7 +4,7 @@
    Mise à jour : le nouveau worker ATTEND (pas de skipWaiting automatique). La page
    affiche un bouton « Actualiser » et envoie le message SKIP_WAITING quand l'utilisateur
    l'accepte. Les appels API (Anthropic / Google / OpenAI) ne sont jamais mis en cache. */
-var CACHE = 'diabete-v17';
+var CACHE = 'diabete-v18';
 var ASSETS = [
   './',
   './index.html',
@@ -13,6 +13,9 @@ var ASSETS = [
   './js/foods.js',
   './js/estimator.js',
   './js/camera.js',
+  './js/off.js',
+  './js/barcode.js',
+  './vendor/zxing.min.js',
   './js/app.js',
   './manifest.webmanifest',
   './icons/icon.svg'
@@ -52,8 +55,9 @@ self.addEventListener('fetch', function (e) {
     return;
   }
 
-  // Images / icônes : cache-first (rapide, elles ne changent presque jamais).
-  if (req.destination === 'image') {
+  // Images / icônes ET bibliothèques tierces figées (vendor/) : cache-first.
+  // ZXing fait ~330 Ko et ne change jamais : inutile de le retélécharger.
+  if (req.destination === 'image' || /\/vendor\//.test(new URL(req.url).pathname)) {
     e.respondWith(
       caches.match(req).then(function (cached) {
         return cached || fetch(req).then(function (res) {
