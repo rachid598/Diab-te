@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '9'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '10'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -215,7 +215,7 @@
     var resultsEl = $('results');
     resultsEl.hidden = true;
     status.hidden = false;
-    status.innerHTML = '<div class="spinner"></div>Analyse en cours… (identification, portions, glucides)';
+    status.innerHTML = '<div class="spinner"></div>Analyse en cours… mesure des portions via le repère, calcul des glucides. Le raisonnement approfondi peut prendre 10 à 30 s.';
     $('estimate-btn').disabled = true;
 
     var ctx = {
