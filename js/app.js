@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '12'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '13'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -25,7 +25,9 @@
     t.textContent = msg;
     t.hidden = false;
     clearTimeout(toast._t);
-    toast._t = setTimeout(function () { t.hidden = true; }, 3200);
+    // Laisse plus de temps pour lire les messages longs (ex. erreurs).
+    var ms = Math.min(8000, 2800 + msg.length * 45);
+    toast._t = setTimeout(function () { t.hidden = true; }, ms);
   }
 
   var CONF_LABEL = { high: 'Confiance élevée', medium: 'Confiance moyenne', low: 'Confiance faible' };

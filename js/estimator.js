@@ -227,8 +227,8 @@
       if (!res.ok) {
         var msg = (data.error && (data.error.message || data.error.type)) ||
                   ('Erreur ' + res.status);
-        if (res.status === 401) msg = 'Clé API invalide ou expirée (401).';
-        if (res.status === 429) msg = 'Trop de requêtes ou quota dépassé (429).';
+        if (res.status === 401 || res.status === 403) msg = 'Clé API invalide, expirée ou sans accès (' + res.status + ').';
+        if (res.status === 429) msg = 'Quota / débit atteint (429). Patiente ~1 min puis réessaie. Sur Gemini gratuit : utilise un modèle « flash » (gemini-2.0-flash), pas « pro », et limite le nombre de photos.';
         throw new Error(msg);
       }
       return data;
