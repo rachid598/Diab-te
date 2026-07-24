@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '10'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '11'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -248,18 +248,33 @@
     lastResult.rangeHighG = Math.round(total * (1 + spread));
   }
 
+  // Barre visuelle de la fourchette d'incertitude.
+  function rangeBarHtml(low, total, high) {
+    low = Math.max(0, Math.round(low));
+    total = Math.max(0, Math.round(total));
+    high = Math.max(high, total, low);
+    var scaleMax = Math.max(high * 1.2, 1);
+    var leftPct = Math.max(0, Math.min(100, low / scaleMax * 100));
+    var rightPct = Math.max(0, Math.min(100, 100 - high / scaleMax * 100));
+    var markPct = Math.max(0, Math.min(100, total / scaleMax * 100));
+    return '<div class="range-wrap">' +
+      '<div class="range-track">' +
+        '<div class="range-fill" style="left:' + leftPct.toFixed(1) + '%;right:' + rightPct.toFixed(1) + '%"></div>' +
+        '<div class="range-mark" style="left:' + markPct.toFixed(1) + '%"></div>' +
+      '</div>' +
+      '<div class="range-labels"><span>' + low + ' g</span><span>fourchette</span><span>' + high + ' g</span></div>' +
+    '</div>';
+  }
+
   function renderResults(r) {
     var el = $('results');
     var parts = partsFrom(r.totalCarbsG);
-    var partsLow = partsFrom(r.rangeLowG);
-    var partsHigh = partsFrom(r.rangeHighG);
 
     var html = '';
     html += '<div class="result-hero">';
     html += '  <div class="hero-parts">' + fr(parts) + ' <small>parts</small></div>';
-    html += '  <div class="hero-grams">≈ ' + r.totalCarbsG + ' g de glucides</div>';
-    html += '  <div class="hero-range">Fourchette : ' + r.rangeLowG + '–' + r.rangeHighG +
-            ' g&nbsp;·&nbsp;' + fr(partsLow) + '–' + fr(partsHigh) + ' parts</div>';
+    html += '  <div class="hero-grams">≈ ' + r.totalCarbsG + ' <small>g de glucides</small></div>';
+    html += rangeBarHtml(r.rangeLowG, r.totalCarbsG, r.rangeHighG);
     html += '  <div class="confidence conf-' + r.overallConfidence + '">' + CONF_LABEL[r.overallConfidence] + '</div>';
     html += '  <div class="pump-hint">💉 À saisir dans ta pompe : <strong>' + r.totalCarbsG +
             ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>). Ta pompe calcule le bolus.</div>';
@@ -309,7 +324,7 @@
       row.innerHTML =
         '<div class="item-main">' +
         '  <div class="item-name">' + escapeHtml(it.name) +
-             ' <span class="confidence conf-' + it.confidence + '" style="margin:0">' + it.confidence + '</span></div>' +
+             ' <span class="mini-conf conf-' + it.confidence + '">' + it.confidence + '</span></div>' +
         '  <div class="item-detail">' + escapeHtml(detail) + '</div>' +
         '  <div class="item-detail">' + editControl + '</div>' +
         '</div>' +
@@ -559,7 +574,7 @@
     el.innerHTML =
       '<div class="result-hero">' +
       '  <div class="hero-parts">' + fr(parts) + ' <small>parts</small></div>' +
-      '  <div class="hero-grams">= ' + total + ' g de glucides</div>' +
+      '  <div class="hero-grams">= ' + total + ' <small>g de glucides</small></div>' +
       '  <div class="pump-hint">💉 À saisir dans ta pompe : <strong>' + total + ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>).</div>' +
       '  <div class="btn-row" style="margin-top:12px"><button id="save-manual" class="btn btn-primary">💾 Enregistrer</button></div>' +
       '</div>';
@@ -592,8 +607,8 @@
       item.className = 'history-item';
       item.innerHTML =
         '<div class="history-date">' + dateStr + ' · ' + (e.source === 'photo' ? '📷 photo' : '✍️ manuel') + '</div>' +
-        '<div class="history-total">' + fr(partsFromStored(e)) + ' parts · ' + e.totalCarbsG + ' g</div>' +
-        '<div class="item-detail">' + escapeHtml(names) + '</div>';
+        '<div class="history-total"><b>' + fr(partsFromStored(e)) + ' parts</b> · ' + e.totalCarbsG + ' g</div>' +
+        '<div class="item-detail">' + escapeHtml(names || '—') + '</div>';
       list.appendChild(item);
     });
     $('clear-history').hidden = false;
