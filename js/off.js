@@ -1,16 +1,29 @@
 /* off.js — accès à OpenFoodFacts (base ouverte et gratuite de produits du commerce).
    Sert à récupérer les glucides EXACTS d'un produit emballé, par recherche de nom
-   ou par code-barres. Rien n'est stocké côté serveur ; on interroge l'API publique. */
+   ou par code-barres. Rien n'est stocké côté serveur ; on interroge l'API publique.
+
+   IMPORTANT — choix des serveurs :
+   On n'utilise QUE world.openfoodfacts.org, le seul hôte qui renvoie l'en-tête
+   « access-control-allow-origin: * ». Le moteur search.openfoodfacts.org
+   (search-a-licious) répond correctement mais n'envoie AUCUN en-tête CORS, quelle
+   que soit l'origine : le navigateur bloque donc systématiquement sa réponse. */
 (function () {
   'use strict';
 
-  // Deux services distincts :
-  //  - recherche par NOM  : search.openfoodfacts.org (moteur « search-a-licious »,
-  //    le seul qui filtre réellement sur le terme recherché) ;
-  //  - recherche par CODE : l'API v2 classique, fiable pour un code-barres précis.
-  var SEARCH_BASE = 'https://search.openfoodfacts.org';
   var BASE = 'https://world.openfoodfacts.org';
   var FIELDS = 'code,product_name,product_name_fr,brands,nutriments,serving_quantity';
+
+  // Points d'entrée de recherche par nom, essayés dans l'ordre (tous CORS-compatibles).
+  var SEARCH_URLS = [
+    function (q) {
+      return BASE + '/cgi/search.pl?search_terms=' + encodeURIComponent(q) +
+        '&search_simple=1&action=process&json=1&page_size=50&fields=' + FIELDS;
+    },
+    function (q) {
+      return BASE + '/api/v2/search?search_terms=' + encodeURIComponent(q) +
+        '&fields=' + FIELDS + '&page_size=50';
+    }
+  ];
 
   function fetchJson(url, ms) {
     ms = ms || 15000;
@@ -23,17 +36,42 @@
     var id = ctrl ? setTimeout(function () { ctrl.abort(); }, ms) : null;
     return fetch(url, opts).then(function (r) {
       if (id) clearTimeout(id);
-      if (!r.ok) throw new Error('Base produits indisponible (' + r.status + ').');
-      return r.json();
+      if (!r.ok) {
+        var err = new Error('HTTP ' + r.status);
+        err.status = r.status;
+        throw err;
+      }
+      return r.json().catch(function () {
+        var e = new Error('Réponse illisible du service.');
+        e.status = 0;
+        throw e;
+      });
     }, function (err) {
       if (id) clearTimeout(id);
-      if (err && err.name === 'AbortError') throw new Error('Délai dépassé : réseau lent. Réessaie.');
-      throw new Error('Réseau indisponible pour la recherche en ligne.');
+      if (err && err.status) throw err;              // erreur HTTP déjà typée
+      var e = new Error(err && err.name === 'AbortError'
+        ? 'Délai dépassé.' : 'Réseau injoignable.');
+      e.status = (err && err.name === 'AbortError') ? 408 : 0;
+      throw e;
     });
   }
 
+  // Message clair selon la cause réelle de l'échec.
+  function friendlyError(err) {
+    var s = err && err.status;
+    if (s >= 500) {
+      return new Error('La recherche par nom d\'OpenFoodFacts est en panne de leur côté ' +
+        '(erreur ' + s + '). Le scan 📷 Code-barres, lui, fonctionne toujours.');
+    }
+    if (s === 408) {
+      return new Error('Délai dépassé : réseau lent. Réessaie, ou utilise le scan code-barres.');
+    }
+    return new Error('Recherche en ligne injoignable (pas de connexion ?). ' +
+      'Le mode manuel hors-ligne et tes aliments perso restent disponibles.');
+  }
+
   // Transforme un produit OFF en aliment { n, brand, carb, code, serving }.
-  // Accepte les deux formats (v2 : brands = "A, B" ; search : brands = ["A","B"]).
+  // Accepte les deux formats (brands = "A, B" ou ["A","B"]).
   function parse(p) {
     if (!p) return null;
     var nutr = p.nutriments || {};
@@ -54,25 +92,46 @@
     };
   }
 
+  // Extrait la liste utilisable d'une réponse (max 20 aliments avec glucides connus).
+  function collect(data) {
+    var raw = (data && (data.products || data.hits)) || [];
+    var out = [];
+    raw.forEach(function (p) {
+      if (out.length >= 20) return;
+      var f = parse(p);
+      if (f) out.push(f);
+    });
+    return out;
+  }
+
   var OFF = {
-    /* Recherche par nom. On demande large (50) car beaucoup de fiches n'ont pas
-       de valeurs nutritionnelles : on ne garde que celles dont les glucides sont
-       connus, puis on limite à 20. Renvoie une Promise d'un tableau d'aliments. */
+    /* Recherche par nom. On essaie les points d'entrée l'un après l'autre : si le
+       premier est en panne (OpenFoodFacts a des coupures régulières), on bascule
+       sur le suivant au lieu d'échouer. Renvoie une Promise d'un tableau. */
     search: function (query) {
       query = (query || '').trim();
       if (query.length < 2) return Promise.resolve([]);
-      var url = SEARCH_BASE + '/search?q=' + encodeURIComponent(query) +
-        '&fields=' + FIELDS + '&page_size=50';
-      return fetchJson(url).then(function (data) {
-        var hits = data.hits || data.products || [];
-        var out = [];
-        hits.forEach(function (p) {
-          if (out.length >= 20) return;
-          var f = parse(p);
-          if (f) out.push(f);
+
+      var lastErr = null;
+      var attempt = function (i) {
+        if (i >= SEARCH_URLS.length) {
+          return Promise.reject(friendlyError(lastErr));
+        }
+        return fetchJson(SEARCH_URLS[i](query)).then(function (data) {
+          var list = collect(data);
+          // Réponse vide : on tente quand même le point d'entrée suivant.
+          if (!list.length && i + 1 < SEARCH_URLS.length) return attempt(i + 1);
+          /* Rien trouvé ET un point d'entrée a réellement échoué avant : c'est une
+             panne du service, pas une absence de résultat. On le dit clairement
+             plutôt que d'afficher un trompeur « aucun produit ». */
+          if (!list.length && lastErr) throw friendlyError(lastErr);
+          return list;
+        }, function (err) {
+          lastErr = err;
+          return attempt(i + 1);
         });
-        return out;
-      });
+      };
+      return attempt(0);
     },
 
     // Recherche par code-barres : renvoie une Promise d'un aliment ou null.
@@ -83,6 +142,10 @@
       return fetchJson(url).then(function (data) {
         if (!data || data.status === 0 || !data.product) return null;
         return parse(data.product);
+      }, function (err) {
+        // Un code inconnu renvoie 404 : ce n'est pas une panne, juste « introuvable ».
+        if (err && err.status === 404) return null;
+        throw friendlyError(err);
       });
     }
   };
