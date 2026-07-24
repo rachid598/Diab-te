@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '16'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '17'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -969,7 +969,7 @@
 
   function showVersion() {
     var el = $('app-version');
-    if (el) el.textContent = 'Version ' + APP_VERSION + ' · Diab’ète';
+    if (el) el.textContent = 'Version ' + APP_VERSION + ' · GlucoVision';
   }
 
   // ---------- Init ----------

@@ -1,4 +1,4 @@
-# Diab'ète — Estimateur de glucides 🩸
+# GlucoVision — Estimateur de glucides 🩸
 
 Application web (PWA) qui estime les **glucides d'un repas à partir d'une photo** et les
 convertit en **parts de glucides** (1 part = 10 g par défaut) à saisir dans une pompe à
@@ -122,7 +122,7 @@ L'app est une PWA 100 % statique, donc simple à empaqueter :
 - **Plus de contrôle — Capacitor** :
   ```bash
   npm init -y && npm i @capacitor/core @capacitor/cli @capacitor/camera
-  npx cap init "Diab'ète" com.example.diabete --web-dir=.
+  npx cap init "GlucoVision" com.example.diabete --web-dir=.
   npx cap add android && npx cap open android
   ```
   Capacitor régénère les icônes natives et permet d'utiliser la caméra native.
