@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=14" />
+  <link rel="stylesheet" href="css/styles.css?v=15" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -199,6 +199,15 @@
           <option value="gemini">Gemini</option>
           <option value="openai">OpenAI (ChatGPT)</option>
         </select>
+
+        <div id="set-compare-model-wrap" hidden>
+          <label>Modèle du 2ᵉ avis (<span id="set-compare-provider-name"></span>)</label>
+          <select id="set-compare-model" class="input"></select>
+          <div id="set-compare-model-custom-wrap" class="inline-field" hidden>
+            <input id="set-compare-model-custom" class="input" type="text" placeholder="id du modèle (ex. gemini-2.5-flash)" />
+          </div>
+        </div>
+
         <p class="hint tiny">Active une case « 2ᵉ avis » sous le bouton Estimer : l'app interroge deux fournisseurs et affiche les deux estimations côte à côte (utile pour recouper).</p>
       </div>
 
@@ -239,10 +248,10 @@
 
   <div id="toast" class="toast" hidden></div>
 
-  <script src="js/storage.js?v=14"></script>
-  <script src="js/foods.js?v=14"></script>
-  <script src="js/estimator.js?v=14"></script>
-  <script src="js/camera.js?v=14"></script>
-  <script src="js/app.js?v=14"></script>
+  <script src="js/storage.js?v=15"></script>
+  <script src="js/foods.js?v=15"></script>
+  <script src="js/estimator.js?v=15"></script>
+  <script src="js/camera.js?v=15"></script>
+  <script src="js/app.js?v=15"></script>
 </body>
 </html>
