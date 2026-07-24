@@ -372,6 +372,40 @@ select.input { -webkit-appearance: none; appearance: none;
 hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 .app-version-line { text-align: center; color: var(--faint); }
 
+/* Groupes de réglages : chaque section dans sa propre carte pour ranger la page. */
+.set-group {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 4px 14px 16px; margin: 14px 0;
+}
+.set-group h3 { margin-top: 14px; }
+.set-group > label { display: block; font-weight: 600; font-size: 14px; margin: 14px 0 6px; }
+.set-group .inline-field { margin-top: 8px; }
+
+/* ---------- Comparaison (2ᵉ avis) ---------- */
+.compare-toggle { justify-content: center; background: color-mix(in srgb, var(--brand) 8%, var(--surface));
+  border: 1.5px dashed var(--brand); border-radius: var(--r); padding: 12px 14px; margin: 4px 0 14px; }
+.cmp-head h2 { margin-bottom: 4px; }
+.cmp-avg { text-align: center; font-size: 14px; color: var(--muted); margin: 4px 0 14px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r); padding: 10px 12px; }
+.cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.cmp-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm); padding: 16px 14px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+.cmp-name { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; color: var(--brand); }
+.cmp-parts { font-size: 34px; font-weight: 900; color: var(--brand); line-height: 1.1; }
+.cmp-parts small { font-size: 14px; font-weight: 800; color: var(--muted); }
+.cmp-grams { font-size: 16px; font-weight: 700; }
+.cmp-range { font-size: 12.5px; color: var(--muted); }
+.cmp-use { margin-top: 10px; width: 100%; font-size: 14px; padding: 10px; }
+.cmp-fail { justify-content: center; }
+.cmp-err { font-size: 13px; color: var(--danger); font-weight: 600; }
+@media (max-width: 380px) {
+  .cmp-grid { grid-template-columns: 1fr; }
+  .cmp-parts { font-size: 40px; }
+}
+
 /* ---------- Toast ---------- */
 .toast {
   position: fixed; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 16px); left: 50%;
