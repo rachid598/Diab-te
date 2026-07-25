@@ -32,9 +32,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Capacitor 8 exige Node >= 22 : un Node plus ancien fait échouer « cap » net.
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - uses: actions/setup-java@v4
         with:
@@ -43,6 +44,11 @@ jobs:
 
       - name: Installer Capacitor
         run: npm install --no-audit --no-fund
+
+      # Gradle refuse de compiler si une licence du SDK n'est pas acceptée.
+      # Sans effet si elles le sont déjà, et ne doit jamais faire échouer le job.
+      - name: Accepter les licences du SDK Android
+        run: yes | "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
 
       - name: Préparer les fichiers web (www/)
         run: bash scripts/build-www.sh
