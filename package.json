@@ -1,6 +1,6 @@
 {
   "name": "glucovision",
-  "version": "1.23.0",
+  "version": "1.24.0",
   "private": true,
   "description": "GlucoVision — estimateur de glucides (emballage Android de la PWA)",
   "scripts": {

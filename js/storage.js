@@ -261,19 +261,27 @@
     },
 
     // ----- Sauvegarde / restauration -----
+    /* L'export inclut les clés API : c'est ce qui rend une bascule PWA -> APK
+       (ou un changement de téléphone) réellement transparente. En contrepartie
+       le fichier contient des secrets facturables — il est marqué comme tel, et
+       l'app le signale au moment de l'export pour qu'on ne le partage pas. */
     exportAll: function () {
-      var out = { app: 'GlucoVision', formatVersion: 1, exportedAt: new Date().toISOString(), data: {} };
+      var out = {
+        app: 'GlucoVision',
+        formatVersion: 2,
+        exportedAt: new Date().toISOString(),
+        containsApiKeys: false,
+        warning: 'Fichier personnel : il peut contenir tes clés API. Ne le partage pas.',
+        data: {}
+      };
       Object.keys(KEYS).forEach(function (name) {
         var raw = null;
         try { raw = localStorage.getItem(KEYS[name]); } catch (e) {}
         if (raw != null) { try { out.data[name] = JSON.parse(raw); } catch (e) {} }
       });
-      /* Les clés API sont volontairement retirées : un export atterrit dans les
-         fichiers du téléphone ou une pièce jointe, ce n'est pas un endroit pour
-         des secrets facturables. Elles se ressaisissent en quelques secondes. */
-      if (out.data.settings && out.data.settings.apiKeys) {
-        out.data.settings = Object.assign({}, out.data.settings);
-        delete out.data.settings.apiKeys;
+      var keys = out.data.settings && out.data.settings.apiKeys;
+      if (keys) {
+        out.containsApiKeys = Object.keys(keys).some(function (k) { return !!keys[k]; });
       }
       return out;
     },
@@ -285,10 +293,18 @@
       Object.keys(KEYS).forEach(function (name) {
         if (!(name in obj.data)) return;
         var value = obj.data[name];
-        // On ne remplace pas les clés API en place : elles ne sont pas exportées.
-        if (name === 'settings' && value && !value.apiKeys) {
+        /* Clés API : une sauvegarde faite sans clé (ou depuis un appareil où
+           l'une d'elles était vide) ne doit pas effacer celles déjà en place.
+           On ne remplace donc que les clés réellement renseignées dans le
+           fichier, et on conserve les autres. */
+        if (name === 'settings' && value) {
           var current = read(KEYS.settings, {}) || {};
-          value = Object.assign({}, value, { apiKeys: current.apiKeys || {} });
+          var merged = Object.assign({}, current.apiKeys || {});
+          var incoming = value.apiKeys || {};
+          Object.keys(incoming).forEach(function (p) {
+            if (incoming[p]) merged[p] = incoming[p];
+          });
+          value = Object.assign({}, value, { apiKeys: merged });
         }
         write(KEYS[name], value);
         restored.push(name);
