@@ -140,8 +140,29 @@
     });
   }
 
+  /* Vignette pour l'historique. Le stockage du navigateur est limité (~5 Mo),
+     donc on descend très bas en taille et en qualité : l'image sert à se
+     rappeler le repas, pas à être ré-analysée. */
+  function makeThumb(dataUrl) {
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () {
+        var scale = Math.min(1, 320 / Math.max(img.naturalWidth, img.naturalHeight));
+        var c = document.createElement('canvas');
+        c.width = Math.round(img.naturalWidth * scale);
+        c.height = Math.round(img.naturalHeight * scale);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        try { resolve(c.toDataURL('image/jpeg', 0.55)); }
+        catch (e) { resolve(null); }
+      };
+      img.onerror = function () { resolve(null); };
+      img.src = dataUrl;
+    });
+  }
+
   window.Camera = {
     MAX_ANGLES: MAX_ANGLES,
+    makeThumb: makeThumb,
     processFile: processFile,
     // Tolérant aux échecs : une photo illisible n'annule pas les autres.
     // Résout { results: [...ok], errors: [...messages] }.
