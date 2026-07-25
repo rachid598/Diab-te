@@ -140,6 +140,32 @@
     });
   }
 
+  /* Image déjà encodée (appareil photo natif de l'APK). Le plugin rend un JPEG
+     déjà mis à l'échelle par le code natif : on ne le repasse par un canvas que
+     s'il dépasse MAX_DIM. Éviter ce ré-encodage n'est pas un détail — c'est
+     précisément ce qui fait la qualité supérieure de la capture native : une
+     seule compression au lieu de deux. */
+  function processDataUrl(dataUrl) {
+    return new Promise(function (resolve, reject) {
+      if (!dataUrl || dataUrl.indexOf('data:image/') !== 0) {
+        return reject(new Error('Image illisible.'));
+      }
+      var img = new Image();
+      img.onload = function () {
+        var w = img.naturalWidth, h = img.naturalHeight;
+        if (Math.max(w, h) <= MAX_DIM) {
+          var head = dataUrl.slice(0, dataUrl.indexOf(','));
+          var mt = (/data:([^;]+)/.exec(head) || [])[1] || 'image/jpeg';
+          resolve({ base64: dataUrl.split(',')[1], mediaType: mt, previewUrl: dataUrl });
+        } else {
+          resolve(drawToJpeg(img, w, h));
+        }
+      };
+      img.onerror = function () { reject(new Error('Image illisible.')); };
+      img.src = dataUrl;
+    });
+  }
+
   /* Vignette pour l'historique. Le stockage du navigateur est limité (~5 Mo),
      donc on descend très bas en taille et en qualité : l'image sert à se
      rappeler le repas, pas à être ré-analysée. */
@@ -164,6 +190,18 @@
     MAX_ANGLES: MAX_ANGLES,
     makeThumb: makeThumb,
     processFile: processFile,
+    processDataUrl: processDataUrl,
+    // Tolérant aux échecs, comme processFiles.
+    processDataUrls: function (urls) {
+      return Promise.allSettled(urls.map(processDataUrl)).then(function (settled) {
+        var results = [], errors = [];
+        settled.forEach(function (s) {
+          if (s.status === 'fulfilled') results.push(s.value);
+          else errors.push((s.reason && s.reason.message) || 'Image illisible.');
+        });
+        return { results: results, errors: errors };
+      });
+    },
     // Tolérant aux échecs : une photo illisible n'annule pas les autres.
     // Résout { results: [...ok], errors: [...messages] }.
     processFiles: function (files) {

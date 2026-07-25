@@ -1,7 +1,14 @@
 /* storage.js — persistance locale des réglages et de l'historique.
-   Tout reste dans le navigateur (localStorage). Rien n'est envoyé à un serveur. */
+   Tout reste sur l'appareil. Rien n'est envoyé à un serveur.
+
+   Deux supports selon la plateforme, choisis par js/native.js :
+   - PWA : localStorage pour tout (limité à ~5 Mo, d'où le rognage des vignettes) ;
+   - APK : localStorage pour les données, système de fichiers pour les photos et
+     Keystore Android pour les clés API. Plus de quota, donc plus de rognage. */
 (function () {
   'use strict';
+
+  var native = window.Native && window.Native.isApp;
 
   var KEYS = {
     settings: 'diabete.settings.v1',
@@ -55,6 +62,8 @@
     openai: 'gpt-5.6-terra'
   };
 
+  var PROVIDERS = ['claude', 'gemini', 'openai'];
+
   var DEFAULT_SETTINGS = {
     provider: 'claude',                                   // fournisseur actif
     compareProvider: '',                                  // 2ᵉ avis (vide = aucun)
@@ -65,8 +74,21 @@
       openai: DEFAULT_MODELS.openai
     },
     partSizeG: 10,       // 1 part = 10 g (standard France)
-    roundHalf: true      // arrondir les parts au 0,5
+    roundHalf: true,     // arrondir les parts au 0,5
+    remindEnabled: false, // rappel de contrôle après repas (APK uniquement)
+    remindDelayMin: 0     // 0 = délai calé sur la vitesse d'absorption estimée
   };
+
+  /* Clés API relues du Keystore au démarrage (APK). On les garde en mémoire
+     pour que getSettings() reste SYNCHRONE : il est appelé partout, y compris
+     dans des chemins de rendu, et le rendre asynchrone contaminerait tout
+     l'appel. La lecture chiffrée, elle, n'a lieu qu'une fois, avant le premier
+     rendu (voir Storage.hydrate). */
+  var secureKeys = null;
+
+  // Limite d'historique. Sur l'APK les photos sont des fichiers, pas du base64
+  // dans localStorage : on peut garder beaucoup plus de repas.
+  var MAX_HISTORY = native ? 500 : 100;
 
   /* Classement d'un aliment par mots-clés. L'IA renvoie des noms libres
      (« purée maison », « demi-baguette »), donc on ne peut pas s'appuyer sur la
@@ -146,6 +168,36 @@
     DEFAULT_MODELS: DEFAULT_MODELS,
     MODEL_CATALOG: MODEL_CATALOG,
 
+    PROVIDERS: PROVIDERS,
+
+    /* Relit les clés API chiffrées et, au premier lancement de l'APK, y déplace
+       celles qui étaient encore en clair dans localStorage. À appeler AVANT le
+       premier rendu ; sur le web c'est un no-op immédiat. */
+    hydrate: function () {
+      if (!native || !window.Native) return Promise.resolve(false);
+      return window.Native.secure.load(PROVIDERS).then(function (stored) {
+        var plain = (read(KEYS.settings, {}) || {}).apiKeys || {};
+        var merged = {};
+        var needsMigration = false;
+        PROVIDERS.forEach(function (p) {
+          var fromSecure = (stored && stored[p]) || '';
+          merged[p] = fromSecure || plain[p] || '';
+          if (!fromSecure && plain[p]) needsMigration = true;
+        });
+        secureKeys = merged;
+        if (needsMigration) {
+          // Migration : on chiffre, puis on efface la copie en clair.
+          return window.Native.secure.save(merged).then(function () {
+            var s = read(KEYS.settings, {}) || {};
+            s.apiKeys = { claude: '', gemini: '', openai: '' };
+            write(KEYS.settings, s);
+            return true;
+          });
+        }
+        return true;
+      }).catch(function () { return false; });
+    },
+
     getSettings: function () {
       var s = read(KEYS.settings, {}) || {};
       var merged = Object.assign({}, DEFAULT_SETTINGS, s);
@@ -155,6 +207,12 @@
       // Migration depuis l'ancien format (clé/modèle uniques).
       if (s.apiKey && !s.apiKeys) merged.apiKeys[s.provider || 'claude'] = s.apiKey;
       if (s.model && !s.models) merged.models[s.provider || 'claude'] = s.model;
+      // APK : les clés font autorité depuis le Keystore, pas depuis localStorage.
+      if (secureKeys) {
+        PROVIDERS.forEach(function (p) {
+          if (secureKeys[p]) merged.apiKeys[p] = secureKeys[p];
+        });
+      }
       // Remplace les modèles retirés par leur équivalent actuel.
       Object.keys(merged.models).forEach(function (p) {
         var repl = MODEL_MIGRATIONS[merged.models[p]];
@@ -163,6 +221,14 @@
       return merged;
     },
     saveSettings: function (s) {
+      if (native && window.Native) {
+        secureKeys = Object.assign({}, s.apiKeys || {});
+        window.Native.secure.save(secureKeys);
+        // Le blob localStorage ne garde aucune clé en clair sur l'APK.
+        var copy = Object.assign({}, s, { apiKeys: { claude: '', gemini: '', openai: '' } });
+        write(KEYS.settings, copy);
+        return;
+      }
       write(KEYS.settings, s);
     },
 
@@ -172,18 +238,40 @@
     addHistory: function (entry) {
       var h = this.getHistory();
       h.unshift(entry);
-      if (h.length > 100) h = h.slice(0, 100);
-      // Les vignettes ne sont gardées que sur les repas récents (limite du stockage).
-      h.forEach(function (e, i) { if (i >= 40 && e.thumb) delete e.thumb; });
-      return writeHistory(h);
+      if (h.length > MAX_HISTORY) h = h.slice(0, MAX_HISTORY);
+      /* PWA : les vignettes en base64 sont ce qui sature localStorage, on ne les
+         garde donc que sur les repas récents. APK : l'image est un fichier, la
+         référence pèse 20 octets — aucune raison de l'abandonner. */
+      if (!native) {
+        h.forEach(function (e, i) { if (i >= 40 && e.thumb) delete e.thumb; });
+      }
+      var saved = writeHistory(h);
+      if (native) this.prunePhotos(saved);
+      return saved;
     },
     clearHistory: function () {
       write(KEYS.history, []);
+      if (native) this.prunePhotos([]);
+    },
+    // Réécrit l'historique tel quel (utilisé pour retirer les images en masse).
+    replaceHistory: function (h) {
+      return writeHistory(h || []);
     },
     deleteHistory: function (date) {
       var h = this.getHistory().filter(function (e) { return e.date !== date; });
       write(KEYS.history, h);
+      if (native) this.prunePhotos(h);
       return h;
+    },
+
+    /* Supprime les fichiers image qu'aucune entrée ne référence plus. Se rattrape
+       aussi toute seule si une écriture d'historique a échoué en cours de route. */
+    prunePhotos: function (history) {
+      if (!native || !window.Native) return Promise.resolve(0);
+      var keep = (history || this.getHistory())
+        .map(function (e) { return e.photo; })
+        .filter(Boolean);
+      return window.Native.photos.prune(keep);
     },
     // Enregistre les glucides RÉELS d'un repas (pour l'apprentissage post-repas).
     setHistoryReal: function (date, realCarbsG) {
@@ -279,6 +367,12 @@
         try { raw = localStorage.getItem(KEYS[name]); } catch (e) {}
         if (raw != null) { try { out.data[name] = JSON.parse(raw); } catch (e) {} }
       });
+      /* Sur l'APK les clés ne sont plus dans le blob localStorage mais dans le
+         Keystore : on les réinjecte ici, sinon la sauvegarde partirait sans
+         elles et une restauration sur un autre appareil serait incomplète. */
+      if (out.data.settings) {
+        out.data.settings.apiKeys = Object.assign({}, this.getSettings().apiKeys);
+      }
       var keys = out.data.settings && out.data.settings.apiKeys;
       if (keys) {
         out.containsApiKeys = Object.keys(keys).some(function (k) { return !!keys[k]; });
@@ -298,13 +392,17 @@
            On ne remplace donc que les clés réellement renseignées dans le
            fichier, et on conserve les autres. */
         if (name === 'settings' && value) {
-          var current = read(KEYS.settings, {}) || {};
+          var current = Storage.getSettings();
           var merged = Object.assign({}, current.apiKeys || {});
           var incoming = value.apiKeys || {};
           Object.keys(incoming).forEach(function (p) {
             if (incoming[p]) merged[p] = incoming[p];
           });
           value = Object.assign({}, value, { apiKeys: merged });
+          // Sur l'APK, saveSettings redirige les clés vers le Keystore.
+          Storage.saveSettings(value);
+          restored.push(name);
+          return;
         }
         write(KEYS[name], value);
         restored.push(name);

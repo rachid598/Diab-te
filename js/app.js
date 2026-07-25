@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '24'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '25'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -192,7 +192,51 @@
     }).catch(function (e) { setExtractStatus(false); toast(e.message); });
   }
 
+  /* Ajoute des images déjà encodées (venant de l'appareil photo natif).
+     Elles ne repassent pas par un canvas si elles sont déjà à la bonne taille :
+     c'est ce qui évite la seconde compression et fait la qualité supérieure. */
+  function addDataUrls(urls) {
+    var room = Camera.MAX_ANGLES - images.length;
+    if (room <= 0) { toast('Maximum ' + Camera.MAX_ANGLES + ' vues.'); return; }
+    Camera.processDataUrls(urls.slice(0, room)).then(function (out) {
+      out.results.forEach(function (r) { if (images.length < Camera.MAX_ANGLES) images.push(r); });
+      renderThumbs();
+      updateEstimateBtn();
+      if (out.errors.length) toast(out.errors.length + ' photo(s) ignorée(s).');
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  /* APK : on détourne les boutons vers l'appareil photo du système au lieu du
+     champ <input type=file>. Le champ reste en place et sert de repli si le
+     plugin échoue — et c'est lui qui est utilisé tel quel dans la PWA. */
+  function initNativePhotoButtons() {
+    if (!Native.isApp) return;
+
+    var wire = function (labelId, run) {
+      var el = $(labelId);
+      if (!el) return;
+      el.addEventListener('click', function (e) {
+        e.preventDefault();   // empêche le <label> d'ouvrir le champ fichier
+        if (images.length >= Camera.MAX_ANGLES) { toast('Maximum ' + Camera.MAX_ANGLES + ' vues.'); return; }
+        run().then(function (urls) {
+          if (urls && urls.length) addDataUrls(urls);
+        }).catch(function (err) {
+          // Annulation par l'utilisateur : silence. Vraie panne : on le dit.
+          var m = (err && err.message) || '';
+          if (/cancel|annul/i.test(m)) return;
+          toast('Appareil photo indisponible : ' + (m || 'accès refusé ?'));
+        });
+      });
+    };
+
+    wire('btn-photo', function () { return Native.camera.capture(false); });
+    wire('btn-gallery', function () {
+      return Native.camera.pickMany(Camera.MAX_ANGLES - images.length);
+    });
+  }
+
   function initPhotos() {
+    initNativePhotoButtons();
     $('camera-input').addEventListener('change', function (e) {
       if (e.target.files.length) addFiles(e.target.files);
       e.target.value = '';
@@ -586,14 +630,62 @@
       glycemicSpeed: lastResult.glycemicSpeed || null,
       items: lastResult.items.map(function (it) { return { name: it.name, carbsG: it.carbsG }; })
     };
-    // Vignette de la 1ʳᵉ vue, pour revoir plus tard à quoi ressemblait la portion.
+    /* Image de la 1ʳᵉ vue, pour revoir plus tard à quoi ressemblait la portion.
+       PWA : une vignette de 320 px en base64, seule taille que le quota de
+       localStorage tolère. APK : la photo entière, écrite comme un vrai fichier
+       — aucune raison de la dégrader puisqu'il n'y a plus de quota. */
     var first = images[0];
-    var thumbP = (first && first.previewUrl && Camera.makeThumb)
-      ? Camera.makeThumb(first.previewUrl) : Promise.resolve(null);
-    thumbP.then(function (thumb) {
-      if (thumb) entry.thumb = thumb;
+    var prepare;
+    if (Native.isApp && first && first.previewUrl) {
+      prepare = Native.photos.save('meal-' + entry.date + '.jpg', first.previewUrl)
+        .then(function (name) { if (name) entry.photo = name; });
+    } else if (first && first.previewUrl && Camera.makeThumb) {
+      prepare = Camera.makeThumb(first.previewUrl)
+        .then(function (thumb) { if (thumb) entry.thumb = thumb; });
+    } else {
+      prepare = Promise.resolve();
+    }
+
+    var done = function () {
       Storage.addHistory(entry);
       toast('Enregistré dans l\'historique.');
+      scheduleReminderFor(entry);
+    };
+    prepare.then(done, done);   // une image qui échoue ne doit pas perdre le repas
+  }
+
+  // ---------- Rappel de contrôle (APK) ----------
+
+  /* Délais par défaut calés sur la vitesse d'absorption déjà estimée par l'IA :
+     un repas gras/protéiné pique tard, inutile de contrôler à 1 h. Ce sont des
+     moments de MESURE, pas des recommandations de traitement — l'app ne propose
+     jamais de dose, c'est la pompe qui dose. */
+  var REMIND_DEFAULT_MIN = { rapide: 90, moderee: 120, lente: 180 };
+
+  function humanDelay(min) {
+    var h = Math.floor(min / 60), m = min % 60;
+    if (!h) return m + ' min';
+    return h + ' h' + (m ? ' ' + (m < 10 ? '0' + m : m) : '');
+  }
+
+  function scheduleReminderFor(entry) {
+    if (!Native.isApp || !settings.remindEnabled) return;
+    var delay = settings.remindDelayMin > 0
+      ? settings.remindDelayMin
+      : (REMIND_DEFAULT_MIN[entry.glycemicSpeed] || 120);
+    var at = new Date(entry.date + delay * 60000);
+    Native.notify.schedule({
+      // Identifiant 32 bits stable et unique : l'horodatage du repas en secondes.
+      id: Math.floor(entry.date / 1000),
+      title: 'Contrôle glycémie',
+      body: 'Repas estimé à ' + entry.totalCarbsG + ' g (' + fr(partsFrom(entry.totalCarbsG)) +
+            ' parts) il y a ' + humanDelay(delay) + '. Pense à contrôler.',
+      at: at
+    }).then(function (ok) {
+      if (ok) {
+        toast('⏰ Rappel de contrôle à ' +
+          at.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) + '.');
+      }
     });
   }
 
@@ -942,12 +1034,16 @@
       }));
     });
     $('save-manual').addEventListener('click', function () {
-      Storage.addHistory({
+      var entry = {
         date: Date.now(), source: 'manuel', totalCarbsG: total,
         parts: parts, partSizeG: settings.partSizeG,
         items: manualItems.map(function (it) { return { name: it.name, carbsG: Math.round(itemGrams(it) * it.carb / 100) }; })
-      });
+      };
+      Storage.addHistory(entry);
       toast('Enregistré dans l\'historique.');
+      // Un repas saisi à la main mérite le même rappel qu'un repas photographié.
+      // Faute de vitesse d'absorption estimée par l'IA, le délai reste le défaut.
+      scheduleReminderFor(entry);
     });
   }
 
@@ -976,13 +1072,14 @@
     h.forEach(function (e) {
       var d = new Date(e.date);
       var dateStr = d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      // e.thumb = vignette base64 (PWA) ; e.photo = fichier sur disque (APK).
       var names = (e.items || []).map(function (it) { return it.name; }).join(', ');
       var item = document.createElement('div');
       item.className = 'history-item';
 
       item.innerHTML =
         '<button class="history-del" data-del="' + e.date + '" aria-label="Supprimer">🗑️</button>' +
-        (e.thumb ? '<img class="history-thumb" src="' + e.thumb + '" alt="photo du repas">' : '') +
+        (historyImg(e) ? '<img class="history-thumb" src="' + historyImg(e) + '" alt="photo du repas">' : '') +
         '<div class="history-date">' + dateStr + ' · ' + (e.source === 'photo' ? '📷 photo' : '✍️ manuel') + '</div>' +
         '<div class="history-total"><b>' + fr(partsFromStored(e)) + ' parts</b> · ' + e.totalCarbsG + ' g</div>' +
         '<div class="item-detail">' + escapeHtml(names || '—') + '</div>' +
@@ -1142,6 +1239,20 @@
     $('set-compare-model').addEventListener('change', function () {
       $('set-compare-model-custom-wrap').hidden = $('set-compare-model').value !== CUSTOM_VALUE;
     });
+    var purge = $('purge-photos');
+    if (purge) {
+      purge.addEventListener('click', function () {
+        if (!confirm('Supprimer toutes les photos de l\'historique ?\n\nLes repas et leurs estimations sont conservés.')) return;
+        var h = Storage.getHistory();
+        h.forEach(function (e) { delete e.photo; delete e.thumb; });
+        Storage.replaceHistory(h);
+        Storage.prunePhotos(h).then(function () {
+          refreshStorageUsage();
+          renderHistory();
+          toast('Photos supprimées.');
+        });
+      });
+    }
     initBackup();
   }
 
@@ -1293,7 +1404,34 @@
     populateCompareModelSelect(cp, cp ? (models[cp] || Storage.DEFAULT_MODELS[cp] || '') : '');
     $('set-partsize').value = settings.partSizeG;
     $('set-round-half').checked = settings.roundHalf;
+    openNativeSettings();
     $('settings-modal').hidden = false;
+  }
+
+  /* Réglages qui n'existent que dans l'APK. Les blocs sont dans le HTML commun
+     mais restent masqués dans la PWA : rien ne sert de proposer un rappel
+     programmé là où le navigateur ne sait pas le déclencher de façon fiable. */
+  function openNativeSettings() {
+    if (!Native.isApp) return;
+    ['set-group-remind', 'set-group-storage', 'keystore-note'].forEach(function (id) {
+      var el = $(id);
+      if (el) el.hidden = false;
+    });
+    $('set-remind').checked = !!settings.remindEnabled;
+    $('set-remind-delay').value = String(settings.remindDelayMin || 0);
+    refreshStorageUsage();
+  }
+
+  function refreshStorageUsage() {
+    var el = $('storage-usage');
+    if (!el || !Native.isApp) return;
+    Native.photos.size().then(function (bytes) {
+      var mb = bytes / (1024 * 1024);
+      var n = Storage.getHistory().filter(function (e) { return e.photo; }).length;
+      el.textContent = n + ' photo' + (n > 1 ? 's' : '') + ' conservée' + (n > 1 ? 's' : '') +
+        ' · ' + (mb < 0.1 ? '<0,1' : fr(mb)) + ' Mo. ' +
+        'Les photos sont des fichiers sur le téléphone : elles ne sont plus rognées comme dans la version web.';
+    });
   }
 
   function saveSettingsFromForm() {
@@ -1315,6 +1453,22 @@
     var ps = parseInt($('set-partsize').value, 10);
     settings.partSizeG = (ps >= 5 && ps <= 20) ? ps : 10;
     settings.roundHalf = $('set-round-half').checked;
+
+    if (Native.isApp) {
+      var wantsRemind = $('set-remind').checked;
+      settings.remindDelayMin = parseInt($('set-remind-delay').value, 10) || 0;
+      // On demande l'autorisation système au moment où l'utilisateur active
+      // l'option, pas au premier lancement : le motif est alors évident.
+      if (wantsRemind && !settings.remindEnabled) {
+        Native.notify.permission().then(function (ok) {
+          settings.remindEnabled = ok;
+          Storage.saveSettings(settings);
+          if (!ok) toast('Notifications refusées : active-les dans les réglages Android.');
+        });
+      }
+      settings.remindEnabled = wantsRemind;
+    }
+
     Storage.saveSettings(settings);
     $('settings-modal').hidden = true;
     updateCompareToggle();
@@ -1339,26 +1493,62 @@
   }
 
   // ---------- Divers ----------
+  /* Source d'image d'une entrée d'historique, quel que soit le support :
+     vignette base64 héritée de la PWA, ou fichier sur disque dans l'APK.
+     Les deux formes coexistent — un historique créé avant l'APK garde ses
+     vignettes, et elles restent affichables. */
+  function historyImg(e) {
+    if (e.thumb) return e.thumb;
+    if (e.photo && Native.isApp) return Native.photos.src(e.photo);
+    return null;
+  }
+
   function escapeHtml(s) {
     return (s || '').toString()
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
   }
 
-  // Affiche le bandeau « Actualiser » et câble le bouton sur le worker en attente.
-  function showUpdate(worker) {
+  /* Bandeau « Actualiser ». Volontairement partagé par les deux mécanismes de
+     mise à jour — service worker dans la PWA, bundle téléchargé dans l'APK :
+     l'utilisateur voit la même chose et décide du moment de la bascule, plutôt
+     que de voir l'app se recharger toute seule en plein repas. */
+  function showUpdate(apply) {
     var banner = $('update-banner');
-    if (!banner || !worker) return;
+    if (!banner || typeof apply !== 'function') return;
     banner.hidden = false;
     var btn = $('update-btn');
     btn.onclick = function () {
       btn.disabled = true;
       btn.textContent = 'Mise à jour…';
-      worker.postMessage('SKIP_WAITING'); // le nouveau worker prend le relais → reload
+      apply();
     };
   }
 
+  /* Mises à jour du contenu web de l'APK (OTA).
+     Sans ça, chaque version imposerait de retélécharger et réinstaller l'APK.
+     Seul un changement de plugin NATIF impose encore un nouvel APK. */
+  var OTA_MANIFEST =
+    'https://github.com/rachid598/Diab-te/releases/download/ota-latest/latest.json';
+
+  function initNativeUpdate() {
+    if (!Native.isApp) return;
+    var run = function () {
+      Native.update.check(OTA_MANIFEST, APP_VERSION).then(function (info) {
+        if (!info) return null;
+        return Native.update.download(info);
+      }).then(function (bundle) {
+        if (bundle) showUpdate(function () { Native.update.apply(bundle); });
+      }).catch(function () { /* hors ligne : on retentera */ });
+    };
+    run();
+    setInterval(run, 6 * 60 * 60 * 1000);
+  }
+
   function registerSW() {
+    // Dans l'APK les fichiers sont déjà locaux : le service worker n'a pas lieu
+    // d'être, et c'est le mécanisme OTA qui gère les mises à jour.
+    if (Native.isApp) return;
     if (!('serviceWorker' in navigator)) return;
 
     // Quand la nouvelle version prend le contrôle, on recharge une seule fois.
@@ -1370,8 +1560,12 @@
     });
 
     navigator.serviceWorker.register('service-worker.js').then(function (reg) {
+      var applyWorker = function (worker) {
+        return function () { worker.postMessage('SKIP_WAITING'); }; // → controllerchange → reload
+      };
+
       // Une version est déjà en attente au chargement.
-      if (reg.waiting && navigator.serviceWorker.controller) showUpdate(reg.waiting);
+      if (reg.waiting && navigator.serviceWorker.controller) showUpdate(applyWorker(reg.waiting));
 
       // Une nouvelle version vient d'être trouvée et installée.
       reg.addEventListener('updatefound', function () {
@@ -1379,7 +1573,7 @@
         if (!nw) return;
         nw.addEventListener('statechange', function () {
           if (nw.state === 'installed' && navigator.serviceWorker.controller) {
-            showUpdate(nw);
+            showUpdate(applyWorker(nw));
           }
         });
       });
@@ -1391,11 +1585,16 @@
 
   function showVersion() {
     var el = $('app-version');
-    if (el) el.textContent = 'Version ' + APP_VERSION + ' · GlucoVision';
+    if (el) {
+      el.textContent = 'Version ' + APP_VERSION + ' · GlucoVision' +
+        (Native.isApp ? ' · application Android' : '');
+    }
   }
 
   // ---------- Init ----------
   function init() {
+    // Relu APRÈS l'hydratation : sur l'APK les clés API viennent du Keystore.
+    settings = Storage.getSettings();
     showVersion();
     initInstall();
     initSafetyBanner();
@@ -1409,7 +1608,19 @@
     renderThumbs();
     updateEstimateBtn();
     registerSW();
+    initNativeUpdate();
+    // Rattrape les images orphelines laissées par un enregistrement interrompu.
+    if (Native.isApp) Storage.prunePhotos();
   }
 
-  document.addEventListener('DOMContentLoaded', init);
+  /* On attend que le pont natif soit prêt AVANT le premier rendu : les clés API
+     doivent être déchiffrées et l'URL de base des photos connue, sinon la
+     première ouverture afficherait des réglages vides et un historique sans
+     images. Native.ready() a son propre garde-fou de 3 s et ne peut pas bloquer
+     le démarrage ; dans le navigateur il se résout immédiatement. */
+  document.addEventListener('DOMContentLoaded', function () {
+    Native.ready()
+      .then(function () { return Storage.hydrate(); })
+      .then(init, init);
+  });
 })();

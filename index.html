@@ -69,7 +69,7 @@
         <p id="angle-count" class="angle-count" hidden></p>
 
         <div class="btn-row">
-          <label class="btn btn-primary">
+          <label id="btn-photo" class="btn btn-primary">
             📷 Photo
             <input id="camera-input" type="file" accept="image/*" capture="environment" hidden />
           </label>
@@ -77,7 +77,7 @@
             🎥 Vidéo
             <input id="video-input" type="file" accept="video/*" capture="environment" hidden />
           </label>
-          <label class="btn">
+          <label id="btn-gallery" class="btn">
             🖼️ Galerie
             <input id="gallery-input" type="file" accept="image/*,video/*" multiple hidden />
           </label>
@@ -255,6 +255,32 @@
         </label>
       </div>
 
+      <!-- Rappel de contrôle (application Android uniquement) -->
+      <div class="set-group" id="set-group-remind" hidden>
+        <h3>Rappel de contrôle</h3>
+        <label class="check">
+          <input type="checkbox" id="set-remind" />
+          <span>Me rappeler de contrôler ma glycémie après un repas analysé</span>
+        </label>
+        <label>Délai</label>
+        <select id="set-remind-delay" class="input">
+          <option value="0">Automatique — selon la vitesse d'absorption estimée</option>
+          <option value="60">1 h après le repas</option>
+          <option value="90">1 h 30 après le repas</option>
+          <option value="120">2 h après le repas</option>
+          <option value="180">3 h après le repas</option>
+        </select>
+        <p class="hint tiny">En automatique : <strong>1 h 30</strong> si la montée est rapide, <strong>2 h</strong> si elle est progressive, <strong>3 h</strong> si elle est retardée (repas gras). C'est un rappel de <strong>mesure</strong> — l'app ne propose jamais de dose, c'est ta pompe qui dose.</p>
+      </div>
+
+      <!-- Stockage (application Android uniquement) -->
+      <div class="set-group" id="set-group-storage" hidden>
+        <h3>Stockage des photos</h3>
+        <p class="hint tiny" id="storage-usage">Calcul…</p>
+        <button id="purge-photos" class="btn btn-ghost">Supprimer toutes les photos de l'historique</button>
+        <p class="hint tiny">Les repas et leurs estimations sont conservés : seules les images sont effacées.</p>
+      </div>
+
       <!-- Sauvegarde -->
       <div class="set-group">
         <h3>Sauvegarde</h3>
@@ -267,6 +293,7 @@
           </label>
         </div>
         <p class="hint tiny">⚠️ L'export contient <strong>tes clés API</strong> pour que la restauration soit immédiate (bascule vers l'APK, changement de téléphone). Le fichier est donc personnel : <strong>ne le partage pas</strong> et ne l'envoie pas par mail.</p>
+        <p class="hint tiny" id="keystore-note" hidden>🔒 Sur l'application Android, tes clés sont chiffrées par le Keystore du téléphone et ne sont plus stockées en clair.</p>
       </div>
 
       <button id="save-settings" class="btn btn-primary btn-lg" style="margin-bottom:12px">Enregistrer</button>
@@ -297,13 +324,19 @@
 
   <div id="toast" class="toast" hidden></div>
 
-  <script src="js/storage.js?v=24"></script>
-  <script src="js/foods.js?v=24"></script>
-  <script src="js/estimator.js?v=24"></script>
-  <script src="js/camera.js?v=24"></script>
-  <script src="js/off.js?v=24"></script>
-  <script src="vendor/zxing.min.js?v=24"></script>
-  <script src="js/barcode.js?v=24"></script>
-  <script src="js/app.js?v=24"></script>
+  <!-- Plugins Capacitor puis pont natif : ils doivent précéder storage.js et
+       off.js, qui décident de leur support de stockage / de leur transport HTTP
+       selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
+       effet (Capacitor y déclare la plateforme « web »). -->
+  <script src="vendor/capacitor-plugins.js?v=25"></script>
+  <script src="js/native.js?v=25"></script>
+  <script src="js/storage.js?v=25"></script>
+  <script src="js/foods.js?v=25"></script>
+  <script src="js/estimator.js?v=25"></script>
+  <script src="js/camera.js?v=25"></script>
+  <script src="js/off.js?v=25"></script>
+  <script src="vendor/zxing.min.js?v=25"></script>
+  <script src="js/barcode.js?v=25"></script>
+  <script src="js/app.js?v=25"></script>
 </body>
 </html>

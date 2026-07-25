@@ -4,7 +4,7 @@
    Mise à jour : le nouveau worker ATTEND (pas de skipWaiting automatique). La page
    affiche un bouton « Actualiser » et envoie le message SKIP_WAITING quand l'utilisateur
    l'accepte. Les appels API (Anthropic / Google / OpenAI) ne sont jamais mis en cache. */
-var CACHE = 'diabete-v24';
+var CACHE = 'diabete-v25';
 var ASSETS = [
   './',
   './index.html',
@@ -15,6 +15,8 @@ var ASSETS = [
   './js/camera.js',
   './js/off.js',
   './js/barcode.js',
+  './js/native.js',
+  './vendor/capacitor-plugins.js',
   './vendor/zxing.min.js',
   './js/app.js',
   './manifest.webmanifest',

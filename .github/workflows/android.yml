@@ -10,15 +10,16 @@ on:
       - 'index.html'
       - 'css/**'
       - 'js/**'
+      - 'src/**'
       - 'vendor/**'
       - 'icons/**'
       - 'manifest.webmanifest'
       - 'capacitor.config.json'
       - 'package.json'
-      - 'scripts/build-www.sh'
+      - 'scripts/**'
       - '.github/workflows/android.yml'
 
-# Nécessaire pour publier l'APK dans une release.
+# Nécessaire pour publier l'APK et le bundle de mise à jour dans des releases.
 permissions:
   contents: write
 
@@ -45,6 +46,33 @@ jobs:
       - name: Installer Capacitor
         run: npm install --no-audit --no-fund
 
+      # APP_VERSION dans js/app.js fait autorité pour tout : nom de version
+      # Android, version du bundle OTA, et comparaison faite par l'app au
+      # démarrage. Une seule source de vérité, donc pas de dérive possible.
+      - name: Lire la version de l'app
+        id: version
+        run: |
+          APP_VERSION=$(grep -oP "APP_VERSION = '\K[0-9]+" js/app.js)
+          test -n "$APP_VERSION" || { echo "APP_VERSION introuvable dans js/app.js"; exit 1; }
+          echo "app=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "bundle=1.$APP_VERSION.0" >> "$GITHUB_OUTPUT"
+          echo "Version de l'app : $APP_VERSION (bundle 1.$APP_VERSION.0)"
+
+      # Garde-fou : le bundle de plugins est committé, il doit correspondre aux
+      # versions déclarées dans package.json. S'il a changé, c'est qu'on a oublié
+      # de relancer scripts/build-plugins.sh — l'APK partirait alors avec des
+      # plugins JS désaccordés du natif.
+      - name: Vérifier vendor/capacitor-plugins.js
+        run: |
+          cp vendor/capacitor-plugins.js /tmp/committed.js
+          bash scripts/build-plugins.sh
+          if ! cmp -s /tmp/committed.js vendor/capacitor-plugins.js; then
+            echo "::error::vendor/capacitor-plugins.js n'est pas à jour."
+            echo "Lance scripts/build-plugins.sh et committe le résultat."
+            exit 1
+          fi
+          echo "Bundle de plugins conforme."
+
       # Gradle refuse de compiler si une licence du SDK n'est pas acceptée.
       # Sans effet si elles le sont déjà, et ne doit jamais faire échouer le job.
       - name: Accepter les licences du SDK Android
@@ -60,6 +88,8 @@ jobs:
 
       # getUserMedia (scan de code-barres) exige la permission CAMERA déclarée.
       # Capacitor ne l'ajoute pas par défaut : on l'insère avant <application>.
+      # Les autres permissions (notifications, démarrage) viennent des manifestes
+      # des plugins et sont fusionnées automatiquement par Gradle.
       - name: Déclarer la permission caméra
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
@@ -67,6 +97,21 @@ jobs:
             perl -0pi -e 's{(<application)}{<uses-permission android:name="android.permission.CAMERA" />\n\n    $1}' "$MANIFEST"
           fi
           grep -n 'uses-permission' "$MANIFEST"
+
+      # La version native doit suivre APP_VERSION. Le plugin de mise à jour
+      # compare la version d'un bundle téléchargé à celle de l'APK : si l'APK
+      # restait figé à « 1.0 », l'installation d'un APK plus récent n'effacerait
+      # pas les anciens bundles. versionCode doit aussi croître pour qu'Android
+      # accepte la réinstallation par-dessus.
+      - name: Aligner la version Android
+        env:
+          APP_VERSION: ${{ steps.version.outputs.app }}
+          BUNDLE_VERSION: ${{ steps.version.outputs.bundle }}
+        run: |
+          GRADLE=android/app/build.gradle
+          sed -i "s/versionCode [0-9]\+/versionCode $APP_VERSION/" "$GRADLE"
+          sed -i "s/versionName \"[^\"]*\"/versionName \"$BUNDLE_VERSION\"/" "$GRADLE"
+          grep -n 'versionCode\|versionName' "$GRADLE"
 
       - name: Compiler l'APK
         run: |
@@ -84,26 +129,53 @@ jobs:
           echo "size=$(du -h dist/glucovision.apk | cut -f1)" >> "$GITHUB_OUTPUT"
           echo "APK : $(du -h dist/glucovision.apk)"
 
+      # Bundle de mise à jour OTA : les mêmes fichiers web que l'APK, en archive.
+      # C'est ce qui évite de réinstaller l'APK à chaque version — l'app le
+      # télécharge et remplace son contenu web toute seule.
+      - name: Préparer le bundle de mise à jour
+        env:
+          APP_VERSION: ${{ steps.version.outputs.app }}
+          BUNDLE_VERSION: ${{ steps.version.outputs.bundle }}
+          REPO: ${{ github.repository }}
+        run: |
+          # index.html doit être à la RACINE de l'archive.
+          (cd www && zip -qr ../dist/www.zip .)
+          cat > dist/latest.json <<EOF
+          {
+            "appVersion": "$APP_VERSION",
+            "version": "$BUNDLE_VERSION",
+            "url": "https://github.com/$REPO/releases/download/ota-latest/www.zip"
+          }
+          EOF
+          cat dist/latest.json
+          echo "Archive : $(du -h dist/www.zip)"
+
       - uses: actions/upload-artifact@v4
         with:
           name: glucovision-apk
           path: dist/glucovision.apk
 
-      # Release au tag fixe « apk-latest » : le lien de téléchargement ne change
-      # jamais, seul le fichier derrière est remplacé à chaque build.
-      - name: Publier la release
+      # Releases aux tags fixes : les liens de téléchargement ne changent jamais,
+      # seuls les fichiers derrière sont remplacés à chaque build.
+      - name: Publier l'APK
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT: ${{ github.sha }}
           APK_SIZE: ${{ steps.apk.outputs.size }}
+          APP_VERSION: ${{ steps.version.outputs.app }}
         run: |
           {
-            echo "APK signé avec la clé de debug Android : installable directement,"
-            echo "sans compte développeur ni Play Store."
+            echo "**GlucoVision v$APP_VERSION** — APK signé avec la clé de debug Android :"
+            echo "installable directement, sans compte développeur ni Play Store."
             echo
             echo "**Installation** — télécharge \`glucovision.apk\` sur ton téléphone,"
             echo "ouvre-le, et autorise l'installation depuis cette source quand"
             echo "Android le demande."
+            echo
+            echo "**Mises à jour** — cet APK se met à jour tout seul : il vérifie au"
+            echo "lancement s'il existe une version plus récente du contenu web, la"
+            echo "télécharge, et propose « Actualiser ». Tu n'as à réinstaller un APK"
+            echo "que si une fonctionnalité NATIVE est ajoutée."
             echo
             echo "Build : commit \`$COMMIT\` · taille $APK_SIZE"
           } > notes.md
@@ -111,3 +183,19 @@ jobs:
           gh release create apk-latest dist/glucovision.apk \
             --title "GlucoVision — APK Android (dernier build)" \
             --notes-file notes.md
+
+      - name: Publier le bundle de mise à jour
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_VERSION: ${{ steps.version.outputs.app }}
+        run: |
+          {
+            echo "Contenu web de GlucoVision v$APP_VERSION, téléchargé automatiquement"
+            echo "par l'application Android installée."
+            echo
+            echo "Rien à télécharger à la main ici."
+          } > ota-notes.md
+          gh release delete ota-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create ota-latest dist/www.zip dist/latest.json \
+            --title "GlucoVision — mise à jour du contenu web (v$APP_VERSION)" \
+            --notes-file ota-notes.md
