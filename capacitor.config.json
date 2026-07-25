@@ -1,0 +1,11 @@
+{
+  "appId": "io.github.rachid598.glucovision",
+  "appName": "GlucoVision",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
