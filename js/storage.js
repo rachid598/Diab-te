@@ -14,14 +14,17 @@
   // Catalogue de modèles par fournisseur. stars = indice de qualité/précision (1 à 3).
   var MODEL_CATALOG = {
     claude: [
-      { id: 'claude-opus-4-8', label: 'Opus 4.8', note: 'précision max', stars: 3 },
+      { id: 'claude-opus-5', label: 'Opus 5', note: 'précision max · raisonnement', stars: 3 },
+      { id: 'claude-opus-4-8', label: 'Opus 4.8', note: 'très précis', stars: 3 },
       { id: 'claude-sonnet-5', label: 'Sonnet 5', note: 'équilibré · recommandé', stars: 2 },
       { id: 'claude-haiku-4-5', label: 'Haiku 4.5', note: 'rapide · économique', stars: 1 }
     ],
     gemini: [
-      { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', note: 'rapide · gratuit', stars: 2 },
-      { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash', note: 'rapide · gratuit', stars: 1 },
-      { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro', note: 'plus fin · quota gratuit limité', stars: 3 }
+      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', note: 'le plus fin · gratuit', stars: 3 },
+      { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', note: 'récent · gratuit · recommandé', stars: 3 },
+      { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', note: 'gratuit', stars: 2 },
+      { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', note: 'rapide · gratuit', stars: 2 },
+      { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', note: 'très rapide · gratuit', stars: 1 }
     ],
     openai: [
       { id: 'gpt-4o', label: 'GPT-4o', note: 'équilibré · vision', stars: 2 },
@@ -29,10 +32,20 @@
     ]
   };
 
+  /* Anciens identifiants → modèle actuel équivalent. Sans cette table, un réglage
+     enregistré il y a plusieurs versions continuerait d'appeler un modèle périmé
+     (nettement moins bon en estimation visuelle) sans que rien ne le signale. */
+  var MODEL_MIGRATIONS = {
+    'gemini-2.0-flash': 'gemini-3.6-flash',
+    'gemini-1.5-flash': 'gemini-3.5-flash',
+    'gemini-1.5-pro': 'gemini-2.5-pro',
+    'gemini-pro-vision': 'gemini-2.5-pro'
+  };
+
   // Modèles par défaut suggérés par fournisseur.
   var DEFAULT_MODELS = {
     claude: 'claude-sonnet-5',
-    gemini: 'gemini-2.0-flash',
+    gemini: 'gemini-3.6-flash',
     openai: 'gpt-4o'
   };
 
@@ -74,6 +87,11 @@
       // Migration depuis l'ancien format (clé/modèle uniques).
       if (s.apiKey && !s.apiKeys) merged.apiKeys[s.provider || 'claude'] = s.apiKey;
       if (s.model && !s.models) merged.models[s.provider || 'claude'] = s.model;
+      // Remplace les modèles retirés par leur équivalent actuel.
+      Object.keys(merged.models).forEach(function (p) {
+        var repl = MODEL_MIGRATIONS[merged.models[p]];
+        if (repl) merged.models[p] = repl;
+      });
       return merged;
     },
     saveSettings: function (s) {

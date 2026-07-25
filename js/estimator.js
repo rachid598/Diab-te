@@ -138,11 +138,15 @@
     });
   }
 
-  // Le raisonnement adaptatif ("thinking") améliore l'estimation géométrique, mais
-  // n'est supporté que par les modèles récents. On l'active seulement pour ceux-là.
+  /* Le raisonnement adaptatif ("thinking") améliore l'estimation géométrique, mais
+     n'est supporté que par les modèles récents. On l'active seulement pour ceux-là.
+     ⚠️ Sur ces modèles, la réflexion et la réponse se partagent le même max_tokens :
+     un plafond trop bas tronque le JSON en plein milieu et fait échouer l'estimation.
+     On laisse donc une marge large — on ne paie que les tokens réellement produits. */
   function supportsAdaptiveThinking(model) {
-    return /(opus-4-[678])|(sonnet-5)|(sonnet-4-6)|(fable-5)/.test(model || '');
+    return /(opus-5)|(opus-4-[678])|(sonnet-5)|(sonnet-4-6)|(fable-5)/.test(model || '');
   }
+  var THINKING_MAX_TOKENS = 8000;
 
   function callClaude(images, prompt, settings) {
     var content = images.map(function (img) {
@@ -163,7 +167,7 @@
     // Raisonnement approfondi pour une estimation de volume plus fiable (modèles compatibles).
     if (supportsAdaptiveThinking(model)) {
       body.thinking = { type: 'adaptive' };
-      body.max_tokens = 4000; // laisse de la marge : la réflexion consomme des tokens
+      body.max_tokens = THINKING_MAX_TOKENS;
     }
 
     return fetchWithTimeout('https://api.anthropic.com/v1/messages', {
