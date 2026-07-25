@@ -1,0 +1,107 @@
+name: Build APK Android
+
+# Déclenchement manuel depuis l'onglet Actions, ou automatique quand le code
+# de l'app change sur la branche de développement.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/meal-carb-estimator-app-twxpqp]
+    paths:
+      - 'index.html'
+      - 'css/**'
+      - 'js/**'
+      - 'vendor/**'
+      - 'icons/**'
+      - 'manifest.webmanifest'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - 'scripts/build-www.sh'
+      - '.github/workflows/android.yml'
+
+# Nécessaire pour publier l'APK dans une release.
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Installer Capacitor
+        run: npm install --no-audit --no-fund
+
+      - name: Préparer les fichiers web (www/)
+        run: bash scripts/build-www.sh
+
+      - name: Générer le projet Android
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      # getUserMedia (scan de code-barres) exige la permission CAMERA déclarée.
+      # Capacitor ne l'ajoute pas par défaut : on l'insère avant <application>.
+      - name: Déclarer la permission caméra
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          if ! grep -q 'android.permission.CAMERA' "$MANIFEST"; then
+            perl -0pi -e 's{(<application)}{<uses-permission android:name="android.permission.CAMERA" />\n\n    $1}' "$MANIFEST"
+          fi
+          grep -n 'uses-permission' "$MANIFEST"
+
+      - name: Compiler l'APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Renommer l'APK
+        id: apk
+        run: |
+          SRC=android/app/build/outputs/apk/debug/app-debug.apk
+          test -f "$SRC" || { echo "APK introuvable"; find android -name '*.apk'; exit 1; }
+          mkdir -p dist
+          cp "$SRC" dist/glucovision.apk
+          echo "size=$(du -h dist/glucovision.apk | cut -f1)" >> "$GITHUB_OUTPUT"
+          echo "APK : $(du -h dist/glucovision.apk)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glucovision-apk
+          path: dist/glucovision.apk
+
+      # Release au tag fixe « apk-latest » : le lien de téléchargement ne change
+      # jamais, seul le fichier derrière est remplacé à chaque build.
+      - name: Publier la release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT: ${{ github.sha }}
+          APK_SIZE: ${{ steps.apk.outputs.size }}
+        run: |
+          {
+            echo "APK signé avec la clé de debug Android : installable directement,"
+            echo "sans compte développeur ni Play Store."
+            echo
+            echo "**Installation** — télécharge \`glucovision.apk\` sur ton téléphone,"
+            echo "ouvre-le, et autorise l'installation depuis cette source quand"
+            echo "Android le demande."
+            echo
+            echo "Build : commit \`$COMMIT\` · taille $APK_SIZE"
+          } > notes.md
+          gh release delete apk-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create apk-latest dist/glucovision.apk \
+            --title "GlucoVision — APK Android (dernier build)" \
+            --notes-file notes.md
