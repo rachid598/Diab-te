@@ -113,6 +113,73 @@ jobs:
           sed -i "s/versionName \"[^\"]*\"/versionName \"$BUNDLE_VERSION\"/" "$GRADLE"
           grep -n 'versionCode\|versionName' "$GRADLE"
 
+      # Raccourcis d'appui long sur l'icône + schéma glucovision:// qui les porte.
+      # Au restaurant, ça évite d'ouvrir l'app puis de chercher le bouton Photo.
+      - name: Ajouter les raccourcis d'écran d'accueil
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          mkdir -p android/app/src/main/res/xml android/app/src/main/res/values
+
+          cat > android/app/src/main/res/xml/shortcuts.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+            <shortcut
+              android:shortcutId="photo"
+              android:enabled="true"
+              android:shortcutShortLabel="@string/shortcut_photo_short"
+              android:shortcutLongLabel="@string/shortcut_photo_long">
+              <intent
+                android:action="android.intent.action.VIEW"
+                android:targetPackage="io.github.rachid598.glucovision"
+                android:targetClass="io.github.rachid598.glucovision.MainActivity"
+                android:data="glucovision://photo" />
+            </shortcut>
+            <shortcut
+              android:shortcutId="manuel"
+              android:enabled="true"
+              android:shortcutShortLabel="@string/shortcut_manuel_short"
+              android:shortcutLongLabel="@string/shortcut_manuel_long">
+              <intent
+                android:action="android.intent.action.VIEW"
+                android:targetPackage="io.github.rachid598.glucovision"
+                android:targetClass="io.github.rachid598.glucovision.MainActivity"
+                android:data="glucovision://manuel" />
+            </shortcut>
+          </shortcuts>
+          XML
+
+          cat > android/app/src/main/res/values/shortcuts_strings.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+            <string name="shortcut_photo_short">Photo</string>
+            <string name="shortcut_photo_long">Photographier un repas</string>
+            <string name="shortcut_manuel_short">Manuel</string>
+            <string name="shortcut_manuel_long">Saisie manuelle</string>
+          </resources>
+          XML
+
+          # Seule la meta-data est nécessaire : les intentions des raccourcis sont
+          # EXPLICITES (targetPackage + targetClass), elles n'ont donc pas besoin
+          # d'un filtre. On évite ainsi d'exposer glucovision:// au navigateur,
+          # ce qui laisserait n'importe quelle page web ouvrir l'appareil photo.
+          python3 - "$MANIFEST" <<'PY'
+          import re, sys
+          path = sys.argv[1]
+          s = open(path, encoding='utf-8').read()
+          if 'android.app.shortcuts' in s:
+              print('deja present')
+              sys.exit(0)
+          extra = ('\n            <meta-data android:name="android.app.shortcuts"\n'
+                   '                android:resource="@xml/shortcuts" />\n')
+          m = re.search(r'(<activity\b[^>]*MainActivity.*?)(\n\s*</activity>)', s, re.S)
+          if not m:
+              sys.exit('MainActivity introuvable dans le manifeste')
+          s = s[:m.end(1)] + extra + s[m.end(1):]
+          open(path, 'w', encoding='utf-8').write(s)
+          print('raccourcis declares')
+          PY
+          grep -n 'android.app.shortcuts' "$MANIFEST"
+
       - name: Compiler l'APK
         run: |
           cd android

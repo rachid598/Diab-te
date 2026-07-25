@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '26'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '27'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -306,10 +306,134 @@
       renderResults(result);
     }).catch(function (e) {
       status.hidden = true;
-      toast(e.message);
+      offerQueue(e, ctx);
     }).then(function () {
       updateEstimateBtn();
     });
+  }
+
+  /* Échec réseau : plutôt que de perdre le repas, on propose de le garder.
+     C'est le moment où on ne peut PAS refaire la photo — l'assiette est entamée
+     ou on a déjà quitté la table. Une erreur de clé ou de quota, elle, échouerait
+     tout autant plus tard : on ne met en file que ce qui a une chance d'aboutir. */
+  function offerQueue(err, ctx) {
+    if (!Queue.isAvailable() || !Queue.isNetworkError(err) || !images.length) {
+      toast(err.message);
+      return;
+    }
+    if (!confirm(err.message + '\n\nGarder ce repas et l\'analyser dès que le réseau revient ?')) {
+      toast(err.message);
+      return;
+    }
+    Queue.add(images, ctx).then(function (id) {
+      if (!id) { toast(err.message); return; }
+      images = [];
+      renderThumbs();
+      updateEstimateBtn();
+      renderQueue();
+      toast('Repas mis de côté. Il sera analysé au retour du réseau.');
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ---------- File d'attente hors-ligne ----------
+  var queueBusy = false;
+
+  function renderQueue() {
+    var el = $('queue-banner');
+    if (!el) return;
+    var n = Queue.isAvailable() ? Queue.count() : 0;
+    el.hidden = n === 0;
+    if (n) {
+      $('queue-text').textContent = n + ' repas en attente de réseau';
+      $('queue-retry').disabled = queueBusy;
+    }
+  }
+
+  /* Traite la file, un repas à la fois. En série et non en parallèle : au retour
+     du réseau la connexion est souvent encore fragile, et enchaîner évite de
+     relancer cinq analyses qui échoueraient toutes ensemble. */
+  function processQueue(manual) {
+    if (!Queue.isAvailable() || queueBusy) return;
+    Queue.prune();
+    var pending = Queue.list();
+    if (!pending.length) { renderQueue(); return; }
+    if (!navigator.onLine && !manual) return;
+
+    queueBusy = true;
+    renderQueue();
+
+    var next = function (i) {
+      if (i >= pending.length) return Promise.resolve();
+      var item = pending[i];
+      return Queue.load(item)
+        .then(function (imgs) { return Estimator.estimate(imgs, item.ctx, settings); })
+        .then(function (result) {
+          var entry = {
+            date: item.date, source: 'photo', totalCarbsG: result.totalCarbsG,
+            parts: partsFrom(result.totalCarbsG), partSizeG: settings.partSizeG,
+            glycemicSpeed: result.glycemicSpeed || null,
+            gi: result.gi ? { gl: result.gi.gl, gi: result.gi.gi } : null,
+            items: result.items.map(function (it) { return { name: it.name, carbsG: it.carbsG }; })
+          };
+          Storage.addHistory(entry);
+          Queue.remove(item.id);
+          // L'utilisateur n'a pas l'app sous les yeux : c'est le rôle d'une notification.
+          Native.notify.schedule({
+            id: Math.floor(item.date / 1000),
+            title: 'Estimation prête',
+            body: 'Le repas mis de côté a été analysé : ' + result.totalCarbsG + ' g (' +
+                  fr(partsFrom(result.totalCarbsG)) + ' parts).',
+            at: new Date(Date.now() + 1000)
+          });
+          return next(i + 1);
+        })
+        .catch(function (e) {
+          // Toujours hors ligne : on s'arrête et on retentera plus tard.
+          if (Queue.isNetworkError(e)) return;
+          // Erreur définitive (clé invalide) : inutile de la garder indéfiniment.
+          Queue.remove(item.id);
+          return next(i + 1);
+        });
+    };
+
+    next(0).then(function () {
+      queueBusy = false;
+      renderQueue();
+      if ($('tab-history').classList.contains('active')) renderHistory();
+    });
+  }
+
+  /* Raccourcis de l'écran d'accueil (appui long sur l'icône).
+     Au restaurant on ne veut pas ouvrir l'app, choisir un onglet puis appuyer
+     sur Photo : le raccourci déclenche directement l'appareil photo. */
+  function initShortcuts() {
+    Native.onLaunchAction(function (action) {
+      if (action === 'photo') {
+        selectTab('analyze');
+        // Laisse le rendu se poser avant d'ouvrir l'appareil photo natif.
+        setTimeout(function () {
+          var btn = $('btn-photo');
+          if (btn) btn.click();
+        }, 250);
+      } else if (action === 'manuel') {
+        selectTab('manual');
+      }
+    });
+  }
+
+  function selectTab(name) {
+    var tab = document.querySelector('.tab[data-tab="' + name + '"]');
+    if (tab) tab.click();
+  }
+
+  function initQueue() {
+    if (!Queue.isAvailable()) return;
+    var retry = $('queue-retry');
+    if (retry) retry.addEventListener('click', function () { processQueue(true); });
+    window.addEventListener('online', function () { processQueue(false); });
+    Native.onResume(function () { processQueue(false); });
+    renderQueue();
+    processQueue(false);
   }
 
   // Affiche les deux avis côte à côte, avec un bouton « Utiliser cet avis ».
@@ -1304,6 +1428,7 @@
     $('set-compare-model').addEventListener('change', function () {
       $('set-compare-model-custom-wrap').hidden = $('set-compare-model').value !== CUSTOM_VALUE;
     });
+    initReport();
     var purge = $('purge-photos');
     if (purge) {
       purge.addEventListener('click', function () {
@@ -1557,6 +1682,57 @@
     }
   }
 
+  // ---------- Synthèse pour la consultation ----------
+
+  function buildReport() {
+    var days = parseInt($('report-days').value, 10) || 90;
+    var r = Report.html(days);
+    if (!r) {
+      toast('Aucun repas enregistré sur cette période.');
+      return null;
+    }
+    return r;
+  }
+
+  function initReport() {
+    var view = $('report-view'), share = $('report-share');
+    if (!view || !share) return;
+
+    /* Aperçu dans un onglet/une fenêtre : le document a sa propre mise en page
+       (et sa propre feuille de style d'impression), l'encastrer dans l'app le
+       dénaturerait. On passe par un Blob plutôt que document.write pour que
+       « Imprimer » du navigateur voie un vrai document autonome. */
+    view.addEventListener('click', function () {
+      var r = buildReport();
+      if (!r) return;
+      var url = URL.createObjectURL(new Blob([r.html], { type: 'text/html' }));
+      var w = window.open(url, '_blank');
+      if (!w) {
+        toast('Ouverture bloquée. Utilise « Envoyer » pour récupérer le fichier.');
+      }
+      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+    });
+
+    share.addEventListener('click', function () {
+      var r = buildReport();
+      if (!r) return;
+      var stamp = new Date().toISOString().slice(0, 10);
+      var name = 'glucovision-synthese-' + stamp + '.html';
+      var title = 'Synthèse glucides — ' + r.stats.count + ' repas';
+
+      Native.shareFile(name, r.html, title).then(function (ok) {
+        // Sur le web (et si le partage natif échoue) : téléchargement classique.
+        if (ok) return;
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([r.html], { type: 'text/html' }));
+        a.download = name;
+        a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 30000);
+        toast('Synthèse téléchargée.');
+      });
+    });
+  }
+
   // ---------- Divers ----------
   /* Source d'image d'une entrée d'historique, quel que soit le support :
      vignette base64 héritée de la PWA, ou fichier sur disque dans l'APK.
@@ -1674,6 +1850,8 @@
     updateEstimateBtn();
     registerSW();
     initNativeUpdate();
+    initQueue();
+    initShortcuts();
     // Rattrape les images orphelines laissées par un enregistrement interrompu.
     if (Native.isApp) Storage.prunePhotos();
   }
