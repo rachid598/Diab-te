@@ -3,17 +3,22 @@
    ou par code-barres. Rien n'est stocké côté serveur ; on interroge l'API publique.
 
    IMPORTANT — choix des serveurs :
-   On n'utilise QUE world.openfoodfacts.org, le seul hôte qui renvoie l'en-tête
-   « access-control-allow-origin: * ». Le moteur search.openfoodfacts.org
-   (search-a-licious) répond correctement mais n'envoie AUCUN en-tête CORS, quelle
-   que soit l'origine : le navigateur bloque donc systématiquement sa réponse. */
+   Dans le NAVIGATEUR on n'utilise que world.openfoodfacts.org, le seul hôte qui
+   renvoie l'en-tête « access-control-allow-origin: * ». Le moteur
+   search.openfoodfacts.org (search-a-licious) répond correctement mais n'envoie
+   AUCUN en-tête CORS, quelle que soit l'origine : le navigateur bloque donc
+   systématiquement sa réponse — c'était la cause du « erreur réseau ».
+
+   Dans l'APK, la requête part du code natif et non du navigateur : la politique
+   d'origine croisée ne s'applique pas. On remet donc search-a-licious en tête,
+   parce que c'est le moteur le plus pertinent des deux. */
 (function () {
   'use strict';
 
   var BASE = 'https://world.openfoodfacts.org';
   var FIELDS = 'code,product_name,product_name_fr,brands,nutriments,serving_quantity';
+  var native = window.Native && window.Native.isApp;
 
-  // Points d'entrée de recherche par nom, essayés dans l'ordre (tous CORS-compatibles).
   var SEARCH_URLS = [
     function (q) {
       return BASE + '/cgi/search.pl?search_terms=' + encodeURIComponent(q) +
@@ -25,8 +30,38 @@
     }
   ];
 
+  if (native) {
+    SEARCH_URLS.unshift(function (q) {
+      return 'https://search.openfoodfacts.org/search?q=' + encodeURIComponent(q) +
+        '&page_size=50&fields=' + FIELDS;
+    });
+  }
+
   function fetchJson(url, ms) {
     ms = ms || 15000;
+
+    // APK : requête native, aucun blocage d'origine croisée.
+    if (native) {
+      return window.Native.httpJson(url, ms).then(function (res) {
+        if (!res || res.status >= 400) {
+          var err = new Error('HTTP ' + ((res && res.status) || 0));
+          err.status = (res && res.status) || 0;
+          throw err;
+        }
+        if (res.data == null) {
+          var e = new Error('Réponse illisible du service.');
+          e.status = 0;
+          throw e;
+        }
+        return res.data;
+      }, function (err) {
+        if (err && err.status) throw err;
+        var e = new Error('Réseau injoignable.');
+        e.status = 0;
+        throw e;
+      });
+    }
+
     var opts = {};
     var ctrl;
     if (typeof AbortController !== 'undefined') {
