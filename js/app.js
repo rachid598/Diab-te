@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '22'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '23'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -373,6 +373,49 @@
       adjusted + ' g</strong> (' + fr(partsFrom(adjusted)) + ' parts). À toi de juger.</div>';
   }
 
+  /* Tendance d'absorption du repas. On décrit comment CE REPAS se digère
+     typiquement — on ne prédit pas ta glycémie : ça demanderait ton capteur et
+     ton insuline active, que ta pompe possède et pas l'app. */
+  var GLYCEMIC = {
+    rapide: {
+      icon: '⚡', label: 'Montée rapide',
+      timing: 'typiquement 15 à 45 min après le début du repas',
+      cls: 'gly-fast'
+    },
+    moderee: {
+      icon: '🕐', label: 'Montée progressive',
+      timing: 'typiquement 45 min à 1 h 30',
+      cls: 'gly-mid'
+    },
+    lente: {
+      icon: '🐢', label: 'Montée retardée et étalée',
+      timing: 'souvent 2 à 4 h, avec un pic tardif',
+      cls: 'gly-slow'
+    }
+  };
+
+  function glycemicHtml(r) {
+    var g = GLYCEMIC[r.glycemicSpeed];
+    if (!g) return '';
+    return '<div class="gly ' + g.cls + '">' +
+      '<div class="gly-head"><span class="gly-ico">' + g.icon + '</span>' +
+        '<strong>' + g.label + '</strong> · <span class="gly-time">' + g.timing + '</span></div>' +
+      (r.glycemicNote ? '<div class="gly-why">' + escapeHtml(r.glycemicNote) + '</div>' : '') +
+      '<div class="gly-meta">Tendance de ce repas, pas une prévision de ta glycémie — ' +
+        'elle dépend aussi de toi et de ta pompe.</div>' +
+      '</div>';
+  }
+
+  function macrosHtml(r) {
+    if (r.totalProteinG == null && r.totalFatG == null && r.totalKcal == null) return '';
+    var bits = [];
+    if (r.totalKcal != null) bits.push('<span><b>' + r.totalKcal + '</b> kcal</span>');
+    if (r.totalProteinG != null) bits.push('<span><b>' + r.totalProteinG + '</b> g protéines</span>');
+    if (r.totalFatG != null) bits.push('<span><b>' + r.totalFatG + '</b> g lipides</span>');
+    if (!bits.length) return '';
+    return '<div class="macros">' + bits.join('') + '</div>';
+  }
+
   function renderResults(r) {
     var el = $('results');
     var parts = partsFrom(r.totalCarbsG);
@@ -386,6 +429,8 @@
     html += '  <div class="pump-hint">💉 À saisir dans ta pompe : <strong>' + r.totalCarbsG +
             ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>). Ta pompe calcule le bolus.</div>';
     html += biasHintHtml(r.totalCarbsG);
+    html += glycemicHtml(r);
+    html += macrosHtml(r);
     html += '</div>';
 
     // Détail par aliment (grammes éditables)
@@ -397,14 +442,79 @@
       html += '<div class="card"><div class="notes-box">📝 ' + escapeHtml(r.notes) + '</div></div>';
     }
 
-    html += '<div class="btn-row"><button id="save-result" class="btn btn-primary">💾 Enregistrer dans l\'historique</button></div>';
+    html += '<div class="btn-row">' +
+            '<button id="save-result" class="btn btn-primary">💾 Enregistrer dans l\'historique</button>' +
+            '<button id="save-meal" class="btn btn-ghost">⭐ Repas fréquent</button>' +
+            '</div>';
     html += '<div class="disclaimer-mini">Estimation indicative — vérifie toujours avant de doser.</div>';
 
     el.innerHTML = html;
     el.hidden = false;
     renderItems();
     $('save-result').addEventListener('click', saveCurrentResult);
+    $('save-meal').addEventListener('click', function () { promptSaveMeal(lastResult.items); });
     el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // ---------- Repas fréquents ----------
+  function promptSaveMeal(items) {
+    if (!items || !items.length) { toast('Rien à enregistrer.'); return; }
+    var suggestion = items.slice(0, 2).map(function (it) { return it.name; }).join(' + ');
+    var name = prompt('Nom de ce repas fréquent :', suggestion);
+    if (name == null) return;
+    name = name.trim();
+    if (!name) { toast('Donne un nom au repas.'); return; }
+    Storage.saveMeal(name, items);
+    renderSavedMeals();
+    toast('« ' + name + ' » enregistré. Retrouve-le dans l\'onglet Manuel.');
+  }
+
+  function renderSavedMeals() {
+    var card = $('saved-meals-card'), box = $('saved-meals');
+    if (!card || !box) return;
+    var meals = Storage.getSavedMeals();
+    card.hidden = meals.length === 0;
+    box.innerHTML = '';
+    meals.forEach(function (m) {
+      var el = document.createElement('div');
+      el.className = 'saved-meal';
+      el.innerHTML =
+        '<button class="saved-meal-load" data-load="' + m.id + '">' +
+          '<span class="saved-meal-name">' + escapeHtml(m.name) + '</span>' +
+          '<span class="saved-meal-carbs">' + fr(partsFrom(m.totalCarbsG)) + ' parts · ' + m.totalCarbsG + ' g</span>' +
+        '</button>' +
+        '<button class="saved-meal-del" data-del="' + m.id + '" aria-label="Supprimer">🗑️</button>';
+      box.appendChild(el);
+    });
+    box.querySelectorAll('[data-load]').forEach(function (b) {
+      b.addEventListener('click', function () { loadSavedMeal(b.dataset.load); });
+    });
+    box.querySelectorAll('[data-del]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        Storage.deleteSavedMeal(b.dataset.del);
+        renderSavedMeals();
+        toast('Repas supprimé.');
+      });
+    });
+  }
+
+  /* Recharge un repas enregistré dans le mode manuel. Les glucides sont ceux
+     validés la première fois : on les réinjecte tels quels (mode grammes avec
+     une densité de 100 %) plutôt que de les ré-estimer. */
+  function loadSavedMeal(id) {
+    var meal = Storage.getSavedMeals().filter(function (m) { return m.id === id; })[0];
+    if (!meal) return;
+    manualItems = meal.items.map(function (it) {
+      return {
+        name: it.name, carb: 100, custom: false,
+        portions: [], mode: 'grams', portionIndex: 0, qty: 1,
+        grams: Math.round(it.carbsG)
+      };
+    });
+    renderManualItems();
+    toast('« ' + meal.name +' » chargé.');
+    var t = $('manual-total');
+    if (t) t.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   function renderItems() {
@@ -467,15 +577,24 @@
   }
 
   function saveCurrentResult() {
-    Storage.addHistory({
+    var entry = {
       date: Date.now(),
       source: 'photo',
       totalCarbsG: lastResult.totalCarbsG,
       parts: partsFrom(lastResult.totalCarbsG),
       partSizeG: settings.partSizeG,
+      glycemicSpeed: lastResult.glycemicSpeed || null,
       items: lastResult.items.map(function (it) { return { name: it.name, carbsG: it.carbsG }; })
+    };
+    // Vignette de la 1ʳᵉ vue, pour revoir plus tard à quoi ressemblait la portion.
+    var first = images[0];
+    var thumbP = (first && first.previewUrl && Camera.makeThumb)
+      ? Camera.makeThumb(first.previewUrl) : Promise.resolve(null);
+    thumbP.then(function (thumb) {
+      if (thumb) entry.thumb = thumb;
+      Storage.addHistory(entry);
+      toast('Enregistré dans l\'historique.');
     });
-    toast('Enregistré dans l\'historique.');
   }
 
   // ---------- Mode manuel ----------
@@ -488,6 +607,7 @@
     initOnlineTools();
     renderChips();
     renderFoodResults('');
+    renderSavedMeals();
   }
 
   // ---------- Recherche en ligne (OpenFoodFacts) + code-barres ----------
@@ -810,9 +930,17 @@
       '  <div class="hero-parts">' + fr(parts) + ' <small>parts</small></div>' +
       '  <div class="hero-grams">= ' + total + ' <small>g de glucides</small></div>' +
       '  <div class="pump-hint">💉 À saisir dans ta pompe : <strong>' + total + ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>).</div>' +
-      '  <div class="btn-row" style="margin-top:12px"><button id="save-manual" class="btn btn-primary">💾 Enregistrer</button></div>' +
+      '  <div class="btn-row" style="margin-top:12px">' +
+      '    <button id="save-manual" class="btn btn-primary">💾 Enregistrer</button>' +
+      '    <button id="save-manual-meal" class="btn btn-ghost">⭐ Repas fréquent</button>' +
+      '  </div>' +
       '</div>';
     el.hidden = false;
+    $('save-manual-meal').addEventListener('click', function () {
+      promptSaveMeal(manualItems.map(function (it) {
+        return { name: it.name, carbsG: Math.round(itemGrams(it) * it.carb / 100) };
+      }));
+    });
     $('save-manual').addEventListener('click', function () {
       Storage.addHistory({
         date: Date.now(), source: 'manuel', totalCarbsG: total,
@@ -854,6 +982,7 @@
 
       item.innerHTML =
         '<button class="history-del" data-del="' + e.date + '" aria-label="Supprimer">🗑️</button>' +
+        (e.thumb ? '<img class="history-thumb" src="' + e.thumb + '" alt="photo du repas">' : '') +
         '<div class="history-date">' + dateStr + ' · ' + (e.source === 'photo' ? '📷 photo' : '✍️ manuel') + '</div>' +
         '<div class="history-total"><b>' + fr(partsFromStored(e)) + ' parts</b> · ' + e.totalCarbsG + ' g</div>' +
         '<div class="item-detail">' + escapeHtml(names || '—') + '</div>' +
@@ -952,9 +1081,25 @@
     card.className = 'bias-card ' + cls;
     card.innerHTML = '<div class="bias-title">🎯 Ta tendance personnelle</div>' +
       '<div class="bias-text">' + verdict + '</div>' +
+      byCategoryHtml() +
       '<div class="bias-meta">Calculé sur ' + bias.count + ' repas avec valeur réelle. ' +
       'Indicatif — ne remplace pas ton jugement.</div>';
     return card;
+  }
+
+  /* Détail par catégorie : bien plus actionnable qu'une moyenne globale.
+     N'apparaît qu'à partir de 3 repas corrigés dans une même catégorie. */
+  function byCategoryHtml() {
+    var groups = Storage.getBiasByCategory(3);
+    if (!groups.length) return '';
+    var rows = groups.slice(0, 4).map(function (g) {
+      var pct = Math.abs(g.pct);
+      var verdict = pct < 5 ? '<span class="cat-ok">juste</span>'
+        : (g.pct > 0 ? 'sous-estimé de <b>' + pct + ' %</b>' : 'sur-estimé de <b>' + pct + ' %</b>');
+      return '<li><span class="cat-name">' + escapeHtml(g.category) + '</span> ' + verdict +
+             ' <span class="cat-count">(' + g.count + ' repas)</span></li>';
+    }).join('');
+    return '<ul class="bias-cats">' + rows + '</ul>';
   }
   // Recalcule les parts avec la taille de part actuelle si elle a changé.
   function partsFromStored(e) { return partsFrom(e.totalCarbsG); }
@@ -996,6 +1141,58 @@
     });
     $('set-compare-model').addEventListener('change', function () {
       $('set-compare-model-custom-wrap').hidden = $('set-compare-model').value !== CUSTOM_VALUE;
+    });
+    initBackup();
+  }
+
+  // ---------- Sauvegarde / restauration ----------
+  function initBackup() {
+    $('export-data').addEventListener('click', function () {
+      var blob = new Blob([JSON.stringify(Storage.exportAll(), null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      var d = new Date();
+      var stamp = d.getFullYear() + '-' +
+                  ('0' + (d.getMonth() + 1)).slice(-2) + '-' +
+                  ('0' + d.getDate()).slice(-2);
+      a.href = url;
+      a.download = 'glucovision-sauvegarde-' + stamp + '.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+      toast('Sauvegarde exportée. Range-la ailleurs que sur ce téléphone.');
+    });
+
+    $('import-data').addEventListener('click', function (e) {
+      // Restauration destructive : on demande confirmation AVANT d'ouvrir le sélecteur.
+      if (!confirm('Restaurer une sauvegarde remplacera ton historique, tes aliments perso et ta calibration actuels. Continuer ?')) {
+        e.preventDefault();
+      }
+    });
+
+    $('import-data').addEventListener('change', function (e) {
+      var file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        try {
+          var restored = Storage.importAll(JSON.parse(reader.result));
+          settings = Storage.getSettings();
+          renderSavedMeals();
+          renderHistory();
+          renderChips();
+          renderFoodResults($('food-search').value);
+          updateCompareToggle();
+          $('settings-modal').hidden = true;
+          toast('Sauvegarde restaurée (' + restored.length + ' éléments). Ressaisis tes clés API.');
+        } catch (err) {
+          toast(err.message || 'Fichier illisible.');
+        }
+      };
+      reader.onerror = function () { toast('Impossible de lire le fichier.'); };
+      reader.readAsText(file);
     });
   }
 

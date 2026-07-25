@@ -8,7 +8,8 @@
     history: 'diabete.history.v1',
     disclaimer: 'diabete.disclaimer.v1',
     customFoods: 'diabete.customfoods.v1',
-    recentFoods: 'diabete.recentfoods.v1'
+    recentFoods: 'diabete.recentfoods.v1',
+    savedMeals: 'diabete.savedmeals.v1'
   };
 
   // Catalogue de modèles par fournisseur. stars = indice de qualité/précision (1 à 3).
@@ -67,6 +68,46 @@
     roundHalf: true      // arrondir les parts au 0,5
   };
 
+  /* Classement d'un aliment par mots-clés. L'IA renvoie des noms libres
+     (« purée maison », « demi-baguette »), donc on ne peut pas s'appuyer sur la
+     base d'aliments : on reconnaît des racines de mots. L'ordre compte — les
+     entrées les plus spécifiques d'abord (« pomme de terre » avant « pomme »). */
+  var CATEGORY_RULES = [
+    ['Féculents', /pomme de terre|patate|puree|purée|riz|pate|pâte|semoule|couscous|quinoa|boulgour|ble|blé|frite|gnocchi|polenta|maïs|mais/],
+    ['Pain', /pain|baguette|biscotte|toast|tartine|brioche|viennois|croissant|wrap|tortilla|pita|bagel|burger|bun/],
+    ['Légumineuses', /lentille|pois chiche|haricot|feve|fève|flageolet|soja/],
+    ['Sucré', /gateau|gâteau|dessert|glace|chocolat|bonbon|biscuit|tarte|creme|crème|confiture|miel|sucre|patisserie|pâtisserie|cookie|crepe|crêpe|gaufre|compote/],
+    ['Boissons', /jus|soda|coca|limonade|boisson|sirop|smoothie|biere|bière|vin/],
+    ['Fruits', /pomme|banane|orange|fraise|raisin|poire|peche|pêche|abricot|mangue|ananas|kiwi|melon|cerise|prune|fruit/],
+    ['Laitier', /lait|yaourt|yogourt|fromage|petit-suisse|skyr|feta|mozzarella/],
+    ['Protéines', /poulet|boeuf|bœuf|porc|veau|agneau|dinde|jambon|steak|poisson|saumon|thon|cabillaud|crevette|oeuf|œuf|tofu|viande|saucisse|lardon/],
+    ['Légumes', /salade|tomate|carotte|courgette|haricot vert|brocoli|epinard|épinard|poivron|concombre|chou|legume|légume|oignon|champignon/]
+  ];
+
+  function categoryOf(name) {
+    var n = (name || '').toString().toLowerCase();
+    for (var i = 0; i < CATEGORY_RULES.length; i++) {
+      if (CATEGORY_RULES[i][1].test(n)) return CATEGORY_RULES[i][0];
+    }
+    return null;
+  }
+
+  // Catégorie qui apporte le plus de glucides au repas.
+  function dominantCategory(items) {
+    if (!items || !items.length) return null;
+    var byCat = {};
+    items.forEach(function (it) {
+      var cat = categoryOf(it.name);
+      if (!cat) return;
+      byCat[cat] = (byCat[cat] || 0) + (it.carbsG || 0);
+    });
+    var best = null;
+    Object.keys(byCat).forEach(function (c) {
+      if (best === null || byCat[c] > byCat[best]) best = c;
+    });
+    return (best && byCat[best] > 0) ? best : null;
+  }
+
   function read(key, fallback) {
     try {
       var raw = localStorage.getItem(key);
@@ -76,7 +117,29 @@
     }
   }
   function write(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+    catch (e) { return false; }
+  }
+
+  /* Écriture de l'historique avec gestion du quota. Les vignettes de repas pèsent
+     lourd : quand le navigateur refuse d'écrire, on abandonne les plus anciennes
+     images (pas les données) et on réessaie, plutôt que de perdre l'enregistrement. */
+  function writeHistory(h) {
+    if (write(KEYS.history, h)) return h;
+    var trimmed = h.map(function (e) { return e; });
+    for (var i = trimmed.length - 1; i >= 0; i--) {
+      if (trimmed[i].thumb) {
+        trimmed[i] = Object.assign({}, trimmed[i]);
+        delete trimmed[i].thumb;
+        if (write(KEYS.history, trimmed)) return trimmed;
+      }
+    }
+    // Toujours trop gros : on tronque l'historique le plus ancien.
+    while (trimmed.length > 10) {
+      trimmed = trimmed.slice(0, Math.floor(trimmed.length / 2));
+      if (write(KEYS.history, trimmed)) return trimmed;
+    }
+    return trimmed;
   }
 
   var Storage = {
@@ -110,8 +173,9 @@
       var h = this.getHistory();
       h.unshift(entry);
       if (h.length > 100) h = h.slice(0, 100);
-      write(KEYS.history, h);
-      return h;
+      // Les vignettes ne sont gardées que sur les repas récents (limite du stockage).
+      h.forEach(function (e, i) { if (i >= 40 && e.thumb) delete e.thumb; });
+      return writeHistory(h);
     },
     clearHistory: function () {
       write(KEYS.history, []);
@@ -130,8 +194,7 @@
           else e.realCarbsG = Math.max(0, Math.round(realCarbsG));
         }
       });
-      write(KEYS.history, h);
-      return h;
+      return writeHistory(h);
     },
     // Calcule le biais personnel : compare estimé vs réel sur les repas corrigés.
     // Renvoie { count, meanRatio, pct } (pct > 0 = tendance à SOUS-estimer).
@@ -145,6 +208,93 @@
       if (!ratios.length) return { count: 0, meanRatio: 1, pct: 0 };
       var mean = ratios.reduce(function (s, r) { return s + r; }, 0) / ratios.length;
       return { count: ratios.length, meanRatio: mean, pct: Math.round((mean - 1) * 100) };
+    },
+
+    /* Biais par catégorie d'aliment. La valeur réelle est saisie pour le REPAS
+       entier, pas par aliment : on attribue donc l'écart à la catégorie qui
+       apporte le plus de glucides au repas. C'est une approximation, mais elle
+       suffit à distinguer « je me trompe sur les féculents » de « sur les fruits ».
+       minMeals évite de conclure sur un seul repas. */
+    getBiasByCategory: function (minMeals) {
+      minMeals = minMeals || 3;
+      var groups = {};
+      this.getHistory().forEach(function (e) {
+        if (!(e.totalCarbsG > 0) || e.realCarbsG == null || !(e.realCarbsG > 0)) return;
+        var cat = dominantCategory(e.items);
+        if (!cat) return;
+        (groups[cat] = groups[cat] || []).push(e.realCarbsG / e.totalCarbsG);
+      });
+      return Object.keys(groups).map(function (cat) {
+        var r = groups[cat];
+        var mean = r.reduce(function (s, x) { return s + x; }, 0) / r.length;
+        return { category: cat, count: r.length, meanRatio: mean, pct: Math.round((mean - 1) * 100) };
+      }).filter(function (g) {
+        return g.count >= minMeals;
+      }).sort(function (a, b) {
+        return Math.abs(b.pct) - Math.abs(a.pct);
+      });
+    },
+
+    // ----- Repas enregistrés (« mes repas fréquents ») -----
+    getSavedMeals: function () {
+      return read(KEYS.savedMeals, []);
+    },
+    saveMeal: function (name, items) {
+      var list = this.getSavedMeals().filter(function (m) { return m.name !== name; });
+      list.unshift({
+        id: 'm' + Date.now(),
+        name: name,
+        items: items.map(function (it) {
+          return { name: it.name, carbsG: Math.round(it.carbsG || 0) };
+        }),
+        totalCarbsG: items.reduce(function (s, it) { return s + Math.round(it.carbsG || 0); }, 0),
+        savedAt: Date.now()
+      });
+      if (list.length > 40) list = list.slice(0, 40);
+      write(KEYS.savedMeals, list);
+      return list;
+    },
+    deleteSavedMeal: function (id) {
+      var list = this.getSavedMeals().filter(function (m) { return m.id !== id; });
+      write(KEYS.savedMeals, list);
+      return list;
+    },
+
+    // ----- Sauvegarde / restauration -----
+    exportAll: function () {
+      var out = { app: 'GlucoVision', formatVersion: 1, exportedAt: new Date().toISOString(), data: {} };
+      Object.keys(KEYS).forEach(function (name) {
+        var raw = null;
+        try { raw = localStorage.getItem(KEYS[name]); } catch (e) {}
+        if (raw != null) { try { out.data[name] = JSON.parse(raw); } catch (e) {} }
+      });
+      /* Les clés API sont volontairement retirées : un export atterrit dans les
+         fichiers du téléphone ou une pièce jointe, ce n'est pas un endroit pour
+         des secrets facturables. Elles se ressaisissent en quelques secondes. */
+      if (out.data.settings && out.data.settings.apiKeys) {
+        out.data.settings = Object.assign({}, out.data.settings);
+        delete out.data.settings.apiKeys;
+      }
+      return out;
+    },
+    importAll: function (obj) {
+      if (!obj || obj.app !== 'GlucoVision' || !obj.data) {
+        throw new Error('Fichier non reconnu : ce n\'est pas une sauvegarde GlucoVision.');
+      }
+      var restored = [];
+      Object.keys(KEYS).forEach(function (name) {
+        if (!(name in obj.data)) return;
+        var value = obj.data[name];
+        // On ne remplace pas les clés API en place : elles ne sont pas exportées.
+        if (name === 'settings' && value && !value.apiKeys) {
+          var current = read(KEYS.settings, {}) || {};
+          value = Object.assign({}, value, { apiKeys: current.apiKeys || {} });
+        }
+        write(KEYS[name], value);
+        restored.push(name);
+      });
+      if (!restored.length) throw new Error('Sauvegarde vide : rien à restaurer.');
+      return restored;
     },
 
     // ----- Aliments récents (mode manuel) -----

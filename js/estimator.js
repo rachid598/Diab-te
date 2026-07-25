@@ -48,6 +48,21 @@
     "   - Dans 'notes' : nomme LE facteur qui pèse le plus et l'action concrète pour l'affiner",
     "     (ex. « confirme si baguette entière ou demie »), pas des généralités.",
     "",
+    "F. VITESSE D'ABSORPTION DU REPAS (caractérise le REPAS, ne prédis JAMAIS une glycémie).",
+    "   Juge à quelle vitesse les glucides de CE repas passent typiquement dans le sang :",
+    "   - 'rapide' : glucides à index glycémique élevé, peu de gras/fibres/protéines",
+    "     (boisson sucrée, pain blanc seul, bonbons, purée, fruit très mûr).",
+    "   - 'moderee' : repas mixte équilibré, féculents avec un peu de gras/protéines/légumes.",
+    "   - 'lente' : beaucoup de gras et/ou de protéines, ou glucides à IG bas et riches en",
+    "     fibres (pizza, friture, plat en sauce, légumineuses, pâtes al dente + huile).",
+    "     Le gras ralentit la vidange gastrique : la montée est RETARDÉE et ÉTALÉE.",
+    "   Dans 'glycemicNote' : une phrase en français expliquant CE QUI, dans ce repas,",
+    "   détermine cette vitesse (l'aliment ou le facteur responsable). Pas de conseil de dose.",
+    "",
+    "G. MACRONUTRIMENTS : estime aussi protéines, lipides et calories par aliment.",
+    "   Ils servent à expliquer la vitesse d'absorption (F). Reste cohérent :",
+    "   kcal ≈ 4×glucides + 4×protéines + 9×lipides.",
+    "",
     "SORTIE : réponds UNIQUEMENT avec un objet JSON valide, sans texte ni balises markdown.",
     "Schéma exact :",
     "{",
@@ -58,6 +73,9 @@
     '      "estimatedMassG": nombre,',
     '      "carbDensityPer100g": nombre,',
     '      "carbsG": nombre,',
+    '      "proteinG": nombre,',
+    '      "fatG": nombre,',
+    '      "kcal": nombre,',
     '      "confidence": "low" | "medium" | "high",',
     '      "assumptions": "mesures via le repère + hypothèses clés, en français"',
     '    }',
@@ -66,6 +84,8 @@
     '  "rangeLowG": nombre,',
     '  "rangeHighG": nombre,',
     '  "overallConfidence": "low" | "medium" | "high",',
+    '  "glycemicSpeed": "rapide" | "moderee" | "lente",',
+    '  "glycemicNote": "ce qui, dans ce repas, détermine la vitesse d\'absorption",',
     '  "notes": "LE facteur d\'incertitude dominant + action concrète pour l\'affiner",',
     '  "referenceUsed": "objet-repère utilisé et échelle déduite (ex: pompe 96 mm → 0,3 cm/px)"',
     "}"
@@ -319,6 +339,9 @@
         estimatedMassG: num(it.estimatedMassG),
         carbDensityPer100g: num(it.carbDensityPer100g),
         carbsG: Math.max(0, Math.round(carbs)),
+        proteinG: nonNeg(it.proteinG),
+        fatG: nonNeg(it.fatG),
+        kcal: nonNeg(it.kcal),
         confidence: normConf(it.confidence),
         assumptions: it.assumptions || ''
       };
@@ -339,20 +362,66 @@
       high = Math.round(total * (1 + spread));
     }
 
+    var totalProtein = sumOf(items, 'proteinG');
+    var totalFat = sumOf(items, 'fatG');
+    var totalKcal = sumOf(items, 'kcal');
+    // Si le modèle n'a pas donné les calories, on les dérive des macros.
+    if (totalKcal == null && (totalProtein != null || totalFat != null)) {
+      totalKcal = Math.round(4 * total + 4 * (totalProtein || 0) + 9 * (totalFat || 0));
+    }
+
     return {
       items: items,
       totalCarbsG: total,
+      totalProteinG: totalProtein,
+      totalFatG: totalFat,
+      totalKcal: totalKcal,
       rangeLowG: Math.max(0, Math.round(low)),
       rangeHighG: Math.round(high),
       overallConfidence: conf,
+      glycemicSpeed: glycemicSpeed(result.glycemicSpeed, total, totalFat, totalProtein),
+      glycemicNote: result.glycemicNote || '',
       notes: result.notes || '',
       referenceUsed: result.referenceUsed || ''
     };
   }
 
+  /* Vitesse d'absorption. On part de l'avis du modèle, mais on le corrige si les
+     macros le contredisent franchement : un repas très gras est retardé même si le
+     modèle a répondu « rapide ». Le gras ralentit la vidange gastrique — c'est un
+     fait nutritionnel stable, pas une prédiction de glycémie. */
+  function glycemicSpeed(raw, carbsG, fatG, proteinG) {
+    var v = (raw || '').toString().toLowerCase()
+      .replace(/[éè]/g, 'e').replace(/\s+/g, '');
+    if (v.indexOf('rapide') !== -1) v = 'rapide';
+    else if (v.indexOf('lente') !== -1 || v.indexOf('retard') !== -1) v = 'lente';
+    else if (v.indexOf('moder') !== -1) v = 'moderee';
+    else v = null;
+
+    // Garde-fous sur les macros (appliqués seulement si on les connaît).
+    if (fatG != null) {
+      if (fatG >= 25 || (fatG >= 15 && (proteinG || 0) >= 25)) return 'lente';
+      if (v === null && fatG < 5 && carbsG >= 20) return 'rapide';
+    }
+    return v || 'moderee';
+  }
+
+  function sumOf(items, key) {
+    var seen = false;
+    var total = items.reduce(function (s, it) {
+      if (it[key] != null) { seen = true; return s + it[key]; }
+      return s;
+    }, 0);
+    return seen ? Math.round(total) : null;
+  }
+
   function num(v) {
     var n = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v;
     return (typeof n === 'number' && isFinite(n)) ? n : null;
+  }
+  function nonNeg(v) {
+    var n = num(v);
+    return (n != null && n >= 0) ? n : null;
   }
   function normConf(c) {
     c = (c || '').toString().toLowerCase();
