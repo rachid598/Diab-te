@@ -4,7 +4,12 @@
 (function () {
   'use strict';
 
-  var MAX_DIM = 1280;
+  /* 2048 px : les modèles de vision récents (Opus 4.7+, Opus 5, Sonnet 5, Gemini 3)
+     exploitent jusqu'à ~2576 px. À 1280 px on leur retirait de la finesse utile pour
+     juger la texture d'un aliment (grain du riz, mie du pain) — justement le facteur
+     de densité qui domine l'incertitude. On reste sous le plafond pour limiter le
+     poids de l'envoi et le coût en tokens. */
+  var MAX_DIM = 2048;
   var JPEG_QUALITY = 0.85;
   var MAX_ANGLES = 6;
 
