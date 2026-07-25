@@ -295,6 +295,58 @@
       .then(function () { return true; }).catch(function () { return false; });
   }
 
+  // ---------- Partage d'un fichier ----------
+
+  /* Écrit le contenu dans le cache de l'app puis ouvre le sélecteur de partage
+     d'Android (mail, messagerie, Drive…). Le cache convient : le fichier n'a
+     pas à survivre au partage, et il est nettoyé par le système.
+     Renvoie false sur le web, où l'appelant retombe sur un téléchargement. */
+  function shareFile(name, content, title) {
+    if (!isApp) return resolved(false);
+    return Cap.Filesystem.writeFile({
+      path: name,
+      data: content,
+      directory: Cap.Directory.Cache,
+      encoding: 'utf8'
+    }).then(function (res) {
+      return Cap.Share.share({
+        title: title || name,
+        // Certains destinataires n'acceptent qu'un texte : le titre sert de secours.
+        files: [res.uri]
+      });
+    }).then(function () { return true; })
+      .catch(function (err) {
+        // Annulation par l'utilisateur : ce n'est pas une erreur.
+        var m = (err && err.message) || '';
+        if (/cancel|abort|dismiss/i.test(m)) return true;
+        return false;
+      });
+  }
+
+  // ---------- Raccourcis de l'écran d'accueil ----------
+
+  /* Android lance l'app avec une URL quand on utilise un raccourci (appui long
+     sur l'icône). On la lit au démarrage ET on écoute les suivantes : si l'app
+     tournait déjà en arrière-plan, aucun démarrage n'a lieu. */
+  function onLaunchAction(handler) {
+    if (!isApp || !Cap.App) return;
+    var fire = function (url) {
+      if (!url) return;
+      var m = /glucovision:\/\/([a-z-]+)/.exec(url);
+      if (m) handler(m[1]);
+    };
+    Cap.App.getLaunchUrl().then(function (r) { fire(r && r.url); }).catch(noop);
+    Cap.App.addListener('appUrlOpen', function (e) { fire(e && e.url); });
+  }
+
+  // Réagit au retour au premier plan (reprise de la file d'attente hors-ligne).
+  function onResume(handler) {
+    if (!isApp || !Cap.App) return;
+    Cap.App.addListener('appStateChange', function (s) {
+      if (s && s.isActive) handler();
+    });
+  }
+
   // ---------- Mise à jour du contenu web (OTA) ----------
 
   /* Sans ça, chaque version imposerait de retélécharger et réinstaller l'APK à
@@ -343,6 +395,9 @@
     httpJson: httpJson,
 
     camera: { capture: capture, pickMany: pickMany },
+    shareFile: shareFile,
+    onLaunchAction: onLaunchAction,
+    onResume: onResume,
     photos: {
       save: savePhoto, src: photoSrc, remove: deletePhoto,
       prune: prunePhotos, size: photosSize

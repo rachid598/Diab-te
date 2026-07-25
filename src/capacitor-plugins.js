@@ -13,6 +13,8 @@ import { Preferences } from '@capacitor/preferences';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { SecureStorage } from '@aparajita/capacitor-secure-storage';
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
+import { Share } from '@capacitor/share';
+import { App } from '@capacitor/app';
 
 window.Cap = {
   Capacitor: Capacitor,
@@ -25,5 +27,7 @@ window.Cap = {
   Preferences: Preferences,
   LocalNotifications: LocalNotifications,
   SecureStorage: SecureStorage,
-  CapacitorUpdater: CapacitorUpdater
+  CapacitorUpdater: CapacitorUpdater,
+  Share: Share,
+  App: App
 };

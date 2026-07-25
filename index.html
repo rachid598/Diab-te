@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=26" />
+  <link rel="stylesheet" href="css/styles.css?v=27" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -64,6 +64,11 @@
       <div class="card">
         <h2>1. Photographie ton repas</h2>
         <p class="hint">Plus il y a d'angles, plus l'estimation est fiable : ajoute <strong>plusieurs photos</strong> (dessus + côté) ou <strong>une courte vidéo</strong> en tournant autour de l'assiette. Jusqu'à 6 vues. Pose un objet-repère à côté.</p>
+
+        <div id="queue-banner" class="queue-banner" hidden>
+          <span id="queue-text">Repas en attente</span>
+          <button id="queue-retry" class="btn btn-ghost">Réessayer</button>
+        </div>
 
         <div id="thumbs" class="thumbs"></div>
         <p id="angle-count" class="angle-count" hidden></p>
@@ -281,6 +286,22 @@
         <p class="hint tiny">Les repas et leurs estimations sont conservés : seules les images sont effacées.</p>
       </div>
 
+      <!-- Rapport de consultation -->
+      <div class="set-group">
+        <h3>Synthèse pour ton médecin</h3>
+        <p class="hint tiny">Un document lisible par un tiers : glucides par repas, répartition dans la journée, fiabilité de tes estimations. Ne contient ni glycémie ni dose — l'app n'en connaît pas.</p>
+        <label>Période</label>
+        <select id="report-days" class="input">
+          <option value="30">30 derniers jours</option>
+          <option value="90" selected>90 derniers jours</option>
+          <option value="180">6 derniers mois</option>
+        </select>
+        <div class="btn-row" style="margin-top:10px">
+          <button id="report-view" class="btn btn-ghost">👁️ Aperçu</button>
+          <button id="report-share" class="btn btn-ghost">📤 Envoyer</button>
+        </div>
+      </div>
+
       <!-- Sauvegarde -->
       <div class="set-group">
         <h3>Sauvegarde</h3>
@@ -328,16 +349,18 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=26"></script>
-  <script src="js/native.js?v=26"></script>
-  <script src="js/storage.js?v=26"></script>
-  <script src="js/foods.js?v=26"></script>
-  <script src="js/gi.js?v=26"></script>
-  <script src="js/estimator.js?v=26"></script>
-  <script src="js/camera.js?v=26"></script>
-  <script src="js/off.js?v=26"></script>
-  <script src="vendor/zxing.min.js?v=26"></script>
-  <script src="js/barcode.js?v=26"></script>
-  <script src="js/app.js?v=26"></script>
+  <script src="vendor/capacitor-plugins.js?v=27"></script>
+  <script src="js/native.js?v=27"></script>
+  <script src="js/storage.js?v=27"></script>
+  <script src="js/foods.js?v=27"></script>
+  <script src="js/gi.js?v=27"></script>
+  <script src="js/queue.js?v=27"></script>
+  <script src="js/report.js?v=27"></script>
+  <script src="js/estimator.js?v=27"></script>
+  <script src="js/camera.js?v=27"></script>
+  <script src="js/off.js?v=27"></script>
+  <script src="vendor/zxing.min.js?v=27"></script>
+  <script src="js/barcode.js?v=27"></script>
+  <script src="js/app.js?v=27"></script>
 </body>
 </html>
