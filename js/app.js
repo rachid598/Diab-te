@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '23'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '24'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -1148,20 +1148,26 @@
   // ---------- Sauvegarde / restauration ----------
   function initBackup() {
     $('export-data').addEventListener('click', function () {
-      var blob = new Blob([JSON.stringify(Storage.exportAll(), null, 2)], { type: 'application/json' });
+      var payload = Storage.exportAll();
+      var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       var d = new Date();
       var stamp = d.getFullYear() + '-' +
                   ('0' + (d.getMonth() + 1)).slice(-2) + '-' +
                   ('0' + d.getDate()).slice(-2);
+      // Le nom du fichier dit lui-même qu'il contient des secrets : c'est ce
+      // qu'on voit dans le gestionnaire de fichiers avant de le partager.
       a.href = url;
-      a.download = 'glucovision-sauvegarde-' + stamp + '.json';
+      a.download = (payload.containsApiKeys ? 'glucovision-sauvegarde-PRIVEE-' : 'glucovision-sauvegarde-')
+                   + stamp + '.json';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
-      toast('Sauvegarde exportée. Range-la ailleurs que sur ce téléphone.');
+      toast(payload.containsApiKeys
+        ? '🔑 Sauvegarde exportée AVEC tes clés API. Garde ce fichier pour toi : ne le partage pas et ne l\'envoie pas par mail.'
+        : 'Sauvegarde exportée. Range-la ailleurs que sur ce téléphone.');
     });
 
     $('import-data').addEventListener('click', function (e) {
@@ -1186,7 +1192,7 @@
           renderFoodResults($('food-search').value);
           updateCompareToggle();
           $('settings-modal').hidden = true;
-          toast('Sauvegarde restaurée (' + restored.length + ' éléments). Ressaisis tes clés API.');
+          toast('Sauvegarde restaurée (' + restored.length + ' éléments), clés API comprises si le fichier en contenait.');
         } catch (err) {
           toast(err.message || 'Fichier illisible.');
         }
