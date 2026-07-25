@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '25'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '26'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -405,16 +405,43 @@
   }
 
   /* Rappel de la tendance personnelle au moment où ça compte (avant de doser).
-     Purement informatif : on NE corrige PAS le chiffre automatiquement — c'est à
-     l'utilisateur d'ajuster s'il le juge pertinent. */
-  function biasHintHtml(totalG) {
+     Purement informatif : on NE corrige PAS le chiffre automatiquement — le
+     modèle a déjà reçu cette calibration dans son prompt (voir estimator.js),
+     donc l'appliquer une seconde fois ici la compterait deux fois.
+
+     On privilégie le biais de la CATÉGORIE réellement présente dans CE repas :
+     « tu sous-estimes les féculents » est actionnable, « tu sous-estimes de
+     12 % en général » ne dit pas quoi regarder. */
+  function biasHintHtml(totalG, items) {
+    var cat = null;
+    if (items && items.length && Storage.getBiasByCategory) {
+      var present = {};
+      items.forEach(function (it) {
+        var c = Storage.categoryOf ? Storage.categoryOf(it.name) : null;
+        if (c && (it.carbsG || 0) > 0) present[c] = (present[c] || 0) + it.carbsG;
+      });
+      var groups = Storage.getBiasByCategory(3) || [];
+      for (var i = 0; i < groups.length; i++) {
+        if (present[groups[i].category] && Math.abs(groups[i].pct) >= 8) {
+          cat = groups[i];
+          break;
+        }
+      }
+    }
+
+    if (cat) {
+      return '<div class="bias-hint">🎯 Sur tes ' + cat.count + ' repas mesurés contenant des ' +
+        escapeHtml(cat.category.toLowerCase()) + ', tu les ' +
+        (cat.pct > 0 ? 'sous-estimes' : 'sur-estimes') + ' d\'environ ' + Math.abs(cat.pct) +
+        ' %. L\'estimation ci-dessus en tient déjà compte — vérifie surtout cette portion-là.</div>';
+    }
+
     var bias = Storage.getBias();
     if (bias.count < 3 || Math.abs(bias.pct) < 5) return '';
-    var adjusted = Math.round(totalG * bias.meanRatio);
     var sens = bias.pct > 0 ? 'sous-estimes' : 'sur-estimes';
     return '<div class="bias-hint">🎯 D\'après tes ' + bias.count + ' repas corrigés, tu ' + sens +
-      ' d\'environ ' + Math.abs(bias.pct) + ' % : le réel serait plutôt autour de <strong>' +
-      adjusted + ' g</strong> (' + fr(partsFrom(adjusted)) + ' parts). À toi de juger.</div>';
+      ' d\'environ ' + Math.abs(bias.pct) + ' % en moyenne. L\'estimation ci-dessus en tient ' +
+      'déjà compte.</div>';
   }
 
   /* Tendance d'absorption du repas. On décrit comment CE REPAS se digère
@@ -450,6 +477,33 @@
       '</div>';
   }
 
+  /* Index et charge glycémiques.
+     La CG est mise en avant plutôt que l'IG, parce que c'est elle qui tient
+     compte de la portion : une tranche de pastèque a un IG de 76 mais une charge
+     dérisoire. Afficher l'IG seul ferait fuir des aliments sans raison. */
+  function giHtml(r) {
+    var g = r.gi;
+    if (!g || g.gl == null) return '';
+    var gl = GI.glBand(g.gl), ig = GI.giBand(g.gi);
+
+    var meta = [];
+    if (g.coverage < 0.85) {
+      meta.push('Calculé sur ' + g.carbsCovered + ' g des ' + g.carbsTotal + ' g de glucides' +
+        (g.unknown.length ? ' (hors : ' + escapeHtml(g.unknown.slice(0, 2).join(', ')) + ')' : '') + '.');
+    }
+    if (g.estimated) meta.push('IG estimé par le modèle pour un plat absent de la table.');
+    meta.push('Valeurs de table mesurées sur aliment isolé : dans un repas mixte, ' +
+      'le gras et les protéines abaissent la montée réelle.');
+
+    return '<div class="gi ' + gl.cls + '">' +
+      '<div class="gi-head">' +
+        '<span class="gi-main"><b>Charge glycémique ' + g.gl + '</b> · ' + gl.label + '</span>' +
+        '<span class="gi-sub">IG moyen ' + g.gi + ' · ' + ig.label + '</span>' +
+      '</div>' +
+      '<div class="gi-meta">' + meta.join(' ') + '</div>' +
+      '</div>';
+  }
+
   function macrosHtml(r) {
     if (r.totalProteinG == null && r.totalFatG == null && r.totalKcal == null) return '';
     var bits = [];
@@ -472,8 +526,9 @@
     html += '  <div class="confidence conf-' + r.overallConfidence + '">' + CONF_LABEL[r.overallConfidence] + '</div>';
     html += '  <div class="pump-hint">💉 À saisir dans ta pompe : <strong>' + r.totalCarbsG +
             ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>). Ta pompe calcule le bolus.</div>';
-    html += biasHintHtml(r.totalCarbsG);
+    html += biasHintHtml(r.totalCarbsG, r.items);
     html += glycemicHtml(r);
+    html += giHtml(r);
     html += macrosHtml(r);
     html += '</div>';
 
@@ -628,6 +683,7 @@
       parts: partsFrom(lastResult.totalCarbsG),
       partSizeG: settings.partSizeG,
       glycemicSpeed: lastResult.glycemicSpeed || null,
+      gi: lastResult.gi ? { gl: lastResult.gi.gl, gi: lastResult.gi.gi } : null,
       items: lastResult.items.map(function (it) { return { name: it.name, carbsG: it.carbsG }; })
     };
     /* Image de la 1ʳᵉ vue, pour revoir plus tard à quoi ressemblait la portion.
@@ -1016,12 +1072,18 @@
     var total = manualItems.reduce(function (s, it) { return s + itemGrams(it) * it.carb / 100; }, 0);
     total = Math.round(total);
     var parts = partsFrom(total);
+    // La charge glycémique du mode manuel sort entièrement de la table locale :
+    // aucun appel réseau, donc elle fonctionne aussi hors ligne.
+    var giInfo = GI.meal(manualItems.map(function (it) {
+      return { name: it.name, carbsG: Math.round(itemGrams(it) * it.carb / 100) };
+    }));
     var el = $('manual-total');
     el.innerHTML =
       '<div class="result-hero">' +
       '  <div class="hero-parts">' + fr(parts) + ' <small>parts</small></div>' +
       '  <div class="hero-grams">= ' + total + ' <small>g de glucides</small></div>' +
       '  <div class="pump-hint">💉 À saisir dans ta pompe : <strong>' + total + ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>).</div>' +
+      giHtml({ gi: giInfo }) +
       '  <div class="btn-row" style="margin-top:12px">' +
       '    <button id="save-manual" class="btn btn-primary">💾 Enregistrer</button>' +
       '    <button id="save-manual-meal" class="btn btn-ghost">⭐ Repas fréquent</button>' +
@@ -1037,6 +1099,7 @@
       var entry = {
         date: Date.now(), source: 'manuel', totalCarbsG: total,
         parts: parts, partSizeG: settings.partSizeG,
+        gi: giInfo ? { gl: giInfo.gl, gi: giInfo.gi } : null,
         items: manualItems.map(function (it) { return { name: it.name, carbsG: Math.round(itemGrams(it) * it.carb / 100) }; })
       };
       Storage.addHistory(entry);
@@ -1082,6 +1145,8 @@
         (historyImg(e) ? '<img class="history-thumb" src="' + historyImg(e) + '" alt="photo du repas">' : '') +
         '<div class="history-date">' + dateStr + ' · ' + (e.source === 'photo' ? '📷 photo' : '✍️ manuel') + '</div>' +
         '<div class="history-total"><b>' + fr(partsFromStored(e)) + ' parts</b> · ' + e.totalCarbsG + ' g</div>' +
+        (e.gi && e.gi.gl != null
+          ? '<div class="history-gi">CG ' + e.gi.gl + ' · ' + GI.glBand(e.gi.gl).label + '</div>' : '') +
         '<div class="item-detail">' + escapeHtml(names || '—') + '</div>' +
         '<div class="history-real-line" data-line="' + e.date + '" hidden></div>' +
         '<div class="history-real">' +

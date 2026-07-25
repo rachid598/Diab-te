@@ -63,6 +63,16 @@
     "   Ils servent à expliquer la vitesse d'absorption (F). Reste cohérent :",
     "   kcal ≈ 4×glucides + 4×protéines + 9×lipides.",
     "",
+    "H. INDEX GLYCÉMIQUE — champ 'gi' (0-100, glucose = 100), par aliment.",
+    "   L'application possède sa propre table de référence et l'utilisera en",
+    "   priorité : ta valeur ne sert QUE pour un plat qu'elle ne connaît pas",
+    "   (plat composé, recette maison, spécialité régionale).",
+    "   - Donne l'IG du plat tel que consommé, pas d'un ingrédient isolé.",
+    "   - Aliment sans glucides (viande, poisson, œuf, légume vert, fromage) :",
+    "     mets 'gi': null. Ne l'invente pas, l'IG n'y a pas de sens.",
+    "   - Dans le doute sur un plat composé, reste proche de 55-65 plutôt que",
+    "     de trancher : une valeur fausse est pire qu'une valeur prudente.",
+    "",
     "SORTIE : réponds UNIQUEMENT avec un objet JSON valide, sans texte ni balises markdown.",
     "Schéma exact :",
     "{",
@@ -76,6 +86,7 @@
     '      "proteinG": nombre,',
     '      "fatG": nombre,',
     '      "kcal": nombre,',
+    '      "gi": nombre | null,',
     '      "confidence": "low" | "medium" | "high",',
     '      "assumptions": "mesures via le repère + hypothèses clés, en français"',
     '    }',
@@ -114,8 +125,53 @@
     if (ctx.notes && ctx.notes.trim()) {
       lines.push('Précisions de l\'utilisateur (fiables, à intégrer) : ' + ctx.notes.trim());
     }
+    var cal = calibrationBlock();
+    if (cal) lines.push(cal);
     lines.push('Réponds uniquement avec le JSON.');
     return lines.join('\n');
+  }
+
+  /* Calibration personnelle : ce que les repas déjà mesurés par l'utilisateur
+     disent des erreurs passées, transmis au modèle.
+
+     Pourquoi le donner au modèle plutôt que multiplier le résultat par un
+     coefficient : un facteur appliqué après coup corrige aveuglément tout le
+     repas, y compris les aliments jamais concernés par l'erreur. Le modèle, lui,
+     peut cibler — s'il sait que les féculents ont été sous-estimés, il révise sa
+     densité sur le riz sans toucher au yaourt.
+
+     Le biais PAR CATÉGORIE passe avant le biais global : « je me trompe sur les
+     féculents » est exploitable, « je me trompe de 12 % » ne l'est pas. */
+  function calibrationBlock() {
+    if (!window.Storage || !Storage.getBiasByCategory) return '';
+    var lines = [];
+
+    var byCat = [];
+    try { byCat = Storage.getBiasByCategory(3) || []; } catch (e) { byCat = []; }
+    byCat.slice(0, 3).forEach(function (g) {
+      if (Math.abs(g.pct) < 8) return;   // sous ce seuil, c'est du bruit de mesure
+      lines.push('  - ' + g.category + ' : ' + (g.pct > 0 ? 'sous-estimés' : 'sur-estimés') +
+        ' d\'environ ' + Math.abs(g.pct) + ' % sur ' + g.count + ' repas mesurés.');
+    });
+
+    if (!lines.length) {
+      var b = null;
+      try { b = Storage.getBias(); } catch (e) { b = null; }
+      if (!b || b.count < 5 || Math.abs(b.pct) < 8) return '';
+      lines.push('  - Ensemble des repas : ' + (b.pct > 0 ? 'sous-estimés' : 'sur-estimés') +
+        ' d\'environ ' + Math.abs(b.pct) + ' % sur ' + b.count + ' repas mesurés.');
+    }
+
+    return [
+      'CALIBRATION PERSONNELLE — écarts constatés entre estimations passées et',
+      'valeurs réelles mesurées par cet utilisateur :',
+      lines.join('\n'),
+      'Utilise-la pour corriger tes densités et tes volumes SUR LES ALIMENTS',
+      'CONCERNÉS uniquement. N\'applique pas un pourcentage global au total : si',
+      'ce repas ne contient pas la catégorie concernée, ignore la correction.',
+      'Ces écarts portent sur des repas passés, pas forcément sur celui-ci : ce',
+      'qui est visible sur la photo prime toujours.'
+    ].join('\n');
   }
 
   // -------- Extraction robuste du JSON dans la réponse --------
@@ -342,6 +398,7 @@
         proteinG: nonNeg(it.proteinG),
         fatG: nonNeg(it.fatG),
         kcal: nonNeg(it.kcal),
+        gi: nonNeg(it.gi),          // secours seulement : la table locale prime
         confidence: normConf(it.confidence),
         assumptions: it.assumptions || ''
       };
@@ -370,6 +427,9 @@
       totalKcal = Math.round(4 * total + 4 * (totalProtein || 0) + 9 * (totalFat || 0));
     }
 
+    // Index et charge glycémiques, calculés depuis la table locale (js/gi.js).
+    var gi = (window.GI && window.GI.meal) ? window.GI.meal(items) : null;
+
     return {
       items: items,
       totalCarbsG: total,
@@ -379,7 +439,8 @@
       rangeLowG: Math.max(0, Math.round(low)),
       rangeHighG: Math.round(high),
       overallConfidence: conf,
-      glycemicSpeed: glycemicSpeed(result.glycemicSpeed, total, totalFat, totalProtein),
+      gi: gi,
+      glycemicSpeed: glycemicSpeed(result.glycemicSpeed, total, totalFat, totalProtein, gi),
       glycemicNote: result.glycemicNote || '',
       notes: result.notes || '',
       referenceUsed: result.referenceUsed || ''
@@ -390,7 +451,7 @@
      macros le contredisent franchement : un repas très gras est retardé même si le
      modèle a répondu « rapide ». Le gras ralentit la vidange gastrique — c'est un
      fait nutritionnel stable, pas une prédiction de glycémie. */
-  function glycemicSpeed(raw, carbsG, fatG, proteinG) {
+  function glycemicSpeed(raw, carbsG, fatG, proteinG, gi) {
     var v = (raw || '').toString().toLowerCase()
       .replace(/[éè]/g, 'e').replace(/\s+/g, '');
     if (v.indexOf('rapide') !== -1) v = 'rapide';
@@ -398,11 +459,22 @@
     else if (v.indexOf('moder') !== -1) v = 'moderee';
     else v = null;
 
-    // Garde-fous sur les macros (appliqués seulement si on les connaît).
-    if (fatG != null) {
-      if (fatG >= 25 || (fatG >= 15 && (proteinG || 0) >= 25)) return 'lente';
-      if (v === null && fatG < 5 && carbsG >= 20) return 'rapide';
+    /* Le gras l'emporte sur tout : il ralentit la vidange gastrique, donc même un
+       repas à IG élevé est retardé s'il est très gras (la pizza en est l'exemple
+       type). C'est un fait nutritionnel stable, pas une prédiction de glycémie. */
+    if (fatG != null && (fatG >= 25 || (fatG >= 15 && (proteinG || 0) >= 25))) {
+      return 'lente';
     }
+
+    /* L'IG mesuré prime ensuite sur l'appréciation libre du modèle, mais seulement
+       si la table couvre l'essentiel du repas : sur une couverture partielle, l'IG
+       calculé ne décrit qu'une partie de l'assiette. */
+    if (gi && gi.coverage >= 0.7 && !gi.estimated) {
+      if (gi.gi >= 70 && (fatG == null || fatG < 15)) return 'rapide';
+      if (gi.gi < 55 && v !== 'rapide') return 'lente';
+    }
+
+    if (fatG != null && v === null && fatG < 5 && carbsG >= 20) return 'rapide';
     return v || 'moderee';
   }
 
