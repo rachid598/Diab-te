@@ -216,6 +216,15 @@
     });
   }
 
+  /* Les GPT-5 et suivants raisonnent avant de répondre : comme sur Claude Opus 5,
+     les tokens de réflexion sont décomptés du plafond de sortie, donc un plafond
+     serré renvoie une réponse vide ou tronquée. Ces modèles attendent par ailleurs
+     'max_completion_tokens' là où les gpt-4* utilisaient 'max_tokens'. */
+  function isReasoningGpt(model) {
+    var m = /^gpt-(\d+)/.exec(model || '');
+    return m ? parseInt(m[1], 10) >= 5 : false;
+  }
+
   function callOpenAI(images, prompt, settings) {
     var userContent = [{ type: 'text', text: prompt }];
     images.forEach(function (img) {
@@ -225,26 +234,55 @@
       });
     });
 
-    return fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'Authorization': 'Bearer ' + settings.apiKey
-      },
-      body: JSON.stringify({
-        model: settings.model || 'gpt-4o',
-        max_tokens: 1600,
+    var model = settings.model || 'gpt-5.6-terra';
+    var modern = isReasoningGpt(model);
+
+    function send(useCompletionTokens) {
+      var body = {
+        model: model,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: userContent }
         ]
+      };
+      if (useCompletionTokens) body.max_completion_tokens = THINKING_MAX_TOKENS;
+      else body.max_tokens = 1600;
+
+      return fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'Authorization': 'Bearer ' + settings.apiKey
+        },
+        body: JSON.stringify(body)
+      }).then(handleResponse);
+    }
+
+    /* Filet de sécurité : le nom du paramètre de plafond varie selon la génération
+       du modèle. Si l'API refuse celui qu'on a choisi, on rejoue une fois avec
+       l'autre plutôt que de renvoyer une erreur à l'utilisateur. */
+    function isTokenParamError(err) {
+      var m = (err && err.apiMessage || '').toLowerCase();
+      return err && err.status === 400 &&
+             (m.indexOf('max_tokens') !== -1 || m.indexOf('max_completion_tokens') !== -1);
+    }
+
+    return send(modern)
+      .catch(function (err) {
+        if (isTokenParamError(err)) return send(!modern);
+        throw err;
       })
-    }).then(handleResponse).then(function (data) {
-      if (data.error) throw new Error(data.error.message || 'Erreur API OpenAI.');
-      var text = data.choices && data.choices[0] && data.choices[0].message.content;
-      return parseJson(text);
-    });
+      .then(function (data) {
+        if (data.error) throw new Error(data.error.message || 'Erreur API OpenAI.');
+        var choice = data.choices && data.choices[0];
+        var text = choice && choice.message && choice.message.content;
+        if (!text && choice && choice.finish_reason === 'length') {
+          throw new Error('Réponse tronquée : le modèle a épuisé son budget en réflexion. ' +
+            'Réessaie, ou choisis un modèle plus léger (GPT-5.6 Luna).');
+        }
+        return parseJson(text);
+      });
   }
 
   function handleResponse(res) {
@@ -252,11 +290,14 @@
       var data;
       try { data = JSON.parse(body); } catch (e) { data = { raw: body }; }
       if (!res.ok) {
-        var msg = (data.error && (data.error.message || data.error.type)) ||
-                  ('Erreur ' + res.status);
+        var apiMessage = (data.error && (data.error.message || data.error.type)) || '';
+        var msg = apiMessage || ('Erreur ' + res.status);
         if (res.status === 401 || res.status === 403) msg = 'Clé API invalide, expirée ou sans accès (' + res.status + ').';
-        if (res.status === 429) msg = 'Quota / débit atteint (429). Patiente ~1 min puis réessaie. Sur Gemini gratuit : utilise un modèle « flash » (gemini-2.0-flash), pas « pro », et limite le nombre de photos.';
-        throw new Error(msg);
+        if (res.status === 429) msg = 'Quota / débit atteint (429). Patiente ~1 min puis réessaie, ou limite le nombre de photos.';
+        var err = new Error(msg);
+        err.status = res.status;
+        err.apiMessage = apiMessage; // brut : sert à détecter un paramètre refusé
+        throw err;
       }
       return data;
     });
