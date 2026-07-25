@@ -27,8 +27,9 @@
       { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', note: 'très rapide · gratuit', stars: 1 }
     ],
     openai: [
-      { id: 'gpt-4o', label: 'GPT-4o', note: 'équilibré · vision', stars: 2 },
-      { id: 'gpt-4o-mini', label: 'GPT-4o mini', note: 'rapide · économique', stars: 1 }
+      { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', note: 'précision max · raisonnement', stars: 3 },
+      { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', note: 'équilibré · recommandé', stars: 2 },
+      { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', note: 'rapide · économique', stars: 1 }
     ]
   };
 
@@ -39,14 +40,18 @@
     'gemini-2.0-flash': 'gemini-3.6-flash',
     'gemini-1.5-flash': 'gemini-3.5-flash',
     'gemini-1.5-pro': 'gemini-2.5-pro',
-    'gemini-pro-vision': 'gemini-2.5-pro'
+    'gemini-pro-vision': 'gemini-2.5-pro',
+    'gpt-4o': 'gpt-5.6-terra',
+    'gpt-4o-mini': 'gpt-5.6-luna',
+    'gpt-4-turbo': 'gpt-5.6-terra',
+    'gpt-4-vision-preview': 'gpt-5.6-terra'
   };
 
   // Modèles par défaut suggérés par fournisseur.
   var DEFAULT_MODELS = {
     claude: 'claude-sonnet-5',
     gemini: 'gemini-3.6-flash',
-    openai: 'gpt-4o'
+    openai: 'gpt-5.6-terra'
   };
 
   var DEFAULT_SETTINGS = {
