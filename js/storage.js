@@ -169,6 +169,7 @@
     MODEL_CATALOG: MODEL_CATALOG,
 
     PROVIDERS: PROVIDERS,
+    categoryOf: categoryOf,
 
     /* Relit les clés API chiffrées et, au premier lancement de l'APK, y déplace
        celles qui étaient encore en clair dans localStorage. À appeler AVANT le
