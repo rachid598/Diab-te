@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=27" />
+  <link rel="stylesheet" href="css/styles.css?v=28" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -90,7 +90,7 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="reference-card" hidden>
         <h2>2. Repère d'échelle <span class="tag">recommandé</span></h2>
         <p class="hint">Un objet de taille connue dans la photo réduit fortement l'erreur de portion.</p>
         <select id="reference-object" class="input">
@@ -109,9 +109,10 @@
       </div>
 
       <div class="card">
-        <h2>3. Précisions <span class="tag">optionnel</span></h2>
-        <p class="hint">Ce que tu sais déjà améliore l'estimation (ex. « riz basmati ~150 g cuit, pain 60 g, yaourt nature »).</p>
-        <textarea id="user-notes" class="input" rows="3" placeholder="Décris les aliments ou quantités connues…"></textarea>
+        <h2 id="notes-title">3. Décris ton repas <span class="tag" id="notes-tag">ou sans photo</span></h2>
+        <p class="hint" id="notes-hint">Tu peux <strong>estimer sans aucune photo</strong> : décris simplement ce que tu manges. Avec une photo, ce texte sert de précisions.</p>
+        <textarea id="user-notes" class="input" rows="3" placeholder="Ex. : une assiette de pâtes à la bolognaise, deux tranches de pain et un yaourt nature"></textarea>
+        <p class="hint tiny">Plus tu donnes de quantités, plus c'est juste : « 150 g de riz <em>cuit</em> » vaut mieux qu'« un peu de riz ». Tu peux dicter avec le micro de ton clavier.</p>
       </div>
 
       <label id="compare-wrap" class="check compare-toggle" hidden>
@@ -349,18 +350,18 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=27"></script>
-  <script src="js/native.js?v=27"></script>
-  <script src="js/storage.js?v=27"></script>
-  <script src="js/foods.js?v=27"></script>
-  <script src="js/gi.js?v=27"></script>
-  <script src="js/queue.js?v=27"></script>
-  <script src="js/report.js?v=27"></script>
-  <script src="js/estimator.js?v=27"></script>
-  <script src="js/camera.js?v=27"></script>
-  <script src="js/off.js?v=27"></script>
-  <script src="vendor/zxing.min.js?v=27"></script>
-  <script src="js/barcode.js?v=27"></script>
-  <script src="js/app.js?v=27"></script>
+  <script src="vendor/capacitor-plugins.js?v=28"></script>
+  <script src="js/native.js?v=28"></script>
+  <script src="js/storage.js?v=28"></script>
+  <script src="js/foods.js?v=28"></script>
+  <script src="js/gi.js?v=28"></script>
+  <script src="js/queue.js?v=28"></script>
+  <script src="js/report.js?v=28"></script>
+  <script src="js/estimator.js?v=28"></script>
+  <script src="js/camera.js?v=28"></script>
+  <script src="js/off.js?v=28"></script>
+  <script src="vendor/zxing.min.js?v=28"></script>
+  <script src="js/barcode.js?v=28"></script>
+  <script src="js/app.js?v=28"></script>
 </body>
 </html>

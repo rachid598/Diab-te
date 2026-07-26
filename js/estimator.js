@@ -103,6 +103,9 @@
   ].join('\n');
 
   function buildUserPrompt(ctx) {
+    // Mode description : rien à mesurer, tout repose sur le texte.
+    if (!ctx.imageCount) return buildTextPrompt(ctx);
+
     var lines = ['Analyse ce repas et estime les glucides selon la méthode.'];
     if (ctx.referenceObject && ctx.referenceObject !== 'none') {
       var ref = ctx.referenceObject;
@@ -125,6 +128,21 @@
     if (ctx.notes && ctx.notes.trim()) {
       lines.push('Précisions de l\'utilisateur (fiables, à intégrer) : ' + ctx.notes.trim());
     }
+    var cal = calibrationBlock();
+    if (cal) lines.push(cal);
+    lines.push('Réponds uniquement avec le JSON.');
+    return lines.join('\n');
+  }
+
+  function buildTextPrompt(ctx) {
+    var lines = [
+      'Voici la description écrite du repas, par l\'utilisateur lui-même :',
+      '',
+      (ctx.notes || '').trim(),
+      '',
+      'Estime les glucides de CE repas, uniquement à partir de cette description.',
+      'Ne compte aucun aliment qui n\'y figure pas.'
+    ];
     var cal = calibrationBlock();
     if (cal) lines.push(cal);
     lines.push('Réponds uniquement avec le JSON.');
@@ -224,6 +242,105 @@
   }
   var THINKING_MAX_TOKENS = 8000;
 
+  /* Prompt du mode DESCRIPTION (aucune photo).
+     Reprendre le prompt photo serait une faute : il est bâti sur la calibration
+     d'échelle, la 3ᵉ dimension et la conversion volume→masse, qui n'ont aucun
+     sens sans image. Le modèle chercherait à « mesurer » un texte et
+     produirait une fausse précision.
+
+     Ici la seule information est ce que l'utilisateur a écrit. Le travail
+     consiste donc à interpréter des portions en langage courant, et surtout à
+     être honnête sur ce qui n'a pas été dit : une « assiette de pâtes » couvre
+     un rapport de 1 à 3 selon l'assiette et l'appétit. */
+  var SYSTEM_PROMPT_TEXT = [
+    "Tu es un diététicien spécialisé dans le comptage des glucides pour un",
+    "diabétique de type 1 sous pompe à insuline. Tu reçois une DESCRIPTION ÉCRITE",
+    "d'un repas, sans photo. Ta réponse sert à saisir une quantité de glucides",
+    "dans une pompe : elle doit être juste, et honnête sur son incertitude.",
+    "",
+    "A. INTERPRÉTATION DES PORTIONS",
+    "   - Quantité explicite (« 150 g de riz cuit », « 2 tranches de pain »,",
+    "     « un yaourt de 125 g ») : prends-la telle quelle, c'est une donnée sûre.",
+    "   - Portion en langage courant (« une assiette de pâtes », « un bol de riz »,",
+    "     « une part de gâteau ») : utilise les portions usuelles françaises pour",
+    "     un adulte, et dis dans 'assumptions' quelle taille tu as retenue en",
+    "     grammes. C'est cette hypothèse qui porte l'essentiel de l'erreur.",
+    "   - Quantificateur vague (« un peu de », « pas mal de », « une grosse part ») :",
+    "     ajuste de 30 % environ vers le bas ou le haut de la portion usuelle.",
+    "   - Aliment cité sans quantité : suppose UNE portion usuelle et signale-le.",
+    "",
+    "B. DENSITÉ GLUCIDIQUE — utilise les valeurs de référence (type Ciqual), pour",
+    "   l'aliment TEL QUE CONSOMMÉ. Attention aux pièges classiques : pâtes et riz",
+    "   CUITS contiennent environ 2,5 fois moins de glucides pour 100 g que crus ;",
+    "   si l'utilisateur donne un poids, détermine d'après sa formulation s'il",
+    "   parle du cru ou du cuit, et dis lequel tu as retenu.",
+    "",
+    "C. NE COMPTE QUE CE QUI EST DIT. N'ajoute pas d'accompagnement, de sauce, de",
+    "   pain ou de boisson qui ne figure pas dans la description : l'utilisateur",
+    "   dose d'après ton total, un aliment inventé le ferait sur-doser.",
+    "   Ne retire pas non plus un aliment cité parce qu'il te semble improbable.",
+    "",
+    "D. INCERTITUDE — elle est structurellement plus large qu'avec une photo :",
+    "   tu ne vois ni la taille réelle de l'assiette, ni la hauteur, ni ce qui",
+    "   est caché dessous.",
+    "   - Quantités toutes données en grammes ⇒ fourchette serrée (±10 %),",
+    "     overallConfidence 'high'.",
+    "   - Portions courantes nommées mais non pesées ⇒ ±25 à 35 %, confiance",
+    "     'medium' au mieux.",
+    "   - Description vague ou incomplète ⇒ ±40 % et confiance 'low'.",
+    "   - Dans 'notes' : nomme LA question dont la réponse resserrerait le plus",
+    "     l'estimation (ex. « quel poids de riz cuit ? »), formulée pour que",
+    "     l'utilisateur puisse y répondre en une ligne. Pas de généralités.",
+    "",
+    "E. VITESSE D'ABSORPTION DU REPAS (caractérise le REPAS, ne prédis JAMAIS une",
+    "   glycémie) : 'rapide', 'moderee' ou 'lente', selon la même logique",
+    "   nutritionnelle (glucides à IG élevé et peu de gras ⇒ rapide ; beaucoup de",
+    "   gras et/ou de protéines ⇒ retardée et étalée). Explique en une phrase",
+    "   dans 'glycemicNote' ce qui, dans ce repas, détermine cette vitesse.",
+    "   Aucun conseil de dose, jamais.",
+    "",
+    "F. MACRONUTRIMENTS : estime protéines, lipides et calories par aliment.",
+    "   Reste cohérent : kcal ≈ 4×glucides + 4×protéines + 9×lipides.",
+    "",
+    "G. INDEX GLYCÉMIQUE — champ 'gi' (0-100, glucose = 100), par aliment.",
+    "   L'application possède sa propre table et l'utilisera en priorité : ta",
+    "   valeur ne sert que pour un plat qu'elle ne connaît pas. Aliment sans",
+    "   glucides (viande, poisson, œuf, légume vert, fromage) : 'gi': null.",
+    "",
+    "SORTIE : réponds UNIQUEMENT avec un objet JSON valide, sans texte ni balises",
+    "markdown. Schéma exact :",
+    "{",
+    '  "items": [',
+    '    {',
+    '      "name": "nom court en français",',
+    '      "portionDescription": "portion retenue (ex: assiette de pâtes ≈ 220 g cuit)",',
+    '      "estimatedMassG": nombre,',
+    '      "carbDensityPer100g": nombre,',
+    '      "carbsG": nombre,',
+    '      "proteinG": nombre,',
+    '      "fatG": nombre,',
+    '      "kcal": nombre,',
+    '      "gi": nombre | null,',
+    '      "confidence": "low" | "medium" | "high",',
+    '      "assumptions": "taille de portion supposée et cru/cuit, en français"',
+    '    }',
+    '  ],',
+    '  "totalCarbsG": nombre,',
+    '  "rangeLowG": nombre,',
+    '  "rangeHighG": nombre,',
+    '  "overallConfidence": "low" | "medium" | "high",',
+    '  "glycemicSpeed": "rapide" | "moderee" | "lente",',
+    '  "glycemicNote": "ce qui, dans ce repas, détermine la vitesse d\'absorption",',
+    '  "notes": "LA question qui resserrerait le plus l\'estimation",',
+    '  "referenceUsed": ""',
+    "}"
+  ].join('\n');
+
+  // Le mode est déterminé par la présence d'images, pas par un réglage.
+  function systemFor(images) {
+    return (images && images.length) ? SYSTEM_PROMPT : SYSTEM_PROMPT_TEXT;
+  }
+
   function callClaude(images, prompt, settings) {
     var content = images.map(function (img) {
       return {
@@ -237,7 +354,7 @@
     var body = {
       model: model,
       max_tokens: 2400,
-      system: SYSTEM_PROMPT,
+      system: systemFor(images),
       messages: [{ role: 'user', content: content }]
     };
     // Raisonnement approfondi pour une estimation de volume plus fiable (modèles compatibles).
@@ -278,7 +395,7 @@
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        system_instruction: { parts: [{ text: systemFor(images) }] },
         contents: [{ role: 'user', parts: parts }],
         generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 4000 }
       })
@@ -318,7 +435,7 @@
         model: model,
         response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: systemFor(images) },
           { role: 'user', content: userContent }
         ]
       };
@@ -381,7 +498,12 @@
 
   // -------- Normalisation / garde-fous sur le résultat --------
   function sanitize(result, ctx) {
-    var hasReference = !!(ctx && ctx.referenceObject && ctx.referenceObject !== 'none');
+    var fromText = !(ctx && ctx.imageCount);
+    /* En mode description il n'y a pas d'image, donc pas de repère d'échelle —
+       même si le sélecteur en affiche encore un. Sans ce garde-fou, la fourchette
+       serait resserrée comme si une mesure avait eu lieu. */
+    var hasReference = !fromText &&
+      !!(ctx && ctx.referenceObject && ctx.referenceObject !== 'none');
     var items = Array.isArray(result.items) ? result.items : [];
     items = items.map(function (it) {
       var carbs = num(it.carbsG);
@@ -415,6 +537,10 @@
     if (low == null || high == null) {
       var spread = conf === 'high' ? 0.12 : conf === 'medium' ? 0.22 : 0.35;
       if (hasReference) spread = Math.max(0.08, spread - 0.06);
+      // Une description ne permet pas de voir la portion : l'incertitude est
+      // structurellement plus large, sauf si l'utilisateur a donné des poids
+      // (auquel cas le modèle répond 'high' et on ne l'élargit qu'un peu).
+      if (fromText) spread = Math.max(spread, conf === 'high' ? 0.14 : 0.28);
       low = Math.round(total * (1 - spread));
       high = Math.round(total * (1 + spread));
     }
@@ -439,6 +565,7 @@
       rangeLowG: Math.max(0, Math.round(low)),
       rangeHighG: Math.round(high),
       overallConfidence: conf,
+      fromText: fromText,
       gi: gi,
       glycemicSpeed: glycemicSpeed(result.glycemicSpeed, total, totalFat, totalProtein, gi),
       glycemicNote: result.glycemicNote || '',
@@ -516,8 +643,10 @@
       return Promise.reject(new Error('Aucune clé API ' + (PROVIDER_LABEL[provider] || provider) +
         '. Ajoute-la dans les Réglages, ou utilise le mode Manuel.'));
     }
-    if (!images || !images.length) {
-      return Promise.reject(new Error('Ajoute au moins une photo.'));
+    images = images || [];
+    // Sans photo, la description devient la seule source : elle est obligatoire.
+    if (!images.length && !(ctx.notes && ctx.notes.trim())) {
+      return Promise.reject(new Error('Ajoute une photo, ou décris ton repas.'));
     }
     var prompt = buildUserPrompt(ctx);
     var callSettings = { provider: provider, apiKey: apiKey, model: model };
