@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '29'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '30'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -161,16 +161,36 @@
     return el ? el.value.trim() : '';
   }
 
-  function setMode(mode) {
-    inputMode = (mode === 'texte') ? 'texte' : 'photo';
-
-    document.querySelectorAll('.mode-btn').forEach(function (b) {
-      var on = b.dataset.mode === inputMode;
+  /* ---------- Sous-onglets, mécanisme partagé ----------
+     Trois écrans en ont désormais. La sélection est SCOPÉE au conteneur : un
+     querySelectorAll global sur .mode-btn ferait basculer les trois ensemble. */
+  function selectPane(rootId, name) {
+    var root = $(rootId);
+    if (!root) return;
+    root.querySelectorAll(':scope > .mode-switch > .mode-btn').forEach(function (b) {
+      var on = b.dataset.mode === name;
       b.classList.toggle('active', on);
       b.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    $('pane-photo').classList.toggle('active', inputMode === 'photo');
-    $('pane-texte').classList.toggle('active', inputMode === 'texte');
+    root.querySelectorAll(':scope > .mode-pane').forEach(function (p) {
+      p.classList.toggle('active', p.dataset.pane === name);
+    });
+  }
+
+  function initPanes(rootId, onSelect) {
+    var root = $(rootId);
+    if (!root) return;
+    root.querySelectorAll(':scope > .mode-switch > .mode-btn').forEach(function (b) {
+      b.addEventListener('click', function () {
+        selectPane(rootId, b.dataset.mode);
+        if (onSelect) onSelect(b.dataset.mode);
+      });
+    });
+  }
+
+  function setMode(mode) {
+    inputMode = (mode === 'texte') ? 'texte' : 'photo';
+    selectPane('tab-analyze', inputMode);
 
     /* La zone de texte est déplacée dans le volet actif au lieu d'être
        dupliquée : le contenu déjà saisi et les écouteurs suivent le nœud. */
@@ -190,9 +210,7 @@
   }
 
   function initModeSwitch() {
-    document.querySelectorAll('.mode-btn').forEach(function (b) {
-      b.addEventListener('click', function () { setMode(b.dataset.mode); });
-    });
+    initPanes('tab-analyze', setMode);
     setMode('photo');
   }
 
@@ -784,10 +802,11 @@
   }
 
   function renderSavedMeals() {
-    var card = $('saved-meals-card'), box = $('saved-meals');
-    if (!card || !box) return;
+    var box = $('saved-meals'), empty = $('saved-meals-empty');
+    if (!box) return;
     var meals = Storage.getSavedMeals();
-    card.hidden = meals.length === 0;
+    // Le volet reste accessible même vide : on y explique alors comment le remplir.
+    if (empty) empty.hidden = meals.length > 0;
     box.innerHTML = '';
     meals.forEach(function (m) {
       var el = document.createElement('div');
@@ -979,7 +998,12 @@
   var scanBusy = false, lastScanCode = null, lastScanAt = 0;
 
   function initOnlineTools() {
-    $('off-search-btn').addEventListener('click', function () { runOffSearch($('food-search').value); });
+    var offGo = function () { runOffSearch($('off-search').value); };
+    $('off-search-btn').addEventListener('click', offGo);
+    // Entrée lance la recherche : c'est le geste attendu dans un champ de recherche.
+    $('off-search').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); offGo(); }
+    });
     $('barcode-btn').addEventListener('click', openBarcode);
     $('close-barcode').addEventListener('click', closeBarcode);
     $('barcode-manual-go').addEventListener('click', function () {
@@ -1329,6 +1353,7 @@
 
   // ---------- Historique ----------
   function renderHistory() {
+    renderBiasCard();
     var list = $('history-list');
     var h = Storage.getHistory();
     if (!h.length) {
@@ -1346,8 +1371,6 @@
       ' · moyenne <strong>' + fr(avgParts) + ' parts</strong>';
     list.appendChild(summary);
 
-    // Apprentissage : biais personnel calculé sur les repas où le réel est saisi.
-    list.appendChild(buildBiasCard());
 
     h.forEach(function (e) {
       var d = new Date(e.date);
@@ -1424,9 +1447,18 @@
   }
 
   // Remplace la carte de biais sans toucher au reste de la liste.
+  /* La carte d'apprentissage vit dans le volet « Analyse ». Elle est rendue là
+     plutôt qu'en tête du journal : on ne veut pas faire défiler des centaines de
+     repas pour la retrouver, ni la relire à chaque consultation du journal. */
+  function renderBiasCard() {
+    var slot = $('bias-slot');
+    if (!slot) return;
+    slot.innerHTML = '';
+    slot.appendChild(buildBiasCard());
+  }
+
   function refreshBiasCard() {
-    var old = document.querySelector('.bias-card');
-    if (old && old.parentNode) old.parentNode.replaceChild(buildBiasCard(), old);
+    renderBiasCard();
   }
 
   // Carte « apprentissage » : montre la tendance personnelle (sous/sur-estimation).
@@ -1487,6 +1519,14 @@
     $('clear-history').addEventListener('click', function () {
       if (confirm('Vider tout l\'historique ?')) { Storage.clearHistory(); renderHistory(); }
     });
+    // La synthèse médecin vivait dans les Réglages, où personne ne la cherchait.
+    initReport();
+    // Le volet Analyse est recalculé à l'ouverture : le biais bouge à chaque
+    // valeur réelle saisie dans le journal.
+    initPanes('tab-history', function (pane) {
+      if (pane === 'analyse') renderBiasCard();
+    });
+    initPanes('tab-manual');
   }
 
   // ---------- Réglages ----------
@@ -1521,7 +1561,6 @@
     $('set-compare-model').addEventListener('change', function () {
       $('set-compare-model-custom-wrap').hidden = $('set-compare-model').value !== CUSTOM_VALUE;
     });
-    initReport();
     var purge = $('purge-photos');
     if (purge) {
       purge.addEventListener('click', function () {

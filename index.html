@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=29" />
+  <link rel="stylesheet" href="css/styles.css?v=30" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -79,7 +79,7 @@
       </div>
 
       <!-- ----- Volet PHOTO ----- -->
-      <div id="pane-photo" class="mode-pane active" role="tabpanel">
+      <div id="pane-photo" class="mode-pane active" data-pane="photo" role="tabpanel">
         <div class="card">
           <h2>Photographie ton repas</h2>
           <p class="hint">Plus il y a d'angles, plus l'estimation est fiable : ajoute <strong>plusieurs photos</strong> (dessus + côté) ou <strong>une courte vidéo</strong> en tournant autour de l'assiette. Jusqu'à 6 vues.</p>
@@ -127,7 +127,7 @@
            La zone de texte est UNIQUE et partagée par les deux volets : elle est
            déplacée dans le volet actif plutôt que dupliquée, pour qu'un texte
            saisi ne disparaisse pas quand on change d'onglet. -->
-      <div id="pane-texte" class="mode-pane" role="tabpanel"></div>
+      <div id="pane-texte" class="mode-pane" data-pane="texte" role="tabpanel"></div>
 
       <div class="card" id="notes-card">
         <h2 id="notes-title">Décris ton repas <span class="tag" id="notes-tag">sans photo</span></h2>
@@ -151,43 +151,77 @@
 
     <!-- ============ Onglet Manuel ============ -->
     <section id="tab-manual" class="tab-panel">
-      <div id="saved-meals-card" class="card" hidden>
-        <h2>⭐ Mes repas</h2>
-        <p class="hint">Un tap pour recharger un repas que tu manges souvent — exact, sans ré-estimation.</p>
-        <div id="saved-meals" class="saved-meals"></div>
+
+      <!-- Trois SOURCES d'aliments, pas trois étapes : base hors-ligne, produit
+           du commerce, ou repas déjà enregistré. Le repas en cours reste visible
+           sous les volets, quelle que soit la source utilisée. -->
+      <div class="mode-switch" role="tablist" aria-label="Source des aliments">
+        <button class="mode-btn active" data-mode="base" role="tab" aria-selected="true">
+          <span class="mode-ico">🥖</span>Aliments
+        </button>
+        <button class="mode-btn" data-mode="produit" role="tab" aria-selected="false">
+          <span class="mode-ico">🏷️</span>Produit
+        </button>
+        <button class="mode-btn" data-mode="repas" role="tab" aria-selected="false">
+          <span class="mode-ico">⭐</span>Mes repas
+        </button>
       </div>
 
-      <div class="card">
-        <h2>Mode manuel assisté</h2>
-        <p class="hint">Fonctionne hors-ligne, sans clé API. Choisis un aliment puis sa portion courante.</p>
-        <input id="food-search" class="input" type="text" placeholder="Rechercher (ex. riz, pain, pomme…)" />
-        <div id="cat-chips" class="chips"></div>
-        <div id="food-results" class="food-results"></div>
+      <!-- ----- Base d'aliments hors-ligne ----- -->
+      <div id="pane-base" class="mode-pane active" data-pane="base" role="tabpanel">
+        <div class="card">
+          <h2>Base d'aliments</h2>
+          <p class="hint">Fonctionne hors-ligne, sans clé API. Choisis un aliment puis sa portion courante.</p>
+          <input id="food-search" class="input" type="text" placeholder="Rechercher (ex. riz, pain, pomme…)" />
+          <div id="cat-chips" class="chips"></div>
+          <div id="food-results" class="food-results"></div>
 
-        <div class="online-tools">
-          <button id="off-search-btn" class="btn btn-ghost">🌐 Produit emballé</button>
-          <button id="barcode-btn" class="btn btn-ghost">📷 Code-barres</button>
-        </div>
-        <p class="hint tiny">Recherche en ligne dans la base ouverte <strong>OpenFoodFacts</strong> (glucides exacts des produits emballés).</p>
-        <div id="off-status" class="status" hidden></div>
-        <div id="off-results" class="food-results off-results" hidden></div>
+          <button id="add-custom-toggle" class="btn btn-ghost add-custom">＋ Ajouter un aliment personnalisé</button>
 
-        <button id="add-custom-toggle" class="btn btn-ghost add-custom">＋ Ajouter un aliment personnalisé</button>
-
-        <div id="custom-form" class="custom-form" hidden>
-          <label>Nom de l'aliment</label>
-          <input id="cf-name" class="input" type="text" placeholder="ex. Mon pain complet" />
-          <label>Glucides pour 100 g (sur l'emballage)</label>
-          <input id="cf-carb" class="input small" type="number" inputmode="decimal" min="0" max="100" step="0.1" placeholder="g / 100 g" />
-          <label>Poids d'une portion (g) <span class="tag">optionnel</span></label>
-          <input id="cf-portion" class="input small" type="number" inputmode="numeric" min="1" step="1" placeholder="ex. 50" />
-          <div class="btn-row">
-            <button id="cf-save" class="btn btn-primary">Enregistrer l'aliment</button>
-            <button id="cf-cancel" class="btn btn-ghost">Annuler</button>
+          <div id="custom-form" class="custom-form" hidden>
+            <label>Nom de l'aliment</label>
+            <input id="cf-name" class="input" type="text" placeholder="ex. Mon pain complet" />
+            <label>Glucides pour 100 g (sur l'emballage)</label>
+            <input id="cf-carb" class="input small" type="number" inputmode="decimal" min="0" max="100" step="0.1" placeholder="g / 100 g" />
+            <label>Poids d'une portion (g) <span class="tag">optionnel</span></label>
+            <input id="cf-portion" class="input small" type="number" inputmode="numeric" min="1" step="1" placeholder="ex. 50" />
+            <div class="btn-row">
+              <button id="cf-save" class="btn btn-primary">Enregistrer l'aliment</button>
+              <button id="cf-cancel" class="btn btn-ghost">Annuler</button>
+            </div>
           </div>
         </div>
       </div>
 
+      <!-- ----- Produit du commerce (OpenFoodFacts) ----- -->
+      <div id="pane-produit" class="mode-pane" data-pane="produit" role="tabpanel">
+        <div class="card">
+          <h2>Produit emballé</h2>
+          <p class="hint">Glucides <strong>exacts</strong> lus sur l'emballage, via la base ouverte OpenFoodFacts. Le scan du code-barres est le plus rapide et le plus sûr.</p>
+          <button id="barcode-btn" class="btn btn-primary btn-lg">📷 Scanner le code-barres</button>
+
+          <label for="off-search">Ou chercher par nom</label>
+          <div class="off-search-row">
+            <input id="off-search" class="input" type="search" placeholder="ex. Prince, Nutella, St Michel…" />
+            <button id="off-search-btn" class="btn btn-ghost">🌐</button>
+          </div>
+          <div id="off-status" class="status" hidden></div>
+          <div id="off-results" class="food-results off-results" hidden></div>
+          <p class="hint tiny">Nécessite une connexion. Hors ligne, utilise l'onglet Aliments.</p>
+        </div>
+      </div>
+
+      <!-- ----- Repas enregistrés ----- -->
+      <div id="pane-repas" class="mode-pane" data-pane="repas" role="tabpanel">
+        <div class="card">
+          <h2>Mes repas fréquents</h2>
+          <p class="hint">Un tap pour recharger un repas que tu manges souvent — exact, sans ré-estimation.</p>
+          <div id="saved-meals" class="saved-meals"></div>
+          <p id="saved-meals-empty" class="empty" hidden>Aucun repas enregistré. Après une estimation, touche « ⭐ Repas fréquent » pour en garder un ici.</p>
+        </div>
+      </div>
+
+      <!-- Composition en cours : commune aux trois sources. -->
       <div class="card">
         <h2>Ton repas</h2>
         <div id="manual-items" class="manual-items"><p class="empty">Aucun aliment ajouté.</p></div>
@@ -198,11 +232,49 @@
 
     <!-- ============ Onglet Historique ============ -->
     <section id="tab-history" class="tab-panel">
-      <div class="card">
-        <h2>Historique</h2>
-        <p class="hint">Compare tes estimations à la réalité pour affiner ton œil au fil du temps.</p>
-        <div id="history-list" class="history-list"><p class="empty">Aucune estimation enregistrée.</p></div>
-        <button id="clear-history" class="btn btn-ghost" hidden>Vider l'historique</button>
+
+      <!-- Le journal et son analyse sont deux usages différents : consulter un
+           repas passé, ou comprendre ses écarts. Séparer évite de faire défiler
+           des centaines de repas pour atteindre la synthèse. -->
+      <div class="mode-switch" role="tablist" aria-label="Vue de l'historique">
+        <button class="mode-btn active" data-mode="journal" role="tab" aria-selected="true">
+          <span class="mode-ico">🕑</span>Mes repas
+        </button>
+        <button class="mode-btn" data-mode="analyse" role="tab" aria-selected="false">
+          <span class="mode-ico">📈</span>Analyse
+        </button>
+      </div>
+
+      <div id="pane-journal" class="mode-pane active" data-pane="journal" role="tabpanel">
+        <div class="card">
+          <h2>Journal des repas</h2>
+          <p class="hint">Saisis les glucides réels quand tu les connais : c'est ce qui apprend à l'app tes écarts habituels.</p>
+          <div id="history-list" class="history-list"><p class="empty">Aucune estimation enregistrée.</p></div>
+          <button id="clear-history" class="btn btn-ghost" hidden>Vider l'historique</button>
+        </div>
+      </div>
+
+      <div id="pane-analyse" class="mode-pane" data-pane="analyse" role="tabpanel">
+        <div class="card">
+          <h2>Ce que l'app a appris</h2>
+          <p class="hint">Calculé sur les repas dont tu as saisi les glucides réels. Ces écarts sont transmis à l'IA à chaque nouvelle estimation.</p>
+          <div id="bias-slot"></div>
+        </div>
+
+        <div class="card">
+          <h2>Synthèse pour ton médecin</h2>
+          <p class="hint">Un document lisible par un tiers : glucides par repas, répartition dans la journée, fiabilité de tes estimations. Ne contient ni glycémie ni dose — l'app n'en connaît pas.</p>
+          <label>Période</label>
+          <select id="report-days" class="input">
+            <option value="30">30 derniers jours</option>
+            <option value="90" selected>90 derniers jours</option>
+            <option value="180">6 derniers mois</option>
+          </select>
+          <div class="btn-row" style="margin-top:12px">
+            <button id="report-view" class="btn btn-ghost">👁️ Aperçu</button>
+            <button id="report-share" class="btn btn-primary">📤 Envoyer</button>
+          </div>
+        </div>
       </div>
     </section>
   </main>
@@ -310,22 +382,6 @@
         <p class="hint tiny">Les repas et leurs estimations sont conservés : seules les images sont effacées.</p>
       </div>
 
-      <!-- Rapport de consultation -->
-      <div class="set-group">
-        <h3>Synthèse pour ton médecin</h3>
-        <p class="hint tiny">Un document lisible par un tiers : glucides par repas, répartition dans la journée, fiabilité de tes estimations. Ne contient ni glycémie ni dose — l'app n'en connaît pas.</p>
-        <label>Période</label>
-        <select id="report-days" class="input">
-          <option value="30">30 derniers jours</option>
-          <option value="90" selected>90 derniers jours</option>
-          <option value="180">6 derniers mois</option>
-        </select>
-        <div class="btn-row" style="margin-top:10px">
-          <button id="report-view" class="btn btn-ghost">👁️ Aperçu</button>
-          <button id="report-share" class="btn btn-ghost">📤 Envoyer</button>
-        </div>
-      </div>
-
       <!-- Sauvegarde -->
       <div class="set-group">
         <h3>Sauvegarde</h3>
@@ -373,18 +429,18 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=29"></script>
-  <script src="js/native.js?v=29"></script>
-  <script src="js/storage.js?v=29"></script>
-  <script src="js/foods.js?v=29"></script>
-  <script src="js/gi.js?v=29"></script>
-  <script src="js/queue.js?v=29"></script>
-  <script src="js/report.js?v=29"></script>
-  <script src="js/estimator.js?v=29"></script>
-  <script src="js/camera.js?v=29"></script>
-  <script src="js/off.js?v=29"></script>
-  <script src="vendor/zxing.min.js?v=29"></script>
-  <script src="js/barcode.js?v=29"></script>
-  <script src="js/app.js?v=29"></script>
+  <script src="vendor/capacitor-plugins.js?v=30"></script>
+  <script src="js/native.js?v=30"></script>
+  <script src="js/storage.js?v=30"></script>
+  <script src="js/foods.js?v=30"></script>
+  <script src="js/gi.js?v=30"></script>
+  <script src="js/queue.js?v=30"></script>
+  <script src="js/report.js?v=30"></script>
+  <script src="js/estimator.js?v=30"></script>
+  <script src="js/camera.js?v=30"></script>
+  <script src="js/off.js?v=30"></script>
+  <script src="vendor/zxing.min.js?v=30"></script>
+  <script src="js/barcode.js?v=30"></script>
+  <script src="js/app.js?v=30"></script>
 </body>
 </html>
