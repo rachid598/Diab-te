@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=28" />
+  <link rel="stylesheet" href="css/styles.css?v=29" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -28,7 +28,7 @@
 
   <!-- ============ Navigation (barre du bas) ============ -->
   <nav class="tabs">
-    <button class="tab active" data-tab="analyze"><span class="tab-ico">📷</span>Photo</button>
+    <button class="tab active" data-tab="analyze"><span class="tab-ico">🔎</span>Estimer</button>
     <button class="tab" data-tab="manual"><span class="tab-ico">✍️</span>Manuel</button>
     <button class="tab" data-tab="history"><span class="tab-ico">🕑</span>Historique</button>
   </nav>
@@ -59,61 +59,84 @@
   </div>
 
   <main>
-    <!-- ============ Onglet Analyse photo ============ -->
+    <!-- ============ Onglet Estimation (photo ou description) ============ -->
     <section id="tab-analyze" class="tab-panel active">
-      <div class="card">
-        <h2>1. Photographie ton repas</h2>
-        <p class="hint">Plus il y a d'angles, plus l'estimation est fiable : ajoute <strong>plusieurs photos</strong> (dessus + côté) ou <strong>une courte vidéo</strong> en tournant autour de l'assiette. Jusqu'à 6 vues. Pose un objet-repère à côté.</p>
 
-        <div id="queue-banner" class="queue-banner" hidden>
-          <span id="queue-text">Repas en attente</span>
-          <button id="queue-retry" class="btn btn-ghost">Réessayer</button>
+      <!-- Choix de la source : ce sont deux méthodes distinctes, pas deux étapes.
+           Les empiler verticalement laissait croire qu'il fallait faire les deux. -->
+      <div class="mode-switch" role="tablist" aria-label="Méthode d'estimation">
+        <button class="mode-btn active" data-mode="photo" role="tab" aria-selected="true">
+          <span class="mode-ico">📷</span>Photo
+        </button>
+        <button class="mode-btn" data-mode="texte" role="tab" aria-selected="false">
+          <span class="mode-ico">✍️</span>Description
+        </button>
+      </div>
+
+      <div id="queue-banner" class="queue-banner" hidden>
+        <span id="queue-text">Repas en attente</span>
+        <button id="queue-retry" class="btn btn-ghost">Réessayer</button>
+      </div>
+
+      <!-- ----- Volet PHOTO ----- -->
+      <div id="pane-photo" class="mode-pane active" role="tabpanel">
+        <div class="card">
+          <h2>Photographie ton repas</h2>
+          <p class="hint">Plus il y a d'angles, plus l'estimation est fiable : ajoute <strong>plusieurs photos</strong> (dessus + côté) ou <strong>une courte vidéo</strong> en tournant autour de l'assiette. Jusqu'à 6 vues.</p>
+
+          <div id="thumbs" class="thumbs"></div>
+          <p id="angle-count" class="angle-count" hidden></p>
+
+          <div class="btn-row">
+            <label id="btn-photo" class="btn btn-primary">
+              📷 Photo
+              <input id="camera-input" type="file" accept="image/*" capture="environment" hidden />
+            </label>
+            <label class="btn btn-primary">
+              🎥 Vidéo
+              <input id="video-input" type="file" accept="video/*" capture="environment" hidden />
+            </label>
+            <label id="btn-gallery" class="btn">
+              🖼️ Galerie
+              <input id="gallery-input" type="file" accept="image/*,video/*" multiple hidden />
+            </label>
+            <button id="clear-photos" class="btn btn-ghost" hidden>Effacer</button>
+          </div>
         </div>
 
-        <div id="thumbs" class="thumbs"></div>
-        <p id="angle-count" class="angle-count" hidden></p>
-
-        <div class="btn-row">
-          <label id="btn-photo" class="btn btn-primary">
-            📷 Photo
-            <input id="camera-input" type="file" accept="image/*" capture="environment" hidden />
-          </label>
-          <label class="btn btn-primary">
-            🎥 Vidéo
-            <input id="video-input" type="file" accept="video/*" capture="environment" hidden />
-          </label>
-          <label id="btn-gallery" class="btn">
-            🖼️ Galerie
-            <input id="gallery-input" type="file" accept="image/*,video/*" multiple hidden />
-          </label>
-          <button id="clear-photos" class="btn btn-ghost" hidden>Effacer</button>
+        <div class="card">
+          <h2>Repère d'échelle <span class="tag">recommandé</span></h2>
+          <p class="hint">Un objet de taille connue dans la photo réduit fortement l'erreur de portion. Pose-le à côté de l'assiette.</p>
+          <select id="reference-object" class="input">
+            <option value="pompe à insuline Medtronic MiniMed 780G, face rectangulaire d'environ 96 mm de long sur 55 mm de large" selected>Ma pompe MiniMed 780G (96 × 55 mm)</option>
+            <option value="none">Aucun repère</option>
+            <option value="carte bancaire (85 mm de large)">Carte bancaire (8,5 cm)</option>
+            <option value="fourchette standard (~19 cm)">Fourchette (~19 cm)</option>
+            <option value="cuillère à soupe (~19 cm)">Cuillère à soupe (~19 cm)</option>
+            <option value="pièce de 2 € (25,75 mm)">Pièce de 2 € (2,6 cm)</option>
+            <option value="assiette">Assiette (préciser Ø)</option>
+          </select>
+          <div id="plate-diameter-wrap" class="inline-field" hidden>
+            <label>Diamètre de l'assiette (cm)</label>
+            <input id="plate-diameter" class="input small" type="number" inputmode="decimal" min="10" max="40" step="0.5" placeholder="ex. 26" />
+          </div>
         </div>
       </div>
 
-      <div class="card" id="reference-card" hidden>
-        <h2>2. Repère d'échelle <span class="tag">recommandé</span></h2>
-        <p class="hint">Un objet de taille connue dans la photo réduit fortement l'erreur de portion.</p>
-        <select id="reference-object" class="input">
-          <option value="pompe à insuline Medtronic MiniMed 780G, face rectangulaire d'environ 96 mm de long sur 55 mm de large" selected>Ma pompe MiniMed 780G (96 × 55 mm)</option>
-          <option value="none">Aucun repère</option>
-          <option value="carte bancaire (85 mm de large)">Carte bancaire (8,5 cm)</option>
-          <option value="fourchette standard (~19 cm)">Fourchette (~19 cm)</option>
-          <option value="cuillère à soupe (~19 cm)">Cuillère à soupe (~19 cm)</option>
-          <option value="pièce de 2 € (25,75 mm)">Pièce de 2 € (2,6 cm)</option>
-          <option value="assiette">Assiette (préciser Ø)</option>
-        </select>
-        <div id="plate-diameter-wrap" class="inline-field" hidden>
-          <label>Diamètre de l'assiette (cm)</label>
-          <input id="plate-diameter" class="input small" type="number" inputmode="decimal" min="10" max="40" step="0.5" placeholder="ex. 26" />
-        </div>
-      </div>
+      <!-- ----- Volet DESCRIPTION -----
+           La zone de texte est UNIQUE et partagée par les deux volets : elle est
+           déplacée dans le volet actif plutôt que dupliquée, pour qu'un texte
+           saisi ne disparaisse pas quand on change d'onglet. -->
+      <div id="pane-texte" class="mode-pane" role="tabpanel"></div>
 
-      <div class="card">
-        <h2 id="notes-title">3. Décris ton repas <span class="tag" id="notes-tag">ou sans photo</span></h2>
-        <p class="hint" id="notes-hint">Tu peux <strong>estimer sans aucune photo</strong> : décris simplement ce que tu manges. Avec une photo, ce texte sert de précisions.</p>
+      <div class="card" id="notes-card">
+        <h2 id="notes-title">Décris ton repas <span class="tag" id="notes-tag">sans photo</span></h2>
+        <p class="hint" id="notes-hint">Écris simplement ce que tu manges, en une phrase.</p>
         <textarea id="user-notes" class="input" rows="3" placeholder="Ex. : une assiette de pâtes à la bolognaise, deux tranches de pain et un yaourt nature"></textarea>
-        <p class="hint tiny">Plus tu donnes de quantités, plus c'est juste : « 150 g de riz <em>cuit</em> » vaut mieux qu'« un peu de riz ». Tu peux dicter avec le micro de ton clavier.</p>
+        <p class="hint tiny" id="notes-foot">Plus tu donnes de quantités, plus c'est juste : « 150 g de riz <em>cuit</em> » vaut mieux qu'« un peu de riz ». Tu peux dicter avec le micro de ton clavier.</p>
       </div>
+
+      <p id="mode-warning" class="mode-warning" hidden></p>
 
       <label id="compare-wrap" class="check compare-toggle" hidden>
         <input type="checkbox" id="compare-toggle" />
@@ -350,18 +373,18 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=28"></script>
-  <script src="js/native.js?v=28"></script>
-  <script src="js/storage.js?v=28"></script>
-  <script src="js/foods.js?v=28"></script>
-  <script src="js/gi.js?v=28"></script>
-  <script src="js/queue.js?v=28"></script>
-  <script src="js/report.js?v=28"></script>
-  <script src="js/estimator.js?v=28"></script>
-  <script src="js/camera.js?v=28"></script>
-  <script src="js/off.js?v=28"></script>
-  <script src="vendor/zxing.min.js?v=28"></script>
-  <script src="js/barcode.js?v=28"></script>
-  <script src="js/app.js?v=28"></script>
+  <script src="vendor/capacitor-plugins.js?v=29"></script>
+  <script src="js/native.js?v=29"></script>
+  <script src="js/storage.js?v=29"></script>
+  <script src="js/foods.js?v=29"></script>
+  <script src="js/gi.js?v=29"></script>
+  <script src="js/queue.js?v=29"></script>
+  <script src="js/report.js?v=29"></script>
+  <script src="js/estimator.js?v=29"></script>
+  <script src="js/camera.js?v=29"></script>
+  <script src="js/off.js?v=29"></script>
+  <script src="vendor/zxing.min.js?v=29"></script>
+  <script src="js/barcode.js?v=29"></script>
+  <script src="js/app.js?v=29"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '28'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '29'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -149,35 +149,73 @@
     }
   }
 
-  /* Le bouton d'estimation accepte désormais DEUX sources : des photos, ou une
-     description écrite. Son libellé dit laquelle sera utilisée, pour qu'on ne
-     lance jamais une analyse en croyant que la photo est prise en compte. */
+  /* ---------- Source de l'estimation : photo ou description ----------
+     Ce sont deux méthodes distinctes, pas deux étapes d'une même saisie. Le
+     mode est donc porté par l'onglet actif et non déduit de la présence de
+     photos : sans ça, ajouter une photo par erreur ferait basculer
+     silencieusement une estimation qu'on voulait textuelle. */
+  var inputMode = 'photo';
+
   function describedMeal() {
     var el = $('user-notes');
     return el ? el.value.trim() : '';
   }
 
+  function setMode(mode) {
+    inputMode = (mode === 'texte') ? 'texte' : 'photo';
+
+    document.querySelectorAll('.mode-btn').forEach(function (b) {
+      var on = b.dataset.mode === inputMode;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    $('pane-photo').classList.toggle('active', inputMode === 'photo');
+    $('pane-texte').classList.toggle('active', inputMode === 'texte');
+
+    /* La zone de texte est déplacée dans le volet actif au lieu d'être
+       dupliquée : le contenu déjà saisi et les écouteurs suivent le nœud. */
+    var card = $('notes-card');
+    if (inputMode === 'texte') {
+      $('pane-texte').appendChild(card);
+      $('notes-title').firstChild.nodeValue = 'Décris ton repas ';
+      $('notes-tag').textContent = 'sans photo';
+      $('notes-hint').innerHTML = 'Écris simplement ce que tu manges, en une phrase.';
+    } else {
+      $('pane-photo').appendChild(card);
+      $('notes-title').firstChild.nodeValue = 'Précisions ';
+      $('notes-tag').textContent = 'optionnel';
+      $('notes-hint').innerHTML = 'Ce que tu sais déjà améliore l\'estimation (ex. « riz basmati ~150 g cuit, pain 60 g »).';
+    }
+    updateEstimateBtn();
+  }
+
+  function initModeSwitch() {
+    document.querySelectorAll('.mode-btn').forEach(function (b) {
+      b.addEventListener('click', function () { setMode(b.dataset.mode); });
+    });
+    setMode('photo');
+  }
+
   function updateEstimateBtn() {
-    var hasPhotos = images.length > 0;
-    var hasText = describedMeal().length >= 4;
+    var textMode = inputMode === 'texte';
+    var ready = textMode ? describedMeal().length >= 4 : images.length > 0;
     var btn = $('estimate-btn');
-    btn.disabled = !hasPhotos && !hasText;
-    btn.textContent = hasPhotos ? '🔎 Estimer les glucides' : '✍️ Estimer d\'après ma description';
+    btn.disabled = !ready;
+    btn.textContent = textMode ? '✍️ Estimer d\'après ma description' : '🔎 Estimer les glucides';
 
-    // Le repère d'échelle ne sert qu'à mesurer sur une image.
-    var refCard = $('reference-card');
-    if (refCard) refCard.hidden = !hasPhotos;
-
-    var title = $('notes-title'), tag = $('notes-tag'), hint = $('notes-hint');
-    if (title && tag && hint) {
-      if (hasPhotos) {
-        title.firstChild.nodeValue = '3. Précisions ';
-        tag.textContent = 'optionnel';
-        hint.innerHTML = 'Ce que tu sais déjà améliore l\'estimation (ex. « riz basmati ~150 g cuit, pain 60 g »).';
+    /* Des photos prises puis laissées de côté ne sont PAS envoyées en mode
+       description. On le dit, plutôt que de les ignorer en silence. */
+    var warn = $('mode-warning');
+    if (warn) {
+      if (textMode && images.length) {
+        warn.hidden = false;
+        warn.innerHTML = '📷 ' + images.length + ' photo' + (images.length > 1 ? 's' : '') +
+          ' de côté, non utilisée' + (images.length > 1 ? 's' : '') +
+          ' dans ce mode. <button type="button" class="linklike" id="go-photo">Revenir à la photo</button>';
+        var go = $('go-photo');
+        if (go) go.addEventListener('click', function () { setMode('photo'); });
       } else {
-        title.firstChild.nodeValue = '3. Décris ton repas ';
-        tag.textContent = 'ou sans photo';
-        hint.innerHTML = 'Tu peux <strong>estimer sans aucune photo</strong> : décris simplement ce que tu manges. Avec une photo, ce texte sert de précisions.';
+        warn.hidden = true;
       }
     }
   }
@@ -306,14 +344,15 @@
     status.hidden = false;
     $('estimate-btn').disabled = true;
 
+    // En mode description, les photos éventuelles ne sont pas envoyées.
+    var textOnly = inputMode === 'texte';
+    var sent = textOnly ? [] : images;
     var ctx = {
       referenceObject: $('reference-object').value,
       plateDiameterCm: $('plate-diameter').value ? parseFloat($('plate-diameter').value) : null,
       notes: $('user-notes').value,
-      imageCount: images.length
+      imageCount: sent.length     // 0 fait basculer l'estimateur en mode description
     };
-    // imageCount à 0 fait basculer l'estimateur en mode description.
-    var textOnly = images.length === 0;
 
     var cmp = settings.compareProvider;
     var wantCompare = cmp && cmp !== settings.provider &&
@@ -325,7 +364,7 @@
         (PROVIDER_NAME[cmp] || cmp) + ')… cela peut prendre 20 à 40 s.';
       // On lance les deux fournisseurs en parallèle ; chacun peut échouer indépendamment.
       var wrap = function (p) {
-        return Estimator.estimateWith(p, images, ctx, settings)
+        return Estimator.estimateWith(p, sent, ctx, settings)
           .then(function (r) { return { ok: true, provider: p, result: r }; })
           .catch(function (e) { return { ok: false, provider: p, error: e.message }; });
       };
@@ -341,13 +380,13 @@
     status.innerHTML = '<div class="spinner"></div>' + (textOnly
       ? 'Estimation d\'après ta description… interprétation des portions et calcul des glucides.'
       : 'Analyse en cours… mesure des portions via le repère, calcul des glucides. Le raisonnement approfondi peut prendre 10 à 30 s.');
-    Estimator.estimate(images, ctx, settings).then(function (result) {
+    Estimator.estimate(sent, ctx, settings).then(function (result) {
       lastResult = result;
       status.hidden = true;
       renderResults(result);
     }).catch(function (e) {
       status.hidden = true;
-      offerQueue(e, ctx);
+      offerQueue(e, ctx, sent);
     }).then(function () {
       updateEstimateBtn();
     });
@@ -357,8 +396,10 @@
      C'est le moment où on ne peut PAS refaire la photo — l'assiette est entamée
      ou on a déjà quitté la table. Une erreur de clé ou de quota, elle, échouerait
      tout autant plus tard : on ne met en file que ce qui a une chance d'aboutir. */
-  function offerQueue(err, ctx) {
-    if (!Queue.isAvailable() || !Queue.isNetworkError(err) || !images.length) {
+  function offerQueue(err, ctx, sent) {
+    /* On ne met en file que ce qui a réellement été envoyé. En mode description
+       il n'y a pas d'image — rien n'est perdu, la phrase reste dans le champ. */
+    if (!Queue.isAvailable() || !Queue.isNetworkError(err) || !sent || !sent.length) {
       toast(err.message);
       return;
     }
@@ -366,7 +407,7 @@
       toast(err.message);
       return;
     }
-    Queue.add(images, ctx).then(function (id) {
+    Queue.add(sent, ctx).then(function (id) {
       if (!id) { toast(err.message); return; }
       images = [];
       renderThumbs();
@@ -1893,6 +1934,7 @@
     initSafetyBanner();
     initTabs();
     initPhotos();
+    initModeSwitch();
     initEstimate();
     initManual();
     initHistory();
