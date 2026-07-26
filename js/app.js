@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '27'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '28'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -31,6 +31,12 @@
   }
 
   var CONF_LABEL = { high: 'Confiance élevée', medium: 'Confiance moyenne', low: 'Confiance faible' };
+
+  var HISTORY_SOURCE = {
+    photo: '📷 photo',
+    texte: '✍️ description',
+    manuel: '✍️ manuel'
+  };
 
   // ---------- Installation PWA ----------
   var deferredPrompt = null;
@@ -143,8 +149,37 @@
     }
   }
 
+  /* Le bouton d'estimation accepte désormais DEUX sources : des photos, ou une
+     description écrite. Son libellé dit laquelle sera utilisée, pour qu'on ne
+     lance jamais une analyse en croyant que la photo est prise en compte. */
+  function describedMeal() {
+    var el = $('user-notes');
+    return el ? el.value.trim() : '';
+  }
+
   function updateEstimateBtn() {
-    $('estimate-btn').disabled = images.length === 0;
+    var hasPhotos = images.length > 0;
+    var hasText = describedMeal().length >= 4;
+    var btn = $('estimate-btn');
+    btn.disabled = !hasPhotos && !hasText;
+    btn.textContent = hasPhotos ? '🔎 Estimer les glucides' : '✍️ Estimer d\'après ma description';
+
+    // Le repère d'échelle ne sert qu'à mesurer sur une image.
+    var refCard = $('reference-card');
+    if (refCard) refCard.hidden = !hasPhotos;
+
+    var title = $('notes-title'), tag = $('notes-tag'), hint = $('notes-hint');
+    if (title && tag && hint) {
+      if (hasPhotos) {
+        title.firstChild.nodeValue = '3. Précisions ';
+        tag.textContent = 'optionnel';
+        hint.innerHTML = 'Ce que tu sais déjà améliore l\'estimation (ex. « riz basmati ~150 g cuit, pain 60 g »).';
+      } else {
+        title.firstChild.nodeValue = '3. Décris ton repas ';
+        tag.textContent = 'ou sans photo';
+        hint.innerHTML = 'Tu peux <strong>estimer sans aucune photo</strong> : décris simplement ce que tu manges. Avec une photo, ce texte sert de précisions.';
+      }
+    }
   }
 
   function setExtractStatus(on) {
@@ -255,6 +290,8 @@
     $('reference-object').addEventListener('change', function (e) {
       $('plate-diameter-wrap').hidden = e.target.value !== 'assiette';
     });
+    // La saisie d'une description active à elle seule le bouton d'estimation.
+    $('user-notes').addEventListener('input', updateEstimateBtn);
   }
 
   // ---------- Estimation IA ----------
@@ -275,6 +312,8 @@
       notes: $('user-notes').value,
       imageCount: images.length
     };
+    // imageCount à 0 fait basculer l'estimateur en mode description.
+    var textOnly = images.length === 0;
 
     var cmp = settings.compareProvider;
     var wantCompare = cmp && cmp !== settings.provider &&
@@ -299,7 +338,9 @@
       return;
     }
 
-    status.innerHTML = '<div class="spinner"></div>Analyse en cours… mesure des portions via le repère, calcul des glucides. Le raisonnement approfondi peut prendre 10 à 30 s.';
+    status.innerHTML = '<div class="spinner"></div>' + (textOnly
+      ? 'Estimation d\'après ta description… interprétation des portions et calcul des glucides.'
+      : 'Analyse en cours… mesure des portions via le repère, calcul des glucides. Le raisonnement approfondi peut prendre 10 à 30 s.');
     Estimator.estimate(images, ctx, settings).then(function (result) {
       lastResult = result;
       status.hidden = true;
@@ -650,6 +691,15 @@
     html += '  <div class="confidence conf-' + r.overallConfidence + '">' + CONF_LABEL[r.overallConfidence] + '</div>';
     html += '  <div class="pump-hint">💉 À saisir dans ta pompe : <strong>' + r.totalCarbsG +
             ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>). Ta pompe calcule le bolus.</div>';
+    /* Estimation sans photo : on le dit franchement. Le chiffre s'affiche
+       exactement comme celui d'une photo, et rien à l'écran ne rappellerait
+       sinon qu'aucune portion n'a été vue — c'est précisément le moment où
+       une vérification vaut le coup. */
+    if (r.fromText) {
+      html += '<div class="from-text">✍️ Estimé d\'après ta description, sans photo. ' +
+        'La taille des portions est supposée, pas mesurée : la fourchette est plus large. ' +
+        'Ajoute des quantités pour la resserrer.</div>';
+    }
     html += biasHintHtml(r.totalCarbsG, r.items);
     html += glycemicHtml(r);
     html += giHtml(r);
@@ -802,7 +852,9 @@
   function saveCurrentResult() {
     var entry = {
       date: Date.now(),
-      source: 'photo',
+      // Distinguer les trois origines : l'historique et la synthèse médecin
+      // n'ont pas la même valeur selon qu'une portion a été vue ou décrite.
+      source: lastResult.fromText ? 'texte' : 'photo',
       totalCarbsG: lastResult.totalCarbsG,
       parts: partsFrom(lastResult.totalCarbsG),
       partSizeG: settings.partSizeG,
@@ -1267,7 +1319,7 @@
       item.innerHTML =
         '<button class="history-del" data-del="' + e.date + '" aria-label="Supprimer">🗑️</button>' +
         (historyImg(e) ? '<img class="history-thumb" src="' + historyImg(e) + '" alt="photo du repas">' : '') +
-        '<div class="history-date">' + dateStr + ' · ' + (e.source === 'photo' ? '📷 photo' : '✍️ manuel') + '</div>' +
+        '<div class="history-date">' + dateStr + ' · ' + HISTORY_SOURCE[e.source] || HISTORY_SOURCE.manuel + '</div>' +
         '<div class="history-total"><b>' + fr(partsFromStored(e)) + ' parts</b> · ' + e.totalCarbsG + ' g</div>' +
         (e.gi && e.gi.gl != null
           ? '<div class="history-gi">CG ' + e.gi.gl + ' · ' + GI.glBand(e.gi.gl).label + '</div>' : '') +
