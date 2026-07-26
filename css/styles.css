@@ -530,3 +530,37 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
   padding: 10px 13px; font-size: 12.5px; line-height: 1.5;
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); }
+
+/* ---------- Sélecteur de méthode (photo / description) ---------- */
+.mode-switch {
+  display: flex; gap: 4px; margin-bottom: 14px; padding: 4px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-full);
+}
+.mode-btn {
+  flex: 1; border: none; cursor: pointer; background: none;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 10px 8px; border-radius: var(--r-full);
+  font-size: 14px; font-weight: 700; color: var(--muted);
+  transition: background .18s, color .18s, box-shadow .18s;
+}
+.mode-btn .mode-ico { font-size: 17px; line-height: 1; }
+.mode-btn.active {
+  background: var(--surface); color: var(--brand);
+  box-shadow: var(--shadow-sm);
+}
+.mode-btn:not(.active):hover { color: var(--text); }
+
+.mode-pane { display: none; }
+.mode-pane.active { display: block; animation: fade-in .22s ease both; }
+
+.mode-warning {
+  margin: 0 0 12px; padding: 9px 13px; border-radius: var(--r);
+  font-size: 12.5px; color: var(--muted);
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.linklike {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--brand); font-weight: 700; font-size: inherit;
+  text-decoration: underline;
+}
