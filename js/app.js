@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '30'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '31'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -31,6 +31,8 @@
   }
 
   var CONF_LABEL = { high: 'Confiance élevée', medium: 'Confiance moyenne', low: 'Confiance faible' };
+  // Forme courte pour la pastille d'un aliment (l'anglais brut y était affiché).
+  var CONF_SHORT = { high: 'sûr', medium: 'moyen', low: 'incertain' };
 
   var HISTORY_SOURCE = {
     photo: '📷 photo',
@@ -728,6 +730,42 @@
       '</div>';
   }
 
+  /* « Ce que l'IA a vu » — la vérification avant de doser.
+     Le reste de l'écran donne des chiffres ; celui-ci dit sur quoi ils portent.
+     C'est ce qui permet de repérer en un coup d'œil que le modèle a pris le
+     poulet pour du poisson, ou n'a pas vu le pain à côté de l'assiette — deux
+     erreurs qui changent le total sans que rien d'autre ne les signale. */
+  function seenHtml(r) {
+    var lignes = (r.items || []).map(function (it) {
+      var carb = it.carbsG > 0
+        ? '<b>' + it.carbsG + ' g</b> de glucides'
+        : '<span class="seen-zero">aucun glucide</span>';
+      var portion = it.portionDescription || (it.estimatedMassG != null
+        ? 'environ ' + Math.round(it.estimatedMassG) + ' g' : '');
+      return '<li class="seen-item">' +
+        '<div class="seen-name">' + escapeHtml(it.name) + '</div>' +
+        (portion ? '<div class="seen-portion">' + escapeHtml(portion) + '</div>' : '') +
+        '<div class="seen-carb">' + carb + '</div>' +
+        (it.assumptions ? '<div class="seen-why">' + escapeHtml(it.assumptions) + '</div>' : '') +
+        '</li>';
+    }).join('');
+
+    if (!lignes && !r.seen) return '';
+
+    var titre = r.fromText ? '💬 Ce que l\'IA a compris' : '👁️ Ce que l\'IA a vu';
+    var intro = r.fromText
+      ? 'Relis : si un aliment manque ou n\'a rien à y faire, corrige ta description et relance.'
+      : 'Relis avant de doser : si un aliment est mal identifié ou manquant, corrige la portion plus bas — ou reprends une photo.';
+
+    return '<div class="card seen-card"><h2>' + titre + '</h2>' +
+      (r.seen ? '<p class="seen-sentence">« ' + escapeHtml(r.seen) + ' »</p>' : '') +
+      '<ul class="seen-list">' + lignes + '</ul>' +
+      (r.referenceUsed && !r.fromText
+        ? '<p class="seen-ref">📐 Échelle : ' + escapeHtml(r.referenceUsed) + '</p>' : '') +
+      '<p class="hint tiny">' + intro + '</p>' +
+      '</div>';
+  }
+
   function macrosHtml(r) {
     if (r.totalProteinG == null && r.totalFatG == null && r.totalKcal == null) return '';
     var bits = [];
@@ -765,9 +803,11 @@
     html += macrosHtml(r);
     html += '</div>';
 
+    html += seenHtml(r);
+
     // Détail par aliment (grammes éditables)
     html += '<div class="card"><h2>Détail par aliment</h2>';
-    html += '<p class="hint">Corrige une portion si elle te semble fausse : le total se recalcule.</p>';
+    html += '<p class="hint">Une portion te semble fausse dans la liste ci-dessus ? Corrige-la ici, le total se recalcule.</p>';
     html += '<div id="items-list"></div></div>';
 
     if (r.notes) {
@@ -863,8 +903,9 @@
 
       var row = document.createElement('div');
       row.className = 'item-row';
-      var detail = it.portionDescription || '';
-      if (it.assumptions) detail += (detail ? ' · ' : '') + it.assumptions;
+      /* La portion et les hypothèses sont déjà détaillées dans « Ce que l'IA a
+         vu » : ici on ne garde que ce qui sert à CORRIGER, sinon la même
+         information s'affiche deux fois d'affilée. */
 
       var editControl = editableGrams
         ? '<input class="input small item-grams-edit" type="number" min="0" step="5" value="' +
@@ -875,8 +916,8 @@
       row.innerHTML =
         '<div class="item-main">' +
         '  <div class="item-name">' + escapeHtml(it.name) +
-             ' <span class="mini-conf conf-' + it.confidence + '">' + it.confidence + '</span></div>' +
-        '  <div class="item-detail">' + escapeHtml(detail) + '</div>' +
+             ' <span class="mini-conf conf-' + it.confidence + '">' +
+             (CONF_SHORT[it.confidence] || it.confidence) + '</span></div>' +
         '  <div class="item-detail">' + editControl + '</div>' +
         '</div>' +
         '<div class="item-carb">' + it.carbsG + ' g</div>' +
