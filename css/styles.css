@@ -571,3 +571,28 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
   color: var(--brand); font-weight: 700; font-size: inherit;
   text-decoration: underline;
 }
+
+/* ---------- « Ce que l'IA a vu » ---------- */
+.seen-card { border-color: color-mix(in srgb, var(--brand) 35%, var(--border)); }
+.seen-sentence {
+  margin: 6px 0 14px; padding: 11px 13px; border-radius: var(--r);
+  background: color-mix(in srgb, var(--brand) 8%, var(--surface));
+  border-left: 3px solid var(--brand);
+  font-size: 14px; line-height: 1.55; font-style: italic;
+}
+.seen-list { list-style: none; margin: 0; padding: 0; }
+.seen-item {
+  padding: 10px 0; border-top: 1px solid var(--border);
+  display: grid; grid-template-columns: 1fr auto; gap: 1px 12px;
+}
+.seen-item:first-child { border-top: none; padding-top: 2px; }
+.seen-name { grid-column: 1; font-weight: 700; font-size: 14.5px; }
+.seen-carb { grid-column: 2; grid-row: 1 / span 2; align-self: center;
+  font-size: 13.5px; color: var(--muted); white-space: nowrap; text-align: right; }
+.seen-carb b { color: var(--text); font-size: 15px; }
+.seen-zero { font-size: 12.5px; }
+.seen-portion { grid-column: 1; font-size: 13px; color: var(--muted); }
+.seen-why { grid-column: 1 / -1; font-size: 12px; color: var(--faint);
+  margin-top: 3px; line-height: 1.45; }
+.seen-ref { font-size: 12px; color: var(--muted); margin: 12px 0 0;
+  padding-top: 10px; border-top: 1px solid var(--border); }
