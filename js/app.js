@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '31'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '32'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -602,14 +602,12 @@
   }
 
   // Recalcule le total à partir des items édités.
+  /* Le total n'est pas seul à dépendre des aliments : la charge glycémique, la
+     vitesse d'absorption et les macros aussi. Tout est recalculé au même
+     endroit (Estimator.refresh) — sinon corriger une portion laissait une
+     charge glycémique périmée à l'écran. */
   function recomputeTotal() {
-    var total = lastResult.items.reduce(function (s, it) { return s + it.carbsG; }, 0);
-    lastResult.totalCarbsG = Math.round(total);
-    // Fourchette proportionnelle conservée autour du nouveau total.
-    var conf = lastResult.overallConfidence;
-    var spread = conf === 'high' ? 0.12 : conf === 'medium' ? 0.22 : 0.35;
-    lastResult.rangeLowG = Math.max(0, Math.round(total * (1 - spread)));
-    lastResult.rangeHighG = Math.round(total * (1 + spread));
+    Estimator.refresh(lastResult);
   }
 
   // Barre visuelle de la fourchette d'incertitude.
@@ -698,6 +696,14 @@
       '<div class="gly-head"><span class="gly-ico">' + g.icon + '</span>' +
         '<strong>' + g.label + '</strong> · <span class="gly-time">' + g.timing + '</span></div>' +
       (r.glycemicNote ? '<div class="gly-why">' + escapeHtml(r.glycemicNote) + '</div>' : '') +
+      /* La note du modèle décrit le repas qu'il a analysé. Une fois un dessert
+         ou une boisson ajoutés, elle ne les couvre plus : le dire vaut mieux
+         que laisser croire qu'elle vaut pour l'ensemble. */
+      (r.hasExtras
+        ? '<div class="gly-why">Le dessert ou la boisson ajoutés ensuite ne sont pas ' +
+          'couverts par cette phrase : un sucre liquide arrive nettement plus vite ' +
+          'que le plat.</div>'
+        : '') +
       '<div class="gly-meta">Tendance de ce repas, pas une prévision de ta glycémie — ' +
         'elle dépend aussi de toi et de ta pompe.</div>' +
       '</div>';
@@ -736,7 +742,7 @@
      poulet pour du poisson, ou n'a pas vu le pain à côté de l'assiette — deux
      erreurs qui changent le total sans que rien d'autre ne les signale. */
   function seenHtml(r) {
-    var lignes = (r.items || []).map(function (it) {
+    var ligne = function (it) {
       var carb = it.carbsG > 0
         ? '<b>' + it.carbsG + ' g</b> de glucides'
         : '<span class="seen-zero">aucun glucide</span>';
@@ -748,9 +754,13 @@
         '<div class="seen-carb">' + carb + '</div>' +
         (it.assumptions ? '<div class="seen-why">' + escapeHtml(it.assumptions) + '</div>' : '') +
         '</li>';
-    }).join('');
+    };
 
-    if (!lignes && !r.seen) return '';
+    var vus = (r.items || []).filter(function (it) { return !it.added; });
+    var ajoutes = (r.items || []).filter(function (it) { return it.added; });
+    var lignes = vus.map(ligne).join('');
+
+    if (!lignes && !ajoutes.length && !r.seen) return '';
 
     var titre = r.fromText ? '💬 Ce que l\'IA a compris' : '👁️ Ce que l\'IA a vu';
     var intro = r.fromText
@@ -760,6 +770,13 @@
     return '<div class="card seen-card"><h2>' + titre + '</h2>' +
       (r.seen ? '<p class="seen-sentence">« ' + escapeHtml(r.seen) + ' »</p>' : '') +
       '<ul class="seen-list">' + lignes + '</ul>' +
+      /* Séparés explicitement : ces aliments n'ont pas été vus sur la photo,
+         ils ont été saisis après coup. Les mélanger laisserait croire que
+         le modèle les a identifiés lui-même. */
+      (ajoutes.length
+        ? '<h3 class="seen-sub">➕ Ajouté par toi</h3>' +
+          '<ul class="seen-list">' + ajoutes.map(ligne).join('') + '</ul>'
+        : '') +
       (r.referenceUsed && !r.fromText
         ? '<p class="seen-ref">📐 Échelle : ' + escapeHtml(r.referenceUsed) + '</p>' : '') +
       '<p class="hint tiny">' + intro + '</p>' +
@@ -810,6 +827,8 @@
     html += '<p class="hint">Une portion te semble fausse dans la liste ci-dessus ? Corrige-la ici, le total se recalcule.</p>';
     html += '<div id="items-list"></div></div>';
 
+    html += extrasHtml();
+
     if (r.notes) {
       html += '<div class="card"><div class="notes-box">📝 ' + escapeHtml(r.notes) + '</div></div>';
     }
@@ -823,9 +842,103 @@
     el.innerHTML = html;
     el.hidden = false;
     renderItems();
+    initExtras();
     $('save-result').addEventListener('click', saveCurrentResult);
     $('save-meal').addEventListener('click', function () { promptSaveMeal(lastResult.items); });
     el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  /* ---------- Dessert et boisson prévus ----------
+     Ils ne sont presque jamais sur la photo : on photographie le plat, et le
+     yaourt ou le soda arrivent après. Les compter séparément obligerait à
+     refaire une estimation ; ils s'ajoutent donc au repas déjà estimé, et le
+     total, la charge glycémique et la vitesse d'absorption se recalculent. */
+  var DRINK_CHIPS = [
+    'un verre de jus d\'orange (20 cl)',
+    'une canette de soda (33 cl)',
+    'un verre de lait (20 cl)',
+    'un verre de vin rouge (12 cl)',
+    'une bière (25 cl)'
+  ];
+
+  function extrasHtml() {
+    return '<div class="card extras-card">' +
+      '<h2>➕ Tu prévois autre chose ?</h2>' +
+      '<p class="hint">Le dessert et la boisson sont rarement sur la photo. Ajoute-les ici : ils seront comptés dans le total et dans la charge glycémique.</p>' +
+
+      '<label for="extra-dessert">🍰 Dessert</label>' +
+      '<input id="extra-dessert" class="input" type="text" ' +
+        'placeholder="ex. une part de tarte aux pommes, un yaourt nature…">' +
+
+      '<label for="extra-drink">🥤 Boisson</label>' +
+      '<input id="extra-drink" class="input" type="text" ' +
+        'placeholder="ex. un verre de jus d\'orange">' +
+      '<div id="drink-chips" class="chips extras-chips">' +
+        DRINK_CHIPS.map(function (d, i) {
+          return '<button type="button" class="chip" data-drink="' + i + '">' +
+            escapeHtml(d.replace(/ \(.*\)$/, '')) + '</button>';
+        }).join('') +
+      '</div>' +
+      '<p class="hint tiny">Eau, café ou thé sans sucre, soda light : <strong>0 g</strong>, rien à ajouter.</p>' +
+
+      '<button id="add-extras" class="btn btn-primary">＋ Ajouter au repas</button>' +
+      '<div id="extras-status" class="status" hidden></div>' +
+      '</div>';
+  }
+
+  function initExtras() {
+    var chips = $('drink-chips');
+    if (chips) {
+      chips.querySelectorAll('[data-drink]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          $('extra-drink').value = DRINK_CHIPS[parseInt(b.dataset.drink, 10)];
+        });
+      });
+    }
+    var btn = $('add-extras');
+    if (btn) btn.addEventListener('click', addExtras);
+  }
+
+  function addExtras() {
+    var dessert = ($('extra-dessert').value || '').trim();
+    var drink = ($('extra-drink').value || '').trim();
+    if (!dessert && !drink) { toast('Écris un dessert ou une boisson à ajouter.'); return; }
+
+    var parts = [];
+    if (dessert) parts.push('Dessert : ' + dessert);
+    if (drink) parts.push('Boisson : ' + drink);
+
+    var status = $('extras-status'), btn = $('add-extras');
+    status.hidden = false;
+    status.innerHTML = '<div class="spinner"></div>Estimation du complément…';
+    btn.disabled = true;
+
+    /* Estimation en mode DESCRIPTION (aucune image) : ces aliments n'ont pas été
+       photographiés, il n'y a rien à mesurer. On n'envoie que le complément,
+       jamais le repas déjà estimé — le recompter fausserait le total. */
+    Estimator.estimate([], {
+      referenceObject: 'none',
+      imageCount: 0,
+      notes: parts.join('. ') + '.'
+    }, settings).then(function (extra) {
+      var added = (extra.items || []).filter(function (it) { return it.name; });
+      if (!added.length) throw new Error('Rien n\'a pu être estimé à partir de ce texte.');
+
+      /* Marqués comme ajoutés : la carte « Ce que l'IA a vu » ne doit pas les
+         présenter comme vus sur la photo, ils ont été saisis après coup. */
+      added.forEach(function (it) { it.added = true; });
+      lastResult.items = lastResult.items.concat(added);
+      lastResult.hasExtras = true;
+      recomputeTotal();
+
+      var g = added.reduce(function (s, it) { return s + it.carbsG; }, 0);
+      renderResults(lastResult);
+      toast(added.length + ' ajouté(s) · +' + g + ' g de glucides.');
+    }).catch(function (e) {
+      status.hidden = true;
+      btn.disabled = false;
+      toast(e.message);
+    });
   }
 
   // ---------- Repas fréquents ----------

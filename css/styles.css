@@ -596,3 +596,12 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
   margin-top: 3px; line-height: 1.45; }
 .seen-ref { font-size: 12px; color: var(--muted); margin: 12px 0 0;
   padding-top: 10px; border-top: 1px solid var(--border); }
+
+/* ---------- Dessert / boisson ajoutés après l'estimation ---------- */
+.extras-card { border-style: dashed; }
+.extras-chips { margin-top: 8px; }
+.extras-chips .chip { font-size: 12.5px; }
+.extras-card .btn-primary { width: 100%; margin-top: 14px; }
+.seen-sub { font-size: 13px; font-weight: 800; color: var(--muted);
+  margin: 14px 0 2px; padding-top: 12px; border-top: 1px dashed var(--border-strong);
+  text-transform: uppercase; letter-spacing: .03em; }
