@@ -38,6 +38,17 @@
       { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', note: 'précision max · raisonnement', stars: 3 },
       { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', note: 'équilibré · recommandé', stars: 2 },
       { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', note: 'rapide · économique', stars: 1 }
+    ],
+    /* OpenRouter : un seul compte pour tous les modèles. Les notes de prix sont
+       ramenées au coût d'UNE estimation (photo + prompt + réponse), seule unité
+       parlante ici — les tarifs au million de jetons ne disent rien. */
+    openrouter: [
+      { id: 'qwen/qwen3.7-flash', label: 'Qwen 3.7 Flash', note: '~4000 repas pour 1 $ · vérification', stars: 2 },
+      { id: 'qwen/qwen3.7-plus', label: 'Qwen 3.7 Plus', note: '~380 repas pour 1 $', stars: 3 },
+      { id: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5', note: '~55 repas pour 1 $', stars: 3 },
+      { id: 'openai/gpt-5.6-terra', label: 'GPT-5.6 Terra', note: '~80 repas pour 1 $', stars: 2 },
+      { id: 'google/gemini-3.6-flash', label: 'Gemini 3.6 Flash', note: '~75 repas pour 1 $', stars: 2 },
+      { id: 'qwen/qwen3-vl-235b-a22b-instruct', label: 'Qwen3-VL 235B', note: '~250 repas pour 1 $', stars: 2 }
     ]
   };
 
@@ -59,24 +70,33 @@
   var DEFAULT_MODELS = {
     claude: 'claude-sonnet-5',
     gemini: 'gemini-3.6-flash',
-    openai: 'gpt-5.6-terra'
+    openai: 'gpt-5.6-terra',
+    openrouter: 'qwen/qwen3.7-flash'
   };
 
-  var PROVIDERS = ['claude', 'gemini', 'openai'];
+  var PROVIDERS = ['claude', 'gemini', 'openai', 'openrouter'];
 
   var DEFAULT_SETTINGS = {
     provider: 'claude',                                   // fournisseur actif
     compareProvider: '',                                  // 2ᵉ avis (vide = aucun)
-    apiKeys: { claude: '', gemini: '', openai: '' },      // une clé par fournisseur
+    apiKeys: { claude: '', gemini: '', openai: '', openrouter: '' },
     models: {                                             // un modèle par fournisseur
       claude: DEFAULT_MODELS.claude,
       gemini: DEFAULT_MODELS.gemini,
-      openai: DEFAULT_MODELS.openai
+      openai: DEFAULT_MODELS.openai,
+      openrouter: DEFAULT_MODELS.openrouter
     },
     partSizeG: 10,       // 1 part = 10 g (standard France)
     roundHalf: true,     // arrondir les parts au 0,5
     remindEnabled: false, // rappel de contrôle après repas (APK uniquement)
-    remindDelayMin: 0     // 0 = délai calé sur la vitesse d'absorption estimée
+    remindDelayMin: 0,    // 0 = délai calé sur la vitesse d'absorption estimée
+    /* Vérification croisée automatique. Un 2ᵉ modèle bon marché tourne en
+       parallèle à chaque estimation ; on n'alerte que si l'écart dépasse le
+       seuil. C'est le seul garde-fou capable de rattraper une erreur grossière
+       du modèle principal, et à ce prix il n'y a pas de raison de l'éteindre. */
+    verifyEnabled: false,
+    verifyProvider: 'openrouter',
+    verifyThresholdPct: 20
   };
 
   /* Clés API relues du Keystore au démarrage (APK). On les garde en mémoire
@@ -190,7 +210,7 @@
           // Migration : on chiffre, puis on efface la copie en clair.
           return window.Native.secure.save(merged).then(function () {
             var s = read(KEYS.settings, {}) || {};
-            s.apiKeys = { claude: '', gemini: '', openai: '' };
+            s.apiKeys = { claude: '', gemini: '', openai: '', openrouter: '' };
             write(KEYS.settings, s);
             return true;
           });
@@ -226,7 +246,8 @@
         secureKeys = Object.assign({}, s.apiKeys || {});
         window.Native.secure.save(secureKeys);
         // Le blob localStorage ne garde aucune clé en clair sur l'APK.
-        var copy = Object.assign({}, s, { apiKeys: { claude: '', gemini: '', openai: '' } });
+        var copy = Object.assign({}, s, {
+          apiKeys: { claude: '', gemini: '', openai: '', openrouter: '' } });
         write(KEYS.settings, copy);
         return;
       }

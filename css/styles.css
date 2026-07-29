@@ -667,3 +667,15 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
   border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); }
 .us-warn { background: color-mix(in srgb, var(--accent) 12%, var(--surface));
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+
+/* Vérification croisée */
+.verify-box { margin-top: 12px; padding: 11px 13px; border-radius: var(--r);
+  font-size: 13px; line-height: 1.55; text-align: left;
+  background: var(--surface-2); border: 1px solid var(--border); }
+.verify-box .spinner { width: 13px; height: 13px; border-width: 2px;
+  display: inline-block; vertical-align: -2px; margin-right: 7px; }
+.v-ok { background: color-mix(in srgb, var(--ok) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); }
+.v-alert { background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  border-color: var(--danger); }
+.v-off { color: var(--muted); }

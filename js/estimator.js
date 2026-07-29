@@ -452,7 +452,16 @@
     return m ? parseInt(m[1], 10) >= 5 : false;
   }
 
-  function callOpenAI(images, prompt, settings) {
+  /* OpenRouter expose une API compatible OpenAI : même corps de requête, même
+     forme de réponse. On réutilise donc le même appel, en changeant l'URL et en
+     ajoutant les deux en-têtes qu'OpenRouter recommande pour identifier l'app. */
+  var OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
+  function callOpenRouter(images, prompt, settings) {
+    return callOpenAI(images, prompt, settings, OPENROUTER_URL);
+  }
+
+  function callOpenAI(images, prompt, settings, url) {
     var userContent = [{ type: 'text', text: prompt }];
     images.forEach(function (img) {
       userContent.push({
@@ -462,7 +471,8 @@
     });
 
     var model = settings.model || 'gpt-5.6-terra';
-    var modern = isReasoningGpt(model);
+    // OpenRouter normalise tous les modèles sur max_tokens.
+    var modern = (url === OPENROUTER_URL) ? false : isReasoningGpt(model);
 
     function send(useCompletionTokens) {
       var body = {
@@ -474,14 +484,19 @@
         ]
       };
       if (useCompletionTokens) body.max_completion_tokens = THINKING_MAX_TOKENS;
-      else body.max_tokens = 1600;
+      else body.max_tokens = (url === OPENROUTER_URL) ? THINKING_MAX_TOKENS : 1600;
 
-      return fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
+      var headers = {
+        'content-type': 'application/json',
+        'Authorization': 'Bearer ' + settings.apiKey
+      };
+      if (url === OPENROUTER_URL) {
+        headers['HTTP-Referer'] = 'https://rachid598.github.io/Diab-te/';
+        headers['X-Title'] = 'GlucoVision';
+      }
+      return fetchWithTimeout(url || 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'Authorization': 'Bearer ' + settings.apiKey
-        },
+        headers: headers,
         body: JSON.stringify(body)
       }).then(handleResponse);
     }
@@ -501,7 +516,7 @@
         throw err;
       })
       .then(function (data) {
-        if (data.error) throw new Error(data.error.message || 'Erreur API OpenAI.');
+        if (data.error) throw new Error(data.error.message || 'Erreur de l\'API.');
         var choice = data.choices && data.choices[0];
         var text = choice && choice.message && choice.message.content;
         if (!text && choice && choice.finish_reason === 'length') {
@@ -665,7 +680,10 @@
     return (c === 'high' || c === 'medium' || c === 'low') ? c : 'medium';
   }
 
-  var PROVIDER_LABEL = { claude: 'Anthropic (Claude)', gemini: 'Google (Gemini)', openai: 'OpenAI (ChatGPT)' };
+  var PROVIDER_LABEL = {
+    claude: 'Anthropic (Claude)', gemini: 'Google (Gemini)',
+    openai: 'OpenAI (ChatGPT)', openrouter: 'OpenRouter'
+  };
 
   // Lance l'estimation pour UN fournisseur donné (utilisé aussi pour le 2ᵉ avis).
   function estimateProvider(provider, images, ctx, settings) {
@@ -688,7 +706,8 @@
     }
     var prompt = buildUserPrompt(ctx);
     var callSettings = { provider: provider, apiKey: apiKey, model: model };
-    var call = provider === 'openai' ? callOpenAI
+    var call = provider === 'openrouter' ? callOpenRouter
+             : provider === 'openai' ? callOpenAI
              : provider === 'gemini' ? callGemini
              : callClaude;
     return call(images, prompt, callSettings).then(function (result) {

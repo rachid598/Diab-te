@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '35'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '36'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -407,10 +407,16 @@
     status.innerHTML = '<div class="spinner"></div>' + (textOnly
       ? 'Estimation d\'après ta description… interprétation des portions et calcul des glucides.'
       : 'Analyse en cours… mesure des portions via le repère, calcul des glucides. Le raisonnement approfondi peut prendre 10 à 30 s.');
+    /* Vérification croisée : lancée EN PARALLÈLE, jamais en série. Elle ne doit
+       pas retarder le chiffre dont l'utilisateur a besoin pour doser — elle
+       arrive après et complète l'affichage. Son échec est sans conséquence. */
+    var verify = startVerification(sent, ctx);
+
     Estimator.estimate(sent, ctx, settings).then(function (result) {
       lastResult = result;
       status.hidden = true;
       renderResults(result);
+      attachVerification(verify);
     }).catch(function (e) {
       status.hidden = true;
       offerQueue(e, ctx, sent);
@@ -823,6 +829,7 @@
     html += macrosHtml(r);
     html += '</div>';
 
+    html += '<div id="verify-box" class="verify-box" hidden></div>';
     html += seenHtml(r);
 
     // Détail par aliment (grammes éditables)
@@ -884,6 +891,62 @@
     if (dessert) parts.push('Dessert : ' + dessert);
     if (drink) parts.push('Boisson : ' + drink);
     return parts.join('. ');
+  }
+
+  /* ---------- Vérification croisée ----------
+     Un second modèle, bon marché, estime le même repas de son côté. On ne
+     remplace jamais le chiffre principal : on signale l'écart. Deux modèles
+     indépendants qui tombent d'accord, c'est une confirmation ; un écart large
+     est le seul signal automatique capable de rattraper une erreur grossière
+     avant que la dose ne soit saisie. */
+  function startVerification(images, ctx) {
+    var p = settings.verifyProvider;
+    if (!settings.verifyEnabled || !p || p === settings.provider) return null;
+    if (!(settings.apiKeys || {})[p]) return null;
+    return Estimator.estimateWith(p, images, ctx, settings)
+      .then(function (r) { return { ok: true, provider: p, total: r.totalCarbsG }; })
+      .catch(function (e) { return { ok: false, provider: p, error: e.message }; });
+  }
+
+  function attachVerification(promise) {
+    if (!promise) return;
+    var box = $('verify-box');
+    if (box) {
+      box.hidden = false;
+      box.className = 'verify-box';
+      box.innerHTML = '<span class="spinner"></span>Vérification croisée en cours…';
+    }
+    promise.then(function (v) {
+      var el = $('verify-box');
+      if (!el || !lastResult) return;
+      var nom = PROVIDER_NAME[v.provider] || v.provider;
+
+      if (!v.ok) {
+        // Un échec de vérification n'invalide pas l'estimation : on le dit sans dramatiser.
+        el.className = 'verify-box v-off';
+        el.innerHTML = '⚪ Vérification croisée indisponible (' + escapeHtml(v.error || 'erreur') + ').';
+        return;
+      }
+
+      var main = lastResult.totalCarbsG;
+      var ecart = main > 0 ? Math.abs(v.total - main) / main * 100 : 0;
+      var seuil = settings.verifyThresholdPct || 20;
+      var parts = fr(partsFrom(v.total));
+
+      if (ecart <= seuil) {
+        el.className = 'verify-box v-ok';
+        el.innerHTML = '✅ <strong>Confirmé</strong> par ' + escapeHtml(nom) + ' : ' +
+          v.total + ' g (' + parts + ' parts), soit ' + Math.round(ecart) + ' % d\'écart.';
+      } else {
+        el.className = 'verify-box v-alert';
+        el.innerHTML = '⚠️ <strong>Écart important</strong> — ' + escapeHtml(nom) +
+          ' estime <strong>' + v.total + ' g</strong> (' + parts + ' parts), soit ' +
+          Math.round(ecart) + ' % de différence.<br>' +
+          'Deux modèles en désaccord sur un repas, c\'est souvent qu\'un aliment a été ' +
+          'mal identifié ou qu\'une portion est mal jugée. Relis « Ce que l\'IA a vu » ' +
+          'avant de saisir la dose.';
+      }
+    });
   }
 
   // ---------- Repas fréquents ----------
@@ -1726,8 +1789,9 @@
   }
 
   // ---------- Réglages ----------
-  var PROVIDER_NAME = { claude: 'Claude', gemini: 'Gemini', openai: 'ChatGPT' };
-  var KEY_FIELD = { claude: 'set-key-claude', gemini: 'set-key-gemini', openai: 'set-key-openai' };
+  var PROVIDER_NAME = { claude: 'Claude', gemini: 'Gemini', openai: 'ChatGPT', openrouter: 'OpenRouter' };
+  var KEY_FIELD = { claude: 'set-key-claude', gemini: 'set-key-gemini',
+                    openai: 'set-key-openai', openrouter: 'set-key-openrouter' };
   var CUSTOM_VALUE = '__custom__';
 
   function initSettings() {
@@ -1921,6 +1985,10 @@
     var cp = settings.compareProvider || '';
     $('set-compare').value = cp;
     populateCompareModelSelect(cp, cp ? (models[cp] || Storage.DEFAULT_MODELS[cp] || '') : '');
+    $('set-key-openrouter').value = settings.apiKeys.openrouter || '';
+    $('set-verify').checked = !!settings.verifyEnabled;
+    $('set-verify-provider').value = settings.verifyProvider || 'openrouter';
+    $('set-verify-threshold').value = String(settings.verifyThresholdPct || 20);
     $('set-partsize').value = settings.partSizeG;
     $('set-round-half').checked = settings.roundHalf;
     openNativeSettings();
@@ -1960,6 +2028,10 @@
     settings.apiKeys.claude = $('set-key-claude').value.trim();
     settings.apiKeys.gemini = $('set-key-gemini').value.trim();
     settings.apiKeys.openai = $('set-key-openai').value.trim();
+    settings.apiKeys.openrouter = $('set-key-openrouter').value.trim();
+    settings.verifyEnabled = $('set-verify').checked;
+    settings.verifyProvider = $('set-verify-provider').value;
+    settings.verifyThresholdPct = parseInt($('set-verify-threshold').value, 10) || 20;
     settings.models = settings.models || {};
     settings.models[provider] = getModelFrom('set-model', 'set-model-custom', provider);
     var cmp = $('set-compare').value;
