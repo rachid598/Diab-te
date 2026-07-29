@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '33'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '34'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -1495,6 +1495,17 @@
     if (ajoutes.length) {
       out += '<div class="detail-label">Ajouté par toi</div>' +
              '<ul class="detail-foods">' + ajoutes.map(ligne).join('') + '</ul>';
+    }
+
+    if (!(e.items || []).length) {
+      out += '<p class="detail-none">Le détail des aliments n\'a pas été enregistré ' +
+             'pour ce repas.</p>';
+    } else if (!e.seen && !(e.items || []).some(function (it) { return it.portion; })) {
+      /* Repas d'avant la v33 : la phrase de lecture et les portions n'étaient
+         pas conservées. On l'explique, sinon l'écart de richesse entre deux
+         repas de l'historique passe pour un bug. */
+      out += '<p class="detail-none">Repas enregistré avant la mise à jour : les ' +
+             'portions et la description n\'avaient pas encore été conservées.</p>';
     }
 
     var tags = [];
