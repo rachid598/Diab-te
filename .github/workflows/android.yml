@@ -23,9 +23,13 @@ on:
 permissions:
   contents: write
 
+# Les exécutions s'enchaînent au lieu de s'annuler. Avec cancel-in-progress,
+# pousser une version pendant que la précédente compilait annulait son build ET
+# la publication de son bundle : la version disparaissait purement et
+# simplement, l'app restant bloquée sur la dernière réellement publiée.
 concurrency:
   group: android-apk
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
