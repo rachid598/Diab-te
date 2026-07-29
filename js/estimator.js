@@ -698,6 +698,36 @@
     // Estimation forcée sur un fournisseur précis (pour le mode « 2ᵉ avis »).
     estimateWith: function (provider, images, ctx, settings) {
       return estimateProvider(provider, images, ctx, settings);
+    },
+
+    /* Recalcule tous les agrégats après une modification de la liste d'aliments :
+       correction d'une portion, ou ajout d'un dessert / d'une boisson.
+       Centralisé ici parce que le total n'est pas seul concerné — la charge
+       glycémique et la vitesse d'absorption dépendent aussi des aliments, et
+       les laisser figés afficherait des chiffres qui ne correspondent plus. */
+    refresh: function (result) {
+      var items = (result && result.items) || [];
+      var total = items.reduce(function (s, it) { return s + (it.carbsG || 0); }, 0);
+      result.totalCarbsG = Math.round(total);
+
+      var conf = result.overallConfidence;
+      var spread = conf === 'high' ? 0.12 : conf === 'medium' ? 0.22 : 0.35;
+      if (result.fromText) spread = Math.max(spread, conf === 'high' ? 0.14 : 0.28);
+      result.rangeLowG = Math.max(0, Math.round(total * (1 - spread)));
+      result.rangeHighG = Math.round(total * (1 + spread));
+
+      result.totalProteinG = sumOf(items, 'proteinG');
+      result.totalFatG = sumOf(items, 'fatG');
+      result.totalKcal = sumOf(items, 'kcal');
+      if (result.totalKcal == null && (result.totalProteinG != null || result.totalFatG != null)) {
+        result.totalKcal = Math.round(4 * total + 4 * (result.totalProteinG || 0) +
+                                      9 * (result.totalFatG || 0));
+      }
+
+      result.gi = (window.GI && window.GI.meal) ? window.GI.meal(items) : null;
+      result.glycemicSpeed = glycemicSpeed(result.glycemicSpeed, total,
+                                           result.totalFatG, result.totalProteinG, result.gi);
+      return result;
     }
   };
 
