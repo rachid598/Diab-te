@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '32'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '33'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -194,16 +194,15 @@
     inputMode = (mode === 'texte') ? 'texte' : 'photo';
     selectPane('tab-analyze', inputMode);
 
-    /* La zone de texte est déplacée dans le volet actif au lieu d'être
-       dupliquée : le contenu déjà saisi et les écouteurs suivent le nœud. */
-    var card = $('notes-card');
+    /* La carte de saisie reste à sa place dans le document et change seulement
+       de libellé. Elle était auparavant déplacée dans le volet actif — sans
+       aucun effet visuel, le volet Description étant vide, elle se retrouvait
+       au même endroit dans les deux cas. Une manipulation du DOM en moins. */
     if (inputMode === 'texte') {
-      $('pane-texte').appendChild(card);
       $('notes-title').firstChild.nodeValue = 'Décris ton repas ';
       $('notes-tag').textContent = 'sans photo';
       $('notes-hint').innerHTML = 'Écris simplement ce que tu manges, en une phrase.';
     } else {
-      $('pane-photo').appendChild(card);
       $('notes-title').firstChild.nodeValue = 'Précisions ';
       $('notes-tag').textContent = 'optionnel';
       $('notes-hint').innerHTML = 'Ce que tu sais déjà améliore l\'estimation (ex. « riz basmati ~150 g cuit, pain 60 g »).';
@@ -218,7 +217,10 @@
 
   function updateEstimateBtn() {
     var textMode = inputMode === 'texte';
-    var ready = textMode ? describedMeal().length >= 4 : images.length > 0;
+    // En mode description, un dessert ou une boisson suffisent à faire un repas.
+    var ready = textMode
+      ? (describedMeal().length >= 4 || extrasText().length >= 4)
+      : images.length > 0;
     var btn = $('estimate-btn');
     btn.disabled = !ready;
     btn.textContent = textMode ? '✍️ Estimer d\'après ma description' : '🔎 Estimer les glucides';
@@ -350,6 +352,10 @@
     });
     // La saisie d'une description active à elle seule le bouton d'estimation.
     $('user-notes').addEventListener('input', updateEstimateBtn);
+    ['extra-dessert', 'extra-drink'].forEach(function (id) {
+      var el = $(id);
+      if (el) el.addEventListener('input', updateEstimateBtn);
+    });
   }
 
   // ---------- Estimation IA ----------
@@ -371,6 +377,7 @@
       referenceObject: $('reference-object').value,
       plateDiameterCm: $('plate-diameter').value ? parseFloat($('plate-diameter').value) : null,
       notes: $('user-notes').value,
+      extras: extrasText(),       // dessert / boisson, absents de la photo
       imageCount: sent.length     // 0 fait basculer l'estimateur en mode description
     };
 
@@ -475,7 +482,11 @@
             parts: partsFrom(result.totalCarbsG), partSizeG: settings.partSizeG,
             glycemicSpeed: result.glycemicSpeed || null,
             gi: result.gi ? { gl: result.gi.gl, gi: result.gi.gi } : null,
-            items: result.items.map(function (it) { return { name: it.name, carbsG: it.carbsG }; })
+            seen: result.seen || '',
+            items: result.items.map(function (it) {
+              return { name: it.name, carbsG: it.carbsG,
+                       portion: it.portionDescription || '', added: !!it.added };
+            })
           };
           Storage.addHistory(entry);
           Queue.remove(item.id);
@@ -696,14 +707,6 @@
       '<div class="gly-head"><span class="gly-ico">' + g.icon + '</span>' +
         '<strong>' + g.label + '</strong> · <span class="gly-time">' + g.timing + '</span></div>' +
       (r.glycemicNote ? '<div class="gly-why">' + escapeHtml(r.glycemicNote) + '</div>' : '') +
-      /* La note du modèle décrit le repas qu'il a analysé. Une fois un dessert
-         ou une boisson ajoutés, elle ne les couvre plus : le dire vaut mieux
-         que laisser croire qu'elle vaut pour l'ensemble. */
-      (r.hasExtras
-        ? '<div class="gly-why">Le dessert ou la boisson ajoutés ensuite ne sont pas ' +
-          'couverts par cette phrase : un sucre liquide arrive nettement plus vite ' +
-          'que le plat.</div>'
-        : '') +
       '<div class="gly-meta">Tendance de ce repas, pas une prévision de ta glycémie — ' +
         'elle dépend aussi de toi et de ta pompe.</div>' +
       '</div>';
@@ -827,8 +830,6 @@
     html += '<p class="hint">Une portion te semble fausse dans la liste ci-dessus ? Corrige-la ici, le total se recalcule.</p>';
     html += '<div id="items-list"></div></div>';
 
-    html += extrasHtml();
-
     if (r.notes) {
       html += '<div class="card"><div class="notes-box">📝 ' + escapeHtml(r.notes) + '</div></div>';
     }
@@ -842,103 +843,47 @@
     el.innerHTML = html;
     el.hidden = false;
     renderItems();
-    initExtras();
     $('save-result').addEventListener('click', saveCurrentResult);
     $('save-meal').addEventListener('click', function () { promptSaveMeal(lastResult.items); });
     el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  /* ---------- Dessert et boisson prévus ----------
-     Ils ne sont presque jamais sur la photo : on photographie le plat, et le
-     yaourt ou le soda arrivent après. Les compter séparément obligerait à
-     refaire une estimation ; ils s'ajoutent donc au repas déjà estimé, et le
-     total, la charge glycémique et la vitesse d'absorption se recalculent. */
+  /* ---------- Dessert et boisson ----------
+     Ils sont saisis sur la page AVANT l'estimation et partent dans le même
+     appel que la photo : une seule requête au modèle au lieu de deux.
+     Le prompt précise qu'ils ne sont pas sur l'image, sinon le modèle les
+     chercherait en vain et finirait par les ignorer. */
   var DRINK_CHIPS = [
-    'un verre de jus d\'orange (20 cl)',
+    "un verre de jus d'orange (20 cl)",
     'une canette de soda (33 cl)',
     'un verre de lait (20 cl)',
     'un verre de vin rouge (12 cl)',
     'une bière (25 cl)'
   ];
 
-  function extrasHtml() {
-    return '<div class="card extras-card">' +
-      '<h2>➕ Tu prévois autre chose ?</h2>' +
-      '<p class="hint">Le dessert et la boisson sont rarement sur la photo. Ajoute-les ici : ils seront comptés dans le total et dans la charge glycémique.</p>' +
-
-      '<label for="extra-dessert">🍰 Dessert</label>' +
-      '<input id="extra-dessert" class="input" type="text" ' +
-        'placeholder="ex. une part de tarte aux pommes, un yaourt nature…">' +
-
-      '<label for="extra-drink">🥤 Boisson</label>' +
-      '<input id="extra-drink" class="input" type="text" ' +
-        'placeholder="ex. un verre de jus d\'orange">' +
-      '<div id="drink-chips" class="chips extras-chips">' +
-        DRINK_CHIPS.map(function (d, i) {
-          return '<button type="button" class="chip" data-drink="' + i + '">' +
-            escapeHtml(d.replace(/ \(.*\)$/, '')) + '</button>';
-        }).join('') +
-      '</div>' +
-      '<p class="hint tiny">Eau, café ou thé sans sucre, soda light : <strong>0 g</strong>, rien à ajouter.</p>' +
-
-      '<button id="add-extras" class="btn btn-primary">＋ Ajouter au repas</button>' +
-      '<div id="extras-status" class="status" hidden></div>' +
-      '</div>';
-  }
-
   function initExtras() {
     var chips = $('drink-chips');
     if (chips) {
+      chips.innerHTML = DRINK_CHIPS.map(function (d, i) {
+        return '<button type="button" class="chip" data-drink="' + i + '">' +
+          escapeHtml(d.replace(/ \(.*\)$/, '')) + '</button>';
+      }).join('');
       chips.querySelectorAll('[data-drink]').forEach(function (b) {
         b.addEventListener('click', function () {
           $('extra-drink').value = DRINK_CHIPS[parseInt(b.dataset.drink, 10)];
         });
       });
     }
-    var btn = $('add-extras');
-    if (btn) btn.addEventListener('click', addExtras);
   }
 
-  function addExtras() {
-    var dessert = ($('extra-dessert').value || '').trim();
-    var drink = ($('extra-drink').value || '').trim();
-    if (!dessert && !drink) { toast('Écris un dessert ou une boisson à ajouter.'); return; }
-
+  // Texte des compléments, ou chaîne vide s'il n'y en a pas.
+  function extrasText() {
+    var dessert = (($('extra-dessert') || {}).value || '').trim();
+    var drink = (($('extra-drink') || {}).value || '').trim();
     var parts = [];
     if (dessert) parts.push('Dessert : ' + dessert);
     if (drink) parts.push('Boisson : ' + drink);
-
-    var status = $('extras-status'), btn = $('add-extras');
-    status.hidden = false;
-    status.innerHTML = '<div class="spinner"></div>Estimation du complément…';
-    btn.disabled = true;
-
-    /* Estimation en mode DESCRIPTION (aucune image) : ces aliments n'ont pas été
-       photographiés, il n'y a rien à mesurer. On n'envoie que le complément,
-       jamais le repas déjà estimé — le recompter fausserait le total. */
-    Estimator.estimate([], {
-      referenceObject: 'none',
-      imageCount: 0,
-      notes: parts.join('. ') + '.'
-    }, settings).then(function (extra) {
-      var added = (extra.items || []).filter(function (it) { return it.name; });
-      if (!added.length) throw new Error('Rien n\'a pu être estimé à partir de ce texte.');
-
-      /* Marqués comme ajoutés : la carte « Ce que l'IA a vu » ne doit pas les
-         présenter comme vus sur la photo, ils ont été saisis après coup. */
-      added.forEach(function (it) { it.added = true; });
-      lastResult.items = lastResult.items.concat(added);
-      lastResult.hasExtras = true;
-      recomputeTotal();
-
-      var g = added.reduce(function (s, it) { return s + it.carbsG; }, 0);
-      renderResults(lastResult);
-      toast(added.length + ' ajouté(s) · +' + g + ' g de glucides.');
-    }).catch(function (e) {
-      status.hidden = true;
-      btn.disabled = false;
-      toast(e.message);
-    });
+    return parts.join('. ');
   }
 
   // ---------- Repas fréquents ----------
@@ -1074,7 +1019,18 @@
       partSizeG: settings.partSizeG,
       glycemicSpeed: lastResult.glycemicSpeed || null,
       gi: lastResult.gi ? { gl: lastResult.gi.gl, gi: lastResult.gi.gi } : null,
-      items: lastResult.items.map(function (it) { return { name: it.name, carbsG: it.carbsG }; })
+      seen: lastResult.seen || '',
+      /* On garde la portion et l'origine de chaque aliment : c'est ce qui rend
+         le détail de l'historique consultable des semaines plus tard. Ce sont
+         des chaînes courtes, sans commune mesure avec le poids d'une image. */
+      items: lastResult.items.map(function (it) {
+        return {
+          name: it.name,
+          carbsG: it.carbsG,
+          portion: it.portionDescription || '',
+          added: !!it.added
+        };
+      })
     };
     /* Image de la 1ʳᵉ vue, pour revoir plus tard à quoi ressemblait la portion.
        PWA : une vignette de 320 px en base64, seule taille que le quota de
@@ -1495,7 +1451,13 @@
         date: Date.now(), source: 'manuel', totalCarbsG: total,
         parts: parts, partSizeG: settings.partSizeG,
         gi: giInfo ? { gl: giInfo.gl, gi: giInfo.gi } : null,
-        items: manualItems.map(function (it) { return { name: it.name, carbsG: Math.round(itemGrams(it) * it.carb / 100) }; })
+        items: manualItems.map(function (it) {
+          return {
+            name: it.name,
+            carbsG: Math.round(itemGrams(it) * it.carb / 100),
+            portion: Math.round(itemGrams(it)) + ' g'
+          };
+        })
       };
       Storage.addHistory(entry);
       toast('Enregistré dans l\'historique.');
@@ -1506,6 +1468,58 @@
   }
 
   // ---------- Historique ----------
+  /* Repas dépliés. Conservé hors du rendu pour qu'un rafraîchissement (saisie
+     d'une valeur réelle, suppression) ne referme pas ce que l'on consultait. */
+  var openMeals = {};
+
+  function mealDetailHtml(e) {
+    var out = '';
+
+    if (historyImg(e)) {
+      out += '<img class="detail-photo" src="' + historyImg(e) + '" alt="photo du repas">';
+    }
+    if (e.seen) {
+      out += '<p class="detail-seen">« ' + escapeHtml(e.seen) + ' »</p>';
+    }
+
+    var vus = (e.items || []).filter(function (it) { return !it.added; });
+    var ajoutes = (e.items || []).filter(function (it) { return it.added; });
+    var ligne = function (it) {
+      return '<li>' +
+        '<span class="detail-food">' + escapeHtml(it.name) +
+          (it.portion ? ' <em>' + escapeHtml(it.portion) + '</em>' : '') + '</span>' +
+        '<span class="detail-carb">' + (it.carbsG > 0 ? it.carbsG + ' g' : '—') + '</span>' +
+        '</li>';
+    };
+    if (vus.length) out += '<ul class="detail-foods">' + vus.map(ligne).join('') + '</ul>';
+    if (ajoutes.length) {
+      out += '<div class="detail-label">Ajouté par toi</div>' +
+             '<ul class="detail-foods">' + ajoutes.map(ligne).join('') + '</ul>';
+    }
+
+    var tags = [];
+    if (e.gi && e.gi.gl != null) {
+      tags.push('<span class="detail-tag">Charge glycémique ' + e.gi.gl +
+        ' · ' + GI.glBand(e.gi.gl).label + '</span>');
+    }
+    if (e.glycemicSpeed && GLYCEMIC[e.glycemicSpeed]) {
+      tags.push('<span class="detail-tag">' + GLYCEMIC[e.glycemicSpeed].icon + ' ' +
+        GLYCEMIC[e.glycemicSpeed].label + '</span>');
+    }
+    if (tags.length) out += '<div class="detail-tags">' + tags.join('') + '</div>';
+
+    out += '<div class="history-real-line" data-line="' + e.date + '" hidden></div>' +
+      '<div class="history-real">' +
+      '  <label>Glucides réels</label>' +
+      '  <input class="input small real-input" type="number" inputmode="numeric" min="0" step="1" ' +
+      '         placeholder="g" value="' + (e.realCarbsG != null ? e.realCarbsG : '') +
+      '" data-real="' + e.date + '">' +
+      '  <span class="real-unit">g</span>' +
+      '</div>' +
+      '<button class="btn btn-ghost history-del" data-del="' + e.date + '">🗑️ Supprimer ce repas</button>';
+    return out;
+  }
+
   function renderHistory() {
     renderBiasCard();
     var list = $('history-list');
@@ -1517,7 +1531,6 @@
     }
     list.innerHTML = '';
 
-    // Résumé : nombre de repas + moyenne des parts.
     var avgParts = h.reduce(function (s, e) { return s + partsFromStored(e); }, 0) / h.length;
     var summary = document.createElement('div');
     summary.className = 'history-summary';
@@ -1525,43 +1538,64 @@
       ' · moyenne <strong>' + fr(avgParts) + ' parts</strong>';
     list.appendChild(summary);
 
-
     h.forEach(function (e) {
       var d = new Date(e.date);
-      var dateStr = d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-      // e.thumb = vignette base64 (PWA) ; e.photo = fichier sur disque (APK).
-      var names = (e.items || []).map(function (it) { return it.name; }).join(', ');
-      var item = document.createElement('div');
-      item.className = 'history-item';
+      var dateStr = d.toLocaleDateString('fr-FR') + ' ' +
+        d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      var open = !!openMeals[e.date];
 
-      item.innerHTML =
-        '<button class="history-del" data-del="' + e.date + '" aria-label="Supprimer">🗑️</button>' +
-        (historyImg(e) ? '<img class="history-thumb" src="' + historyImg(e) + '" alt="photo du repas">' : '') +
-        '<div class="history-date">' + dateStr + ' · ' + HISTORY_SOURCE[e.source] || HISTORY_SOURCE.manuel + '</div>' +
-        '<div class="history-total"><b>' + fr(partsFromStored(e)) + ' parts</b> · ' + e.totalCarbsG + ' g</div>' +
-        (e.gi && e.gi.gl != null
-          ? '<div class="history-gi">CG ' + e.gi.gl + ' · ' + GI.glBand(e.gi.gl).label + '</div>' : '') +
-        '<div class="item-detail">' + escapeHtml(names || '—') + '</div>' +
-        '<div class="history-real-line" data-line="' + e.date + '" hidden></div>' +
-        '<div class="history-real">' +
-        '  <label>Glucides réels</label>' +
-        '  <input class="input small real-input" type="number" inputmode="numeric" min="0" step="1" ' +
-        '         placeholder="g" value="' + (e.realCarbsG != null ? e.realCarbsG : '') + '" data-real="' + e.date + '">' +
-        '  <span class="real-unit">g</span>' +
-        '</div>';
+      var item = document.createElement('div');
+      item.className = 'history-item' + (open ? ' open' : '');
+
+      /* Ligne repliée : uniquement ce qu'on lit d'un coup d'œil en parcourant
+         la liste. Le reste (aliments, photo, charge, valeur réelle) est dans le
+         détail — sinon quelques dizaines de repas deviennent illisibles. */
+      var resume =
+        '<button class="history-head" data-open="' + e.date + '" aria-expanded="' + open + '">' +
+          (historyImg(e)
+            ? '<img class="history-thumb" src="' + historyImg(e) + '" alt="">'
+            : '<span class="history-noimg">' + (e.source === 'photo' ? '📷' : '✍️') + '</span>') +
+          '<span class="history-lines">' +
+            '<span class="history-date">' + dateStr + ' · ' +
+              (HISTORY_SOURCE[e.source] || HISTORY_SOURCE.manuel) + '</span>' +
+            '<span class="history-total"><b>' + fr(partsFromStored(e)) + ' parts</b> · ' +
+              e.totalCarbsG + ' g' +
+              (e.realCarbsG != null ? ' <span class="history-real-tag">réel ' + e.realCarbsG + ' g</span>' : '') +
+            '</span>' +
+          '</span>' +
+          '<span class="history-chev">' + (open ? '▲' : '▼') + '</span>' +
+        '</button>';
+
+      item.innerHTML = resume +
+        '<div class="history-detail"' + (open ? '' : ' hidden') + '>' +
+          (open ? mealDetailHtml(e) : '') + '</div>';
       list.appendChild(item);
-      updateRealLine(e.date, e.totalCarbsG, e.realCarbsG);
+      if (open) updateRealLine(e.date, e.totalCarbsG, e.realCarbsG);
     });
 
-    list.querySelectorAll('.history-del').forEach(function (b) {
+    list.querySelectorAll('[data-open]').forEach(function (b) {
       b.addEventListener('click', function () {
-        Storage.deleteHistory(Number(b.dataset.del));
+        var date = Number(b.dataset.open);
+        // Un seul repas ouvert à la fois : la liste reste parcourable.
+        var etait = openMeals[date];
+        openMeals = {};
+        if (!etait) openMeals[date] = true;
         renderHistory();
       });
     });
+
+    list.querySelectorAll('.history-del').forEach(function (b) {
+      b.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        Storage.deleteHistory(Number(b.dataset.del));
+        delete openMeals[Number(b.dataset.del)];
+        renderHistory();
+      });
+    });
+
     /* Saisie du réel. On met à jour UNIQUEMENT la ligne concernée et la carte de
-       biais : re-rendre toute la liste ferait perdre la saisie en cours dans un
-       autre champ (le 'change' se déclenche au moment où l'on quitte le champ). */
+       biais : re-rendre toute la liste ferait perdre la saisie en cours (le
+       'change' se déclenche au moment où l'on quitte le champ). */
     list.querySelectorAll('.real-input').forEach(function (inp) {
       var commit = function (announce) {
         var date = Number(inp.dataset.real);
@@ -1574,8 +1608,6 @@
         refreshBiasCard();
         if (announce) toast(real == null ? 'Valeur réelle effacée.' : 'Réel enregistré — l\'app apprend ton biais.');
       };
-      // Sauvegarde pendant la frappe (rien n'est perdu si l'app est fermée),
-      // puis confirmation visible quand on quitte le champ.
       inp.addEventListener('input', function () {
         clearTimeout(inp._t);
         inp._t = setTimeout(function () { commit(false); }, 600);
@@ -1588,7 +1620,6 @@
     $('clear-history').hidden = false;
   }
 
-  // Met à jour l'écart estimé/réel d'une seule ligne d'historique.
   function updateRealLine(date, estG, realG) {
     var el = document.querySelector('[data-line="' + date + '"]');
     if (!el) return;
@@ -2128,6 +2159,7 @@
     initTabs();
     initPhotos();
     initModeSwitch();
+    initExtras();
     initEstimate();
     initManual();
     initHistory();

@@ -597,11 +597,60 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 .seen-ref { font-size: 12px; color: var(--muted); margin: 12px 0 0;
   padding-top: 10px; border-top: 1px solid var(--border); }
 
-/* ---------- Dessert / boisson ajoutés après l'estimation ---------- */
-.extras-card { border-style: dashed; }
+/* ---------- Dessert / boisson ---------- */
 .extras-chips { margin-top: 8px; }
 .extras-chips .chip { font-size: 12.5px; }
-.extras-card .btn-primary { width: 100%; margin-top: 14px; }
 .seen-sub { font-size: 13px; font-weight: 800; color: var(--muted);
   margin: 14px 0 2px; padding-top: 12px; border-top: 1px dashed var(--border-strong);
   text-transform: uppercase; letter-spacing: .03em; }
+
+/* ---------- Historique : repas dépliables ---------- */
+.history-item { border-top: 1px solid var(--border); padding: 0; }
+.history-summary + .history-item { border-top: none; }
+.history-head {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  background: none; border: none; cursor: pointer; text-align: left;
+  padding: 12px 2px; color: inherit; border-radius: var(--r-sm);
+}
+.history-head:active { background: var(--surface-2); }
+.history-item.open .history-head { padding-bottom: 6px; }
+.history-thumb { width: 52px; height: 52px; object-fit: cover; border-radius: 10px; flex-shrink: 0; }
+.history-noimg {
+  width: 52px; height: 52px; flex-shrink: 0; display: grid; place-items: center;
+  background: var(--surface-2); border-radius: 10px; font-size: 21px;
+}
+.history-lines { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.history-date { font-size: 12px; color: var(--muted); }
+.history-total { font-size: 14px; }
+.history-total b { font-size: 15.5px; }
+.history-real-tag {
+  font-size: 11.5px; color: var(--ok); font-weight: 700;
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  padding: 1px 7px; border-radius: var(--r-full);
+}
+.history-chev { color: var(--faint); font-size: 11px; flex-shrink: 0; }
+
+.history-detail { padding: 2px 2px 16px; animation: fade-in .2s ease both; }
+.detail-photo { width: 100%; max-height: 260px; object-fit: cover;
+  border-radius: var(--r); margin-bottom: 12px; }
+.detail-seen { font-size: 13.5px; font-style: italic; line-height: 1.55;
+  margin: 0 0 12px; padding: 10px 12px; border-radius: var(--r);
+  background: color-mix(in srgb, var(--brand) 8%, var(--surface));
+  border-left: 3px solid var(--brand); }
+.detail-label { font-size: 11.5px; font-weight: 800; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .03em; margin: 12px 0 2px; }
+.detail-foods { list-style: none; margin: 0; padding: 0; }
+.detail-foods li { display: flex; justify-content: space-between; gap: 12px;
+  padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.detail-foods li:last-child { border-bottom: none; }
+.detail-food em { color: var(--muted); font-size: 12.5px; font-style: normal; }
+.detail-carb { white-space: nowrap; font-weight: 700; }
+.detail-tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+.detail-tag { font-size: 12px; padding: 5px 11px; border-radius: var(--r-full);
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); }
+/* L'ancienne mise en page positionnait la corbeille en absolu dans le coin de
+   la ligne. Dans le détail c'est un bouton normal, en pleine largeur. */
+.history-detail .history-del {
+  position: static; width: 100%; margin-top: 16px; font-size: 13px;
+  top: auto; right: auto;
+}

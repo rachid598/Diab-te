@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=32" />
+  <link rel="stylesheet" href="css/styles.css?v=33" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -134,6 +134,24 @@
         <p class="hint" id="notes-hint">Écris simplement ce que tu manges, en une phrase.</p>
         <textarea id="user-notes" class="input" rows="3" placeholder="Ex. : une assiette de pâtes à la bolognaise, deux tranches de pain et un yaourt nature"></textarea>
         <p class="hint tiny" id="notes-foot">Plus tu donnes de quantités, plus c'est juste : « 150 g de riz <em>cuit</em> » vaut mieux qu'« un peu de riz ». Tu peux dicter avec le micro de ton clavier.</p>
+      </div>
+
+      <!-- Dessert et boisson : saisis AVANT l'estimation pour partir dans le
+           même appel que la photo. Les demander après le résultat obligeait à
+           une seconde requête, donc à payer deux fois et à attendre deux fois. -->
+      <div class="card extras-card">
+        <h2>🍰 Dessert et boisson <span class="tag">optionnel</span></h2>
+        <p class="hint">Rarement sur la photo, mais ils comptent dans le total. Indique-les ici avant d'estimer.</p>
+
+        <label for="extra-dessert">Dessert prévu</label>
+        <input id="extra-dessert" class="input" type="text"
+               placeholder="ex. une part de tarte aux pommes, un yaourt nature…" />
+
+        <label for="extra-drink">Boisson</label>
+        <input id="extra-drink" class="input" type="text"
+               placeholder="ex. un verre de jus d'orange" />
+        <div id="drink-chips" class="chips extras-chips"></div>
+        <p class="hint tiny">Eau, café ou thé sans sucre, soda light : <strong>0 g</strong>, rien à indiquer.</p>
       </div>
 
       <p id="mode-warning" class="mode-warning" hidden></p>
@@ -429,18 +447,18 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=32"></script>
-  <script src="js/native.js?v=32"></script>
-  <script src="js/storage.js?v=32"></script>
-  <script src="js/foods.js?v=32"></script>
-  <script src="js/gi.js?v=32"></script>
-  <script src="js/queue.js?v=32"></script>
-  <script src="js/report.js?v=32"></script>
-  <script src="js/estimator.js?v=32"></script>
-  <script src="js/camera.js?v=32"></script>
-  <script src="js/off.js?v=32"></script>
-  <script src="vendor/zxing.min.js?v=32"></script>
-  <script src="js/barcode.js?v=32"></script>
-  <script src="js/app.js?v=32"></script>
+  <script src="vendor/capacitor-plugins.js?v=33"></script>
+  <script src="js/native.js?v=33"></script>
+  <script src="js/storage.js?v=33"></script>
+  <script src="js/foods.js?v=33"></script>
+  <script src="js/gi.js?v=33"></script>
+  <script src="js/queue.js?v=33"></script>
+  <script src="js/report.js?v=33"></script>
+  <script src="js/estimator.js?v=33"></script>
+  <script src="js/camera.js?v=33"></script>
+  <script src="js/off.js?v=33"></script>
+  <script src="vendor/zxing.min.js?v=33"></script>
+  <script src="js/barcode.js?v=33"></script>
+  <script src="js/app.js?v=33"></script>
 </body>
 </html>

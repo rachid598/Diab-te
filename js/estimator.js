@@ -104,6 +104,7 @@
     '      "fatG": nombre,',
     '      "kcal": nombre,',
     '      "gi": nombre | null,',
+    '      "fromPhoto": true | false,',
     '      "confidence": "low" | "medium" | "high",',
     '      "assumptions": "mesures via le repère + hypothèses clés, en français"',
     '    }',
@@ -145,6 +146,12 @@
     if (ctx.notes && ctx.notes.trim()) {
       lines.push('Précisions de l\'utilisateur (fiables, à intégrer) : ' + ctx.notes.trim());
     }
+    if (ctx.extras && ctx.extras.trim()) {
+      lines.push('À COMPTER EN PLUS, mais ABSENTS DE LA PHOTO (l\'utilisateur les');
+      lines.push('prévoit après le plat) : ' + ctx.extras.trim());
+      lines.push('Ne les cherche pas dans l\'image. Ajoute-les comme aliments à part');
+      lines.push('entière avec "fromPhoto": false, en te basant sur les portions usuelles.');
+    }
     var cal = calibrationBlock();
     if (cal) lines.push(cal);
     lines.push('Réponds uniquement avec le JSON.');
@@ -160,6 +167,9 @@
       'Estime les glucides de CE repas, uniquement à partir de cette description.',
       'Ne compte aucun aliment qui n\'y figure pas.'
     ];
+    if (ctx.extras && ctx.extras.trim()) {
+      lines.push('À compter également : ' + ctx.extras.trim());
+    }
     var cal = calibrationBlock();
     if (cal) lines.push(cal);
     lines.push('Réponds uniquement avec le JSON.');
@@ -545,6 +555,9 @@
         fatG: nonNeg(it.fatG),
         kcal: nonNeg(it.kcal),
         gi: nonNeg(it.gi),          // secours seulement : la table locale prime
+        // Dessert / boisson annoncés mais absents de l'image : l'interface les
+        // présente à part, pour ne pas les faire passer pour « vus ».
+        added: !fromText && it.fromPhoto === false,
         confidence: normConf(it.confidence),
         assumptions: it.assumptions || ''
       };
