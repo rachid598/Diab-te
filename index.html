@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=34" />
+  <link rel="stylesheet" href="css/styles.css?v=35" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -415,6 +415,14 @@
         <p class="hint tiny" id="keystore-note" hidden>🔒 Sur l'application Android, tes clés sont chiffrées par le Keystore du téléphone et ne sont plus stockées en clair.</p>
       </div>
 
+      <!-- Mise à jour -->
+      <div class="set-group">
+        <h3>Mise à jour</h3>
+        <p class="hint tiny">L'app se met à jour toute seule au lancement. Ce bouton force la vérification et dit précisément ce qu'il en est.</p>
+        <button id="check-update" class="btn btn-ghost">🔄 Vérifier les mises à jour</button>
+        <p id="update-status" class="update-status" hidden></p>
+      </div>
+
       <button id="save-settings" class="btn btn-primary btn-lg" style="margin-bottom:12px">Enregistrer</button>
       <p class="hint tiny">Sécurité : les clés et les photos ne quittent ton téléphone que pour l'appel direct au fournisseur choisi. Rien n'est stocké sur un serveur.</p>
       <p class="hint tiny app-version-line" id="app-version">Version…</p>
@@ -447,18 +455,18 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=34"></script>
-  <script src="js/native.js?v=34"></script>
-  <script src="js/storage.js?v=34"></script>
-  <script src="js/foods.js?v=34"></script>
-  <script src="js/gi.js?v=34"></script>
-  <script src="js/queue.js?v=34"></script>
-  <script src="js/report.js?v=34"></script>
-  <script src="js/estimator.js?v=34"></script>
-  <script src="js/camera.js?v=34"></script>
-  <script src="js/off.js?v=34"></script>
-  <script src="vendor/zxing.min.js?v=34"></script>
-  <script src="js/barcode.js?v=34"></script>
-  <script src="js/app.js?v=34"></script>
+  <script src="vendor/capacitor-plugins.js?v=35"></script>
+  <script src="js/native.js?v=35"></script>
+  <script src="js/storage.js?v=35"></script>
+  <script src="js/foods.js?v=35"></script>
+  <script src="js/gi.js?v=35"></script>
+  <script src="js/queue.js?v=35"></script>
+  <script src="js/report.js?v=35"></script>
+  <script src="js/estimator.js?v=35"></script>
+  <script src="js/camera.js?v=35"></script>
+  <script src="js/off.js?v=35"></script>
+  <script src="vendor/zxing.min.js?v=35"></script>
+  <script src="js/barcode.js?v=35"></script>
+  <script src="js/app.js?v=35"></script>
 </body>
 </html>

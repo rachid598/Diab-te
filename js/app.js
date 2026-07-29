@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '34'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '35'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -1757,6 +1757,7 @@
     $('set-compare-model').addEventListener('change', function () {
       $('set-compare-model-custom-wrap').hidden = $('set-compare-model').value !== CUSTOM_VALUE;
     });
+    initUpdateCheck();
     var purge = $('purge-photos');
     if (purge) {
       purge.addEventListener('click', function () {
@@ -2112,6 +2113,102 @@
     };
     run();
     setInterval(run, 6 * 60 * 60 * 1000);
+  }
+
+  /* ---------- Vérification manuelle des mises à jour ----------
+     La vérification automatique échouait en SILENCE : pas de réseau, publication
+     en retard, worker en attente — dans tous les cas l'app restait sur son
+     ancienne version sans rien dire, et on ne pouvait pas distinguer « à jour »
+     de « quelque chose ne marche pas ». Ce bouton nomme la situation. */
+
+  function setUpdateStatus(msg, kind) {
+    var el = $('update-status');
+    if (!el) return;
+    el.hidden = false;
+    el.className = 'update-status' + (kind ? ' us-' + kind : '');
+    el.innerHTML = msg;
+  }
+
+  /* Version réellement publiée. Deux chemins, parce que les contraintes ne sont
+     pas les mêmes : l'APK lit le manifeste des releases par le réseau natif
+     (aucun blocage d'origine croisée), la PWA relit son propre js/app.js avec un
+     anti-cache — c'est la seule source qui dise ce que le serveur sert VRAIMENT,
+     par opposition à ce que le cache du navigateur veut bien montrer. */
+  function fetchPublishedVersion() {
+    if (Native.isApp) {
+      return Native.httpJson(OTA_MANIFEST + '?t=' + Date.now(), 10000)
+        .then(function (res) {
+          var info = res && res.data;
+          if (!info || !info.appVersion) throw new Error('Manifeste illisible.');
+          return { version: String(info.appVersion), info: info };
+        });
+    }
+    return fetch('js/app.js?maj=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      })
+      .then(function (txt) {
+        var m = /APP_VERSION = '(\d+)'/.exec(txt);
+        if (!m) throw new Error('Version introuvable.');
+        return { version: m[1], info: null };
+      });
+  }
+
+  function initUpdateCheck() {
+    var btn = $('check-update');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      setUpdateStatus('<span class="spinner"></span>Vérification…', '');
+
+      fetchPublishedVersion().then(function (pub) {
+        var local = parseInt(APP_VERSION, 10);
+        var online = parseInt(pub.version, 10);
+
+        if (online <= local) {
+          setUpdateStatus('✅ Tu es à jour — version ' + APP_VERSION +
+            ', et c\'est bien la dernière publiée.', 'ok');
+          btn.disabled = false;
+          return;
+        }
+
+        setUpdateStatus('⬇️ Version ' + pub.version + ' disponible (tu es en ' +
+          APP_VERSION + '). Téléchargement…', '');
+
+        if (Native.isApp) {
+          return Native.update.download(pub.info).then(function (bundle) {
+            btn.disabled = false;
+            if (!bundle) {
+              setUpdateStatus('⚠️ Version ' + pub.version + ' trouvée, mais le ' +
+                'téléchargement a échoué. Réessaie avec une meilleure connexion.', 'warn');
+              return;
+            }
+            setUpdateStatus('✅ Version ' + pub.version + ' prête.', 'ok');
+            showUpdate(function () { Native.update.apply(bundle); });
+          });
+        }
+
+        /* PWA : le service worker peut détenir l'ancienne page en cache. On le
+           force à se remettre à jour, puis on recharge en contournant le cache. */
+        btn.disabled = false;
+        setUpdateStatus('✅ Version ' + pub.version + ' disponible.', 'ok');
+        var apply = function () {
+          if (!('serviceWorker' in navigator)) { window.location.reload(); return; }
+          navigator.serviceWorker.getRegistration().then(function (reg) {
+            if (reg && reg.waiting) { reg.waiting.postMessage('SKIP_WAITING'); return; }
+            (reg ? reg.update() : Promise.resolve())
+              .catch(function () {})
+              .then(function () { window.location.reload(); });
+          });
+        };
+        showUpdate(apply);
+      }).catch(function (e) {
+        btn.disabled = false;
+        setUpdateStatus('❌ Impossible de vérifier : ' + escapeHtml(e.message || 'réseau injoignable') +
+          '. Réessaie une fois connecté.', 'warn');
+      });
+    });
   }
 
   function registerSW() {
