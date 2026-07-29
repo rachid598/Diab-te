@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=35" />
+  <link rel="stylesheet" href="css/styles.css?v=36" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -360,7 +360,36 @@
         <input id="set-key-openai" class="input" type="password" placeholder="sk-…" autocomplete="off" />
         <p class="hint tiny">platform.openai.com/api-keys — payant. ⚠️ L'abonnement <strong>ChatGPT Pro ne donne pas accès à l'API</strong>.</p>
 
+        <label>OpenRouter <span class="tag">tous les modèles</span></label>
+        <input id="set-key-openrouter" class="input" type="password" placeholder="sk-or-v1-…" autocomplete="off" />
+        <p class="hint tiny">openrouter.ai/keys — un seul compte pour Claude, Gemini, ChatGPT, Qwen… Facturation à l'usage, sans abonnement.</p>
+
         <button id="clear-key" class="btn btn-ghost" style="margin-top:10px">Effacer la clé du fournisseur actif</button>
+      </div>
+
+      <!-- Vérification croisée -->
+      <div class="set-group">
+        <h3>Vérification croisée <span class="tag">recommandé</span></h3>
+        <p class="hint tiny">Un second modèle estime le même repas en parallèle. L'app compare et t'alerte seulement si les deux sont en désaccord — c'est ce qui rattrape une erreur grossière avant que tu saisisses la dose.</p>
+        <label class="check">
+          <input type="checkbox" id="set-verify" />
+          <span>Vérifier chaque estimation avec un 2ᵉ modèle</span>
+        </label>
+        <label>Fournisseur de vérification</label>
+        <select id="set-verify-provider" class="input">
+          <option value="openrouter">OpenRouter</option>
+          <option value="claude">Claude</option>
+          <option value="gemini">Gemini</option>
+          <option value="openai">ChatGPT</option>
+        </select>
+        <label>Alerter à partir de</label>
+        <select id="set-verify-threshold" class="input">
+          <option value="10">10 % d'écart — très sensible</option>
+          <option value="15">15 % d'écart</option>
+          <option value="20" selected>20 % d'écart — recommandé</option>
+          <option value="30">30 % d'écart — seulement les gros écarts</option>
+        </select>
+        <p class="hint tiny">Avec OpenRouter et Qwen 3.7 Flash, une vérification coûte environ <strong>0,025 centime</strong> : tu peux la laisser allumée en permanence.</p>
       </div>
 
       <!-- Parts -->
@@ -455,18 +484,18 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=35"></script>
-  <script src="js/native.js?v=35"></script>
-  <script src="js/storage.js?v=35"></script>
-  <script src="js/foods.js?v=35"></script>
-  <script src="js/gi.js?v=35"></script>
-  <script src="js/queue.js?v=35"></script>
-  <script src="js/report.js?v=35"></script>
-  <script src="js/estimator.js?v=35"></script>
-  <script src="js/camera.js?v=35"></script>
-  <script src="js/off.js?v=35"></script>
-  <script src="vendor/zxing.min.js?v=35"></script>
-  <script src="js/barcode.js?v=35"></script>
-  <script src="js/app.js?v=35"></script>
+  <script src="vendor/capacitor-plugins.js?v=36"></script>
+  <script src="js/native.js?v=36"></script>
+  <script src="js/storage.js?v=36"></script>
+  <script src="js/foods.js?v=36"></script>
+  <script src="js/gi.js?v=36"></script>
+  <script src="js/queue.js?v=36"></script>
+  <script src="js/report.js?v=36"></script>
+  <script src="js/estimator.js?v=36"></script>
+  <script src="js/camera.js?v=36"></script>
+  <script src="js/off.js?v=36"></script>
+  <script src="vendor/zxing.min.js?v=36"></script>
+  <script src="js/barcode.js?v=36"></script>
+  <script src="js/app.js?v=36"></script>
 </body>
 </html>
