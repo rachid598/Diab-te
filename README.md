@@ -127,7 +127,7 @@ serveur intermédiaire** en dehors du fournisseur choisi.
 | Fournisseur | Où obtenir une clé | Coût indicatif par estimation |
 |---|---|---|
 | **Anthropic** (Claude) | [console.anthropic.com](https://console.anthropic.com/settings/keys) | ~0,018 $ (Sonnet 5) |
-| **Google** (Gemini) | [aistudio.google.com](https://aistudio.google.com/app/apikey) | palier gratuit généreux |
+| **Google** (Gemini) | [aistudio.google.com](https://aistudio.google.com/app/apikey) | ~0,002 $ (3.1 Flash-Lite) |
 | **OpenAI** (ChatGPT) | [platform.openai.com](https://platform.openai.com/api-keys) | ~0,012 $ |
 | **OpenRouter** (tous modèles) | [openrouter.ai/keys](https://openrouter.ai/keys) | de ~0,0005 $ à ~0,10 $ selon le modèle |
 

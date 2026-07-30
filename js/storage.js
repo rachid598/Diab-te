@@ -45,13 +45,13 @@
     ],
     gemini: [
       { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite',
-        note: 'RECOMMANDÉ · MAE 10,0 g · le plus rapide (4 s) · gratuit', stars: 3 },
-      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', note: 'non mesuré · gratuit', stars: 2 },
+        note: 'RECOMMANDÉ · MAE 10,0 g · le plus rapide (4 s) · ~0,002 $', stars: 3 },
+      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', note: 'non mesuré · payant uniquement', stars: 2 },
       { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash',
-        note: 'MAE 14,6 g · sous-estime beaucoup (−30 %) · gratuit', stars: 1 },
-      { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', note: 'non mesuré · gratuit', stars: 2 },
-      { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', note: 'rapide · gratuit', stars: 2 },
-      { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', note: 'très rapide · gratuit', stars: 1 }
+        note: 'MAE 14,6 g · sous-estime beaucoup (−30 %)', stars: 1 },
+      { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', note: 'non mesuré', stars: 2 },
+      { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', note: 'rapide', stars: 2 },
+      { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', note: 'très rapide', stars: 1 }
     ],
     openai: [
       { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', note: 'raisonnement · non mesuré', stars: 2 },
@@ -125,8 +125,8 @@
 
   var DEFAULT_SETTINGS = {
     /* Fournisseur par défaut : Gemini, pour son modèle 3.1 Flash-Lite — meilleur
-       rapport précision/prix mesuré au banc d'essai (BENCHMARK.md), et palier
-       gratuit chez Google. Ce défaut ne concerne QUE les installations neuves :
+       rapport précision/prix mesuré au banc d'essai (BENCHMARK.md), à environ
+       0,002 $ l'analyse. Ce défaut ne concerne QUE les installations neuves :
        un réglage déjà enregistré n'est jamais écrasé. */
     provider: 'gemini',                                   // fournisseur actif
     compareProvider: '',                                  // compatibilité avant v37
