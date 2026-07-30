@@ -874,3 +874,37 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 .warn-box li { margin: 3px 0; }
 .v-warn { background: color-mix(in srgb, var(--accent) 12%, var(--surface));
   border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+
+/* ---------- Qualité des photos ---------- */
+.thumb { position: relative; }
+.thumb-bad img { outline: 2px solid var(--danger); outline-offset: -2px; }
+.thumb-flag {
+  position: absolute; left: 3px; bottom: 3px; right: 3px;
+  font-size: 9.5px; font-weight: 800; text-align: center;
+  padding: 2px 3px; border-radius: 5px; line-height: 1.25;
+  background: rgba(0, 0, 0, .72); color: #fff;
+  text-transform: uppercase; letter-spacing: .02em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.flag-bad { background: var(--danger); }
+.flag-soft { background: rgba(0, 0, 0, .6); }
+.photo-advice { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 4px; }
+.advice { font-size: 12.5px; line-height: 1.5; padding: 9px 12px; border-radius: var(--r); }
+.advice-warn { background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.advice-tip { background: color-mix(in srgb, var(--brand) 9%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--brand) 35%, var(--border)); }
+
+/* ---------- Relance et repas similaire ---------- */
+.rerun-box { margin-top: 14px; padding: 12px 13px; border-radius: var(--r);
+  background: var(--surface-2); border: 1px solid var(--border); text-align: left; }
+.rerun-box label { margin-top: 0; }
+.rerun-row { display: flex; gap: 8px; align-items: stretch; }
+.rerun-row .input { flex: 1; min-width: 0; }
+.rerun-row .btn { flex: 0 0 auto; white-space: nowrap; }
+.similar-box { margin-top: 12px; padding: 11px 13px; border-radius: var(--r);
+  text-align: left; font-size: 13px; line-height: 1.55;
+  background: color-mix(in srgb, var(--info) 9%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--info) 40%, var(--border)); }
+.similar-head { font-weight: 800; font-size: 13.5px; margin-bottom: 4px; }
+.similar-foot { font-size: 11.5px; color: var(--muted); margin-top: 7px; }

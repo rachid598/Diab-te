@@ -386,6 +386,61 @@
       });
     },
 
+    /* ----- Retrouver un repas déjà mangé -----
+       Un repas passé dont la valeur RÉELLE a été relevée vaut mieux que
+       n'importe quelle estimation : c'est une mesure, sur ce plat précis, avec
+       tes portions habituelles. Le biais moyen, lui, mélange tous les repas.
+
+       Comparaison volontairement simple, et locale : recouvrement des mots des
+       noms d'aliments (indice de Jaccard) plus proximité du total. Pas
+       d'empreinte d'image ni d'appel réseau — on cherche « le même plat »,
+       pas « la même photo ». */
+    findSimilarMeal: function (items, totalCarbsG) {
+      var mots = function (list) {
+        var set = {};
+        (list || []).forEach(function (it) {
+          if (!(it.carbsG > 0)) return;   // un aliment sans glucides ne caractérise pas le plat
+          (it.name || '').toLowerCase()
+            .replace(/[^a-zà-ÿ ]/g, ' ')
+            .split(/\s+/)
+            .forEach(function (w) { if (w.length >= 4) set[w] = true; });
+        });
+        return Object.keys(set);
+      };
+
+      var ref = mots(items);
+      if (ref.length < 1 || !(totalCarbsG > 0)) return null;
+
+      var best = null;
+      this.getHistory().forEach(function (e) {
+        if (!(e.realCarbsG > 0) || !(e.totalCarbsG > 0)) return;
+        var autres = mots(e.items);
+        if (!autres.length) return;
+        var communs = ref.filter(function (w) { return autres.indexOf(w) !== -1; }).length;
+        var union = ref.length + autres.length - communs;
+        var jaccard = union ? communs / union : 0;
+        // Totaux trop éloignés : ce n'est pas la même assiette, même si les
+        // aliments se ressemblent.
+        var ecart = Math.abs(e.totalCarbsG - totalCarbsG) / totalCarbsG;
+        if (jaccard < 0.5 || ecart > 0.4) return;
+        var score = jaccard - ecart * 0.5;
+        if (!best || score > best.score) {
+          best = { score: score, jaccard: jaccard, entry: e };
+        }
+      });
+      if (!best) return null;
+      return {
+        date: best.entry.date,
+        estimated: best.entry.totalCarbsG,
+        real: best.entry.realCarbsG,
+        realSource: best.entry.realSource || null,
+        // Écart constaté ce jour-là, en pourcentage de l'estimation.
+        pct: Math.round((best.entry.realCarbsG - best.entry.totalCarbsG) / best.entry.totalCarbsG * 100),
+        names: (best.entry.items || []).filter(function (it) { return it.carbsG > 0; })
+                 .map(function (it) { return it.name; }).slice(0, 3)
+      };
+    },
+
     // ----- Repas enregistrés (« mes repas fréquents ») -----
     getSavedMeals: function () {
       return read(KEYS.savedMeals, []);

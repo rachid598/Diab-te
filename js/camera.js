@@ -36,6 +36,82 @@
   }
 
   // Dessine une source (image ou vidéo) sur un canvas et renvoie un JPEG compressé.
+  /* ---------- Qualité de l'image, mesurée EN LOCAL ----------
+     Une photo floue ou trop sombre donne une estimation médiocre, mais on ne
+     l'apprend qu'après avoir attendu 20 s et payé l'appel — et le message
+     d'erreur, lui, ne dit jamais que la cause était la photo.
+
+     Ces deux mesures coûtent quelques millisecondes et aucun appel réseau :
+     - NETTETÉ : variance du laplacien. Une image nette a des transitions
+       franches entre pixels voisins, donc une forte variance ; le flou les
+       lisse et la fait chuter. C'est la mesure classique du « focus ».
+     - EXPOSITION : luminance moyenne, plus la part de pixels écrasés en noir
+       ou brûlés en blanc — dans les deux cas l'information est perdue et
+       aucun modèle ne peut la retrouver.
+
+     On analyse une réduction à 256 px : suffisant pour ces statistiques, et
+     assez rapide pour ne pas bloquer l'interface. */
+  var ANALYSE_DIM = 256;
+  var SHARP_BLURRY = 90;    // en dessous : franchement flou
+  var SHARP_SOFT = 220;     // entre les deux : acceptable mais mou
+  var DARK = 55, BRIGHT = 205;
+
+  function analyseQuality(source, w, h) {
+    try {
+      var s = Math.min(1, ANALYSE_DIM / Math.max(w, h));
+      var aw = Math.max(8, Math.round(w * s)), ah = Math.max(8, Math.round(h * s));
+      var c = document.createElement('canvas');
+      c.width = aw; c.height = ah;
+      var ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(source, 0, 0, aw, ah);
+      var d = ctx.getImageData(0, 0, aw, ah).data;
+
+      // Niveaux de gris (luma perceptuelle) + statistiques d'exposition.
+      var gray = new Float32Array(aw * ah);
+      var sum = 0, dark = 0, blown = 0;
+      for (var i = 0, p = 0; p < d.length; p += 4, i++) {
+        var g = 0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2];
+        gray[i] = g; sum += g;
+        if (g < 12) dark++;
+        if (g > 246) blown++;
+      }
+      var n = aw * ah;
+      var mean = sum / n;
+
+      // Laplacien 4-voisins, puis variance de la réponse.
+      var lSum = 0, lSum2 = 0, count = 0;
+      for (var y = 1; y < ah - 1; y++) {
+        for (var x = 1; x < aw - 1; x++) {
+          var k = y * aw + x;
+          var lap = 4 * gray[k] - gray[k - 1] - gray[k + 1] - gray[k - aw] - gray[k + aw];
+          lSum += lap; lSum2 += lap * lap; count++;
+        }
+      }
+      if (!count) return null;
+      var lMean = lSum / count;
+      var sharpness = Math.round(lSum2 / count - lMean * lMean);
+
+      var issues = [];
+      if (sharpness < SHARP_BLURRY) issues.push('flou');
+      else if (sharpness < SHARP_SOFT) issues.push('peu net');
+      if (mean < DARK) issues.push('sombre');
+      else if (mean > BRIGHT) issues.push('surexposé');
+      if (dark / n > 0.55) issues.push('sombre');
+      if (blown / n > 0.18) issues.push('reflets brûlés');
+
+      return {
+        sharpness: sharpness,
+        brightness: Math.round(mean),
+        // 'bad' déclenche un avertissement visible, 'soft' une simple mention.
+        verdict: (sharpness < SHARP_BLURRY || mean < DARK || mean > BRIGHT) ? 'bad'
+               : (issues.length ? 'soft' : 'ok'),
+        issues: issues.filter(function (v, i, a) { return a.indexOf(v) === i; })
+      };
+    } catch (e) {
+      return null;   // une analyse impossible ne doit jamais bloquer une photo
+    }
+  }
+
   function drawToJpeg(source, w, h) {
     var scale = Math.min(1, MAX_DIM / Math.max(w, h));
     var cw = Math.round(w * scale), ch = Math.round(h * scale);
@@ -43,7 +119,10 @@
     canvas.width = cw; canvas.height = ch;
     canvas.getContext('2d').drawImage(source, 0, 0, cw, ch);
     var dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
-    return { base64: dataUrl.split(',')[1], mediaType: 'image/jpeg', previewUrl: dataUrl };
+    return {
+      base64: dataUrl.split(',')[1], mediaType: 'image/jpeg', previewUrl: dataUrl,
+      quality: analyseQuality(source, w, h)
+    };
   }
 
   /* Extrait jusqu'à maxFrames images réparties dans une vidéo, par LECTURE +
@@ -156,7 +235,10 @@
         if (Math.max(w, h) <= MAX_DIM) {
           var head = dataUrl.slice(0, dataUrl.indexOf(','));
           var mt = (/data:([^;]+)/.exec(head) || [])[1] || 'image/jpeg';
-          resolve({ base64: dataUrl.split(',')[1], mediaType: mt, previewUrl: dataUrl });
+          // Même sans ré-encodage, on mesure la qualité : c'est le chemin de
+          // l'appareil photo natif, celui qui sert le plus souvent.
+          resolve({ base64: dataUrl.split(',')[1], mediaType: mt, previewUrl: dataUrl,
+                    quality: analyseQuality(img, w, h) });
         } else {
           resolve(drawToJpeg(img, w, h));
         }
@@ -191,6 +273,7 @@
     makeThumb: makeThumb,
     processFile: processFile,
     processDataUrl: processDataUrl,
+    analyseQuality: analyseQuality,
     // Tolérant aux échecs, comme processFiles.
     processDataUrls: function (urls) {
       return Promise.allSettled(urls.map(processDataUrl)).then(function (settled) {
