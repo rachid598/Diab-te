@@ -933,3 +933,20 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 
 /* Filtre du journal */
 .history-search { margin: 4px 0 12px; }
+
+/* Statut de la relance — affiché DANS la carte, sous le bouton */
+.rerun-status {
+  margin-top: 10px; padding: 10px 12px; border-radius: var(--r);
+  font-size: 12.5px; line-height: 1.5;
+  background: color-mix(in srgb, var(--brand) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--brand) 40%, var(--border));
+}
+.rerun-status .spinner {
+  width: 13px; height: 13px; border-width: 2px;
+  display: inline-block; vertical-align: -2px; margin-right: 7px;
+}
+.rerun-status.rerun-fail {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+#rerun-timer { color: var(--muted); font-variant-numeric: tabular-nums; }
