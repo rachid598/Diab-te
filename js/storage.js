@@ -20,42 +20,68 @@
     savedMeals: 'diabete.savedmeals.v1'
   };
 
-  // Catalogue de modèles par fournisseur. stars = indice de qualité/précision (1 à 3).
+  /* Catalogue de modèles par fournisseur.
+
+     Les notes portent l'ERREUR MESURÉE, pas une réputation. Elle vient d'un banc
+     d'essai maison : 44 plats du jeu de données Nutrition5k (Google Research),
+     pesés ingrédient par ingrédient, passés au prompt exact de l'application.
+     « MAE » = écart absolu moyen en grammes de glucides entre l'estimation et la
+     pesée. Voir BENCHMARK.md pour le protocole et les réserves.
+
+     Deux avertissements qui comptent pour lire ces chiffres :
+     - Les photos du jeu de données n'ont AUCUN objet-repère. Avec la pompe dans
+       le cadre, l'erreur réelle est plus basse — mais elle l'est pour tous, donc
+       le classement RELATIF tient.
+     - À 44 plats, aucun écart entre deux modèles voisins n'est statistiquement
+       significatif. Ces notes servent à écarter les mauvais choix, pas à
+       départager 10,0 de 10,5. D'où la règle appliquée ici : à précision
+       indistinguable, on prend le moins cher et le plus rapide. */
   var MODEL_CATALOG = {
     claude: [
-      { id: 'claude-opus-5', label: 'Opus 5', note: 'précision max · raisonnement', stars: 3 },
-      { id: 'claude-opus-4-8', label: 'Opus 4.8', note: 'très précis', stars: 3 },
-      { id: 'claude-sonnet-5', label: 'Sonnet 5', note: 'équilibré · recommandé', stars: 2 },
-      { id: 'claude-haiku-4-5', label: 'Haiku 4.5', note: 'rapide · économique', stars: 1 }
+      { id: 'claude-opus-5', label: 'Opus 5', note: 'raisonnement · MAE 12,0 g · le plus cher', stars: 2 },
+      { id: 'claude-opus-4-8', label: 'Opus 4.8', note: 'raisonnement · non mesuré', stars: 2 },
+      { id: 'claude-sonnet-5', label: 'Sonnet 5', note: 'MAE 14,5 g · surestime (+13 %)', stars: 1 },
+      { id: 'claude-haiku-4-5', label: 'Haiku 4.5', note: 'rapide · MAE 12,7 g', stars: 2 }
     ],
     gemini: [
-      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', note: 'le plus fin · gratuit', stars: 3 },
-      { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', note: 'récent · gratuit · recommandé', stars: 3 },
-      { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', note: 'gratuit', stars: 2 },
+      { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite',
+        note: 'RECOMMANDÉ · MAE 10,0 g · le plus rapide (4 s) · gratuit', stars: 3 },
+      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', note: 'non mesuré · gratuit', stars: 2 },
+      { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash',
+        note: 'MAE 14,6 g · sous-estime beaucoup (−30 %) · gratuit', stars: 1 },
+      { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', note: 'non mesuré · gratuit', stars: 2 },
       { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', note: 'rapide · gratuit', stars: 2 },
       { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', note: 'très rapide · gratuit', stars: 1 }
     ],
     openai: [
-      { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', note: 'précision max · raisonnement', stars: 3 },
-      { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', note: 'équilibré · recommandé', stars: 2 },
-      { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', note: 'rapide · économique', stars: 1 }
+      { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', note: 'raisonnement · non mesuré', stars: 2 },
+      { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', note: 'MAE 12,5 g · équilibré', stars: 2 },
+      { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', note: 'MAE 17,8 g · surestime (+32 %) · à éviter', stars: 1 }
     ],
     /* OpenRouter : un seul compte pour tous les modèles. Les notes de prix sont
        ramenées au coût d'UNE estimation (photo + prompt + réponse), seule unité
        parlante ici — les tarifs au million de jetons ne disent rien. */
     openrouter: [
+      { id: 'google/gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite',
+        note: 'RECOMMANDÉ · MAE 10,0 g · 4 s · ~500 repas pour 1 $', stars: 3 },
+      { id: 'x-ai/grok-4.5', label: 'Grok 4.5',
+        note: 'MAE 9,9 g · le plus régulier · ~47 repas pour 1 $', stars: 3 },
       { id: 'qwen/qwen3-vl-235b-a22b-thinking', label: 'Qwen3-VL 235B Thinking',
-        note: 'raisonnement visuel · ~70 repas pour 1 $ · vérification', stars: 3 },
-      { id: 'qwen/qwen3.7-plus', label: 'Qwen 3.7 Plus',
-        note: 'raisonnement · récent · ~180 repas pour 1 $', stars: 3 },
-      { id: 'qwen/qwen3.7-flash', label: 'Qwen 3.7 Flash',
-        note: 'le moins cher · ~1800 repas pour 1 $', stars: 2 },
+        note: 'MAE 11,8 g · se trompe autrement que Gemini · 2ᵉ avis', stars: 3 },
       { id: 'qwen/qwen3-vl-235b-a22b-instruct', label: 'Qwen3-VL 235B',
-        note: 'sans raisonnement · ~250 repas pour 1 $', stars: 2 },
-      { id: 'anthropic/claude-opus-5', label: 'Claude Opus 5', note: '~10 repas pour 1 $', stars: 3 },
-      { id: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5', note: '~25 repas pour 1 $', stars: 3 },
-      { id: 'openai/gpt-5.6-terra', label: 'GPT-5.6 Terra', note: '~80 repas pour 1 $', stars: 2 },
-      { id: 'google/gemini-3.6-flash', label: 'Gemini 3.6 Flash', note: '~75 repas pour 1 $', stars: 2 }
+        note: 'MAE 12,3 g · ~400 repas pour 1 $', stars: 2 },
+      { id: 'openai/gpt-5.6-terra', label: 'GPT-5.6 Terra',
+        note: 'MAE 12,5 g · ~63 repas pour 1 $', stars: 2 },
+      { id: 'qwen/qwen3.7-flash', label: 'Qwen 3.7 Flash',
+        note: 'MAE 12,6 g · imbattable en prix · ~2500 repas pour 1 $', stars: 2 },
+      { id: 'qwen/qwen3.7-plus', label: 'Qwen 3.7 Plus',
+        note: 'raisonnement · MAE 12,7 g · ~330 repas pour 1 $', stars: 2 },
+      { id: 'anthropic/claude-opus-5', label: 'Claude Opus 5',
+        note: 'MAE 12,0 g pour 35× le prix de Gemini · ~14 repas pour 1 $', stars: 2 },
+      { id: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5',
+        note: 'MAE 14,5 g · ~32 repas pour 1 $', stars: 1 },
+      { id: 'google/gemini-3.6-flash', label: 'Gemini 3.6 Flash',
+        note: 'MAE 14,6 g · sous-estime (−30 %) · ~43 repas pour 1 $', stars: 1 }
     ]
   };
 
@@ -79,10 +105,18 @@
     'qwen/qwen3.7-flash': 'qwen/qwen3-vl-235b-a22b-thinking'
   };
 
-  // Modèles par défaut suggérés par fournisseur.
+  /* Modèles par défaut suggérés par fournisseur — issus du banc d'essai (44
+     plats pesés). Gemini 3.1 Flash-Lite est le meilleur rapport qualité/prix
+     mesuré : à égalité de précision avec des modèles 35× plus chers, et le plus
+     rapide. Gemini 3.6 Flash, l'ancien défaut, sous-estimait de 30 % en moyenne.
+
+     Aucune migration automatique n'est déclarée pour autant : un modèle qui
+     fonctionne ne doit pas être remplacé dans le dos de l'utilisateur, parce que
+     c'est ce modèle qui produit le nombre saisi dans la pompe. Le changement se
+     fait dans les Réglages, sciemment. */
   var DEFAULT_MODELS = {
     claude: 'claude-opus-5',
-    gemini: 'gemini-3.6-flash',
+    gemini: 'gemini-3.1-flash-lite',
     openai: 'gpt-5.6-terra',
     openrouter: 'qwen/qwen3-vl-235b-a22b-thinking'
   };
@@ -110,7 +144,20 @@
     verificationMode: 'off', // off | ask | auto
     verifyEnabled: false,    // compatibilité avant v37
     verifyProvider: 'openrouter',
-    verifyThresholdPct: 20
+    verifyThresholdPct: 20,
+    /* Fusionner les deux avis en une moyenne, au lieu de n'afficher que
+       l'alerte d'écart. Mesuré sur le banc (44 plats) : la moyenne de Gemini
+       3.1 Flash-Lite et de Qwen3-VL 235B Thinking fait mieux que CHACUN des
+       deux, sur les deux manches indépendantes (10,4 g contre 12,1 / 11,6 puis
+       6,8 g contre 8,7 / 11,9). Le mécanisme est banal : leurs erreurs sont
+       faiblement corrélées (r = +0,30), donc la moyenne annule une partie de
+       la dispersion.
+
+       Désactivé par défaut malgré ce résultat. À 38 plats comparables,
+       l'intervalle de confiance à 95 % du gain contient encore zéro, et ce
+       réglage déplace le nombre que l'utilisateur tape dans sa pompe : c'est
+       à lui de l'activer, pas à une mise à jour de le décider. */
+    mergeVerification: false
   };
 
   /* Clés API relues du Keystore au démarrage (APK). On les garde en mémoire
@@ -267,6 +314,9 @@
       if (!/^(off|ask|auto)$/.test(merged.verificationMode)) {
         merged.verificationMode = 'off';
       }
+      /* La fusion n'a de sens que si un second avis tourne à chaque estimation.
+         En mode 'ask' ou 'off', il n'y a rien à moyenner. */
+      merged.mergeVerification = !!merged.mergeVerification && merged.verificationMode === 'auto';
       return merged;
     },
     saveSettings: function (s) {

@@ -1,0 +1,444 @@
+[
+ {
+  "id": "dish_1563563492",
+  "kcal": 192.370255,
+  "masse": 176.0,
+  "lip": 8.663634,
+  "gluc": 21.364147,
+  "prot": 8.011463,
+  "ingr": [
+   "olive oil",
+   "pizza",
+   "bok choy"
+  ]
+ },
+ {
+  "id": "dish_1563555160",
+  "kcal": 268.832642,
+  "masse": 287.0,
+  "lip": 14.444396,
+  "gluc": 21.797338,
+  "prot": 13.773809,
+  "ingr": [
+   "scrambled eggs",
+   "olive oil",
+   "pepper",
+   "salt",
+   "sweet potato",
+   "cantaloupe",
+   "brussels sprouts"
+  ]
+ },
+ {
+  "id": "dish_1564588889",
+  "kcal": 234.494431,
+  "masse": 346.0,
+  "lip": 5.021447,
+  "gluc": 22.387161,
+  "prot": 24.059095,
+  "ingr": [
+   "egg whites",
+   "blueberries",
+   "greek yogurt",
+   "chia seeds",
+   "milk"
+  ]
+ },
+ {
+  "id": "dish_1559060106",
+  "kcal": 206.369995,
+  "masse": 195.0,
+  "lip": 8.643,
+  "gluc": 23.68,
+  "prot": 8.907001,
+  "ingr": [
+   "bacon",
+   "sweet potato",
+   "strawberries"
+  ]
+ },
+ {
+  "id": "dish_1560961385",
+  "kcal": 249.519989,
+  "masse": 293.0,
+  "lip": 11.830999,
+  "gluc": 23.794003,
+  "prot": 12.781,
+  "ingr": [
+   "sweet potato",
+   "scrambled eggs",
+   "strawberries",
+   "broccoli"
+  ]
+ },
+ {
+  "id": "dish_1558640311",
+  "kcal": 105.879997,
+  "masse": 276.0,
+  "lip": 0.552,
+  "gluc": 26.114,
+  "prot": 2.242,
+  "ingr": [
+   "grapes",
+   "cantaloupe",
+   "cherry tomatoes"
+  ]
+ },
+ {
+  "id": "dish_1559843222",
+  "kcal": 111.269997,
+  "masse": 229.0,
+  "lip": 0.65,
+  "gluc": 27.460001,
+  "prot": 2.183,
+  "ingr": [
+   "grapes",
+   "broccoli",
+   "mandarin oranges",
+   "strawberries"
+  ]
+ },
+ {
+  "id": "dish_1559841163",
+  "kcal": 357.043518,
+  "masse": 335.0,
+  "lip": 18.222002,
+  "gluc": 27.539,
+  "prot": 21.153002,
+  "ingr": [
+   "blackberries",
+   "scrambled eggs",
+   "yam",
+   "sweet potato",
+   "chicken apple sausage",
+   "broccoli"
+  ]
+ },
+ {
+  "id": "dish_1558722780",
+  "kcal": 142.838989,
+  "masse": 367.0,
+  "lip": 1.872,
+  "gluc": 31.532999,
+  "prot": 4.845,
+  "ingr": [
+   "cauliflower",
+   "carrot",
+   "corn on the cob",
+   "cantaloupe",
+   "cherry tomatoes"
+  ]
+ },
+ {
+  "id": "dish_1559845046",
+  "kcal": 313.625977,
+  "masse": 207.0,
+  "lip": 18.192999,
+  "gluc": 31.922001,
+  "prot": 10.976,
+  "ingr": [
+   "potatoes",
+   "mandarin oranges",
+   "broccoli",
+   "almonds"
+  ]
+ },
+ {
+  "id": "dish_1562602687",
+  "kcal": 721.365173,
+  "masse": 311.0,
+  "lip": 52.319649,
+  "gluc": 32.215893,
+  "prot": 31.824261,
+  "ingr": [
+   "brussels sprouts",
+   "sausage",
+   "hash browns",
+   "olive oil",
+   "pepper",
+   "salt",
+   "scrambled eggs"
+  ]
+ },
+ {
+  "id": "dish_1559668314",
+  "kcal": 551.546021,
+  "masse": 300.0,
+  "lip": 38.153999,
+  "gluc": 32.832001,
+  "prot": 21.035,
+  "ingr": [
+   "scrambled eggs",
+   "garden salad",
+   "hash browns"
+  ]
+ },
+ {
+  "id": "dish_1565020867",
+  "kcal": 255.804886,
+  "masse": 325.0,
+  "lip": 6.230683,
+  "gluc": 35.736317,
+  "prot": 13.901073,
+  "ingr": [
+   "egg whites",
+   "berries",
+   "bacon",
+   "sweet potato",
+   "olive oil"
+  ]
+ },
+ {
+  "id": "dish_1558721636",
+  "kcal": 163.069992,
+  "masse": 299.0,
+  "lip": 2.578,
+  "gluc": 35.818001,
+  "prot": 4.616,
+  "ingr": [
+   "carrot",
+   "corn on the cob",
+   "cantaloupe",
+   "cherry tomatoes"
+  ]
+ },
+ {
+  "id": "dish_1561739238",
+  "kcal": 274.190002,
+  "masse": 257.0,
+  "lip": 9.785,
+  "gluc": 37.556999,
+  "prot": 9.465,
+  "ingr": [
+   "egg whites",
+   "hash browns",
+   "berries",
+   "sweet potato"
+  ]
+ },
+ {
+  "id": "dish_1565118067",
+  "kcal": 623.429932,
+  "masse": 522.0,
+  "lip": 12.966,
+  "gluc": 41.417,
+  "prot": 82.112991,
+  "ingr": [
+   "carrot",
+   "chicken breast",
+   "tuna",
+   "cherry tomatoes",
+   "cheese pizza",
+   "bell peppers"
+  ]
+ },
+ {
+  "id": "dish_1558723568",
+  "kcal": 179.618988,
+  "masse": 356.0,
+  "lip": 1.848,
+  "gluc": 42.959999,
+  "prot": 3.879,
+  "ingr": [
+   "cantaloupe",
+   "corn on the cob",
+   "carrot",
+   "cauliflower",
+   "apple"
+  ]
+ },
+ {
+  "id": "dish_1558378634",
+  "kcal": 874.966003,
+  "masse": 315.0,
+  "lip": 64.777,
+  "gluc": 44.301998,
+  "prot": 37.979,
+  "ingr": [
+   "grapes",
+   "almonds",
+   "sausage"
+  ]
+ },
+ {
+  "id": "dish_1560887435",
+  "kcal": 364.529053,
+  "masse": 171.0,
+  "lip": 13.398108,
+  "gluc": 44.367718,
+  "prot": 16.457802,
+  "ingr": [
+   "pizza",
+   "parmesan cheese",
+   "croutons",
+   "kale",
+   "caesar dressing"
+  ]
+ },
+ {
+  "id": "dish_1563464670",
+  "kcal": 384.175995,
+  "masse": 156.0,
+  "lip": 13.646,
+  "gluc": 47.477001,
+  "prot": 18.148001,
+  "ingr": [
+   "cream cheese",
+   "bagels",
+   "cucumbers",
+   "mozzarella cheese"
+  ]
+ },
+ {
+  "id": "dish_1558719145",
+  "kcal": 547.072998,
+  "masse": 416.0,
+  "lip": 36.821003,
+  "gluc": 48.143997,
+  "prot": 18.493002,
+  "ingr": [
+   "cantaloupe",
+   "cherry tomatoes",
+   "almonds",
+   "apple"
+  ]
+ },
+ {
+  "id": "dish_1567526888",
+  "kcal": 479.179993,
+  "masse": 816.0,
+  "lip": 7.59,
+  "gluc": 51.193001,
+  "prot": 47.294998,
+  "ingr": [
+   "berries",
+   "sweet potato",
+   "olive oil",
+   "salsa",
+   "egg whites",
+   "watermelon",
+   "yam"
+  ]
+ },
+ {
+  "id": "dish_1562170331",
+  "kcal": 263.830017,
+  "masse": 400.0,
+  "lip": 5.293,
+  "gluc": 54.537998,
+  "prot": 3.476,
+  "ingr": [
+   "watermelon",
+   "roasted potatoes",
+   "berries",
+   "pineapple"
+  ]
+ },
+ {
+  "id": "dish_1561737293",
+  "kcal": 801.822021,
+  "masse": 636.0,
+  "lip": 46.077,
+  "gluc": 55.828995,
+  "prot": 41.927002,
+  "ingr": [
+   "broccoli",
+   "cantaloupe",
+   "sausage",
+   "pineapple",
+   "egg whites",
+   "hash browns"
+  ]
+ },
+ {
+  "id": "dish_1560874751",
+  "kcal": 379.992004,
+  "masse": 220.0,
+  "lip": 10.96,
+  "gluc": 58.687004,
+  "prot": 12.556001,
+  "ingr": [
+   "bacon",
+   "berries",
+   "bagels",
+   "cream cheese",
+   "yam"
+  ]
+ },
+ {
+  "id": "dish_1558721827",
+  "kcal": 886.523071,
+  "masse": 429.0,
+  "lip": 66.524002,
+  "gluc": 59.541,
+  "prot": 32.415001,
+  "ingr": [
+   "cantaloupe",
+   "apple",
+   "cauliflower",
+   "almonds"
+  ]
+ },
+ {
+  "id": "dish_1566838407",
+  "kcal": 358.947601,
+  "masse": 558.0,
+  "lip": 9.825659,
+  "gluc": 62.420345,
+  "prot": 9.731463,
+  "ingr": [
+   "pineapple",
+   "scrambled eggs",
+   "sweet potato",
+   "berries",
+   "olive oil",
+   "watermelon"
+  ]
+ },
+ {
+  "id": "dish_1558639012",
+  "kcal": 257.436005,
+  "masse": 490.0,
+  "lip": 2.237,
+  "gluc": 63.264,
+  "prot": 4.685,
+  "ingr": [
+   "cherry tomatoes",
+   "corn on the cob",
+   "cauliflower",
+   "apple",
+   "grapes"
+  ]
+ },
+ {
+  "id": "dish_1559246053",
+  "kcal": 251.04599,
+  "masse": 494.0,
+  "lip": 0.822,
+  "gluc": 63.925999,
+  "prot": 3.73,
+  "ingr": [
+   "cauliflower",
+   "orange",
+   "berries",
+   "pears"
+  ]
+ },
+ {
+  "id": "dish_1568401302",
+  "kcal": 716.47937,
+  "masse": 561.0,
+  "lip": 28.946722,
+  "gluc": 69.864967,
+  "prot": 44.677963,
+  "ingr": [
+   "fried rice",
+   "salt",
+   "squash",
+   "carrot",
+   "avocado",
+   "olive oil",
+   "tuna salad"
+  ]
+ }
+]

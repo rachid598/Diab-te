@@ -29,8 +29,10 @@ nécessaire que si une capacité **native** est ajoutée. Un bouton
 ## Trois façons d'estimer
 
 **📷 Photo** — une à six vues du repas. Un **objet-repère de taille connue** posé à côté de
-l'assiette (par défaut la pompe MiniMed 780G, 96 × 55 mm) permet au modèle de calibrer
-l'échelle et de *mesurer* les portions au lieu de les deviner.
+l'assiette (par défaut la pompe MiniMed 780G, 96,8 × 53,6 × 24,9 mm) permet au modèle de
+calibrer l'échelle et de *mesurer* les portions au lieu de les deviner. Les trois dimensions
+sont données, pas seulement deux : posée à plat, la pompe est aussi la seule **règle
+verticale** de l'image, et la hauteur est justement ce qu'une photo de dessus ne montre pas.
 
 **✍️ Description** — aucune photo : tu écris ce que tu manges. Le modèle interprète les
 portions courantes françaises. La marge d'erreur est structurellement plus large, et l'app
@@ -133,9 +135,35 @@ serveur intermédiaire** en dehors du fournisseur choisi.
 séparée. Idem pour Claude Pro.
 
 Le coût dérisoire d'OpenRouter est ce qui rend la **vérification croisée systématique**
-tenable : environ 4000 estimations pour 1 $ avec Qwen 3.7 Flash. Elle est proposée pour
-*vérifier*, pas comme modèle principal — sa précision sur des portions n'est pas démontrée
-pour cet usage, et c'est le seul critère qui compte quand une dose en dépend.
+tenable : environ 70 estimations pour 1 $ avec Qwen3-VL 235B Thinking, 2500 avec Qwen 3.7
+Flash.
+
+## Quel modèle choisir — la mesure, pas la réputation
+
+Les modèles proposés dans les Réglages portent leur **erreur mesurée**, pas une étiquette
+commerciale. Elle vient d'un banc d'essai sur 44 plats du jeu de données
+[Nutrition5k](https://github.com/google-research-datasets/Nutrition5k) (Google Research),
+pesés ingrédient par ingrédient, passés au prompt exact de l'application. Protocole complet,
+résultats et réserves : **[BENCHMARK.md](BENCHMARK.md)**.
+
+Deux enseignements ont changé les réglages par défaut :
+
+**Le prix n'achète pas la précision.** Claude Opus 5 se trompe de 12,0 g en moyenne pour 35×
+le prix de Gemini 3.1 Flash-Lite, qui se trompe de 10,0 g en 4 secondes. Claude Sonnet 5
+(14,5 g) est derrière Qwen 3.7 Flash, 79× moins cher. **Aucun écart entre deux modèles
+voisins n'est statistiquement significatif** à cette taille d'échantillon — d'où la règle
+retenue : à précision indistinguable, le moins cher et le plus rapide. Le défaut Gemini est
+donc passé de 3.6 Flash (qui sous-estimait de 30 %) à **3.1 Flash-Lite**.
+
+**Deux avis moyennés valent mieux que le meilleur des deux.** Les erreurs de Gemini 3.1
+Flash-Lite et de Qwen3-VL 235B Thinking sont faiblement corrélées (r = +0,30) et de sens
+opposé. Leur moyenne bat chacun des deux sur les deux manches du banc (6,8 g contre 8,7 et
+11,9 sur la manche de validation). Le réglage existe — *Second avis → moyenne des deux* —
+et reste **désactivé par défaut** : le gain n'est pas significatif à n = 38, et ce réglage
+déplace le nombre saisi dans la pompe.
+
+Aucune migration automatique de modèle n'accompagne cette version. Un modèle qui fonctionne
+n'est pas remplacé dans le dos de l'utilisateur : le changement se fait dans les Réglages.
 
 ## Capacités natives (Android)
 
@@ -192,8 +220,9 @@ l'APK est publié sous le tag `apk-latest`, le bundle de mise à jour sous `ota-
 | `js/off.js` | accès à OpenFoodFacts |
 | `js/queue.js` | file d'attente hors-ligne |
 | `js/report.js` | synthèse pour la consultation |
-| `js/bench.js` | banc d'essai des modèles |
+| `js/bench.js` | banc d'essai sur les repas de l'utilisateur |
 | `js/app.js` | interface |
+| `bench/` | banc d'essai hors ligne sur Nutrition5k (voir [BENCHMARK.md](BENCHMARK.md)) |
 
 ---
 

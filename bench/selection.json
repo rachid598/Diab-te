@@ -1,0 +1,187 @@
+[
+ {
+  "id": "dish_1559844951",
+  "kcal": 274.335999,
+  "masse": 122.0,
+  "lip": 17.906,
+  "gluc": 22.792,
+  "prot": 9.784,
+  "ingr": [
+   "almonds",
+   "potatoes"
+  ]
+ },
+ {
+  "id": "dish_1559845399",
+  "kcal": 107.18,
+  "masse": 178.0,
+  "lip": 0.362,
+  "gluc": 24.630001,
+  "prot": 2.417,
+  "ingr": [
+   "potatoes",
+   "mandarin oranges",
+   "strawberries"
+  ]
+ },
+ {
+  "id": "dish_1558724031",
+  "kcal": 358.710999,
+  "masse": 303.0,
+  "lip": 25.801001,
+  "gluc": 25.789999,
+  "prot": 14.067,
+  "ingr": [
+   "cherry tomatoes",
+   "cantaloupe",
+   "almonds",
+   "cauliflower"
+  ]
+ },
+ {
+  "id": "dish_1563216412",
+  "kcal": 172.449982,
+  "masse": 205.0,
+  "lip": 0.714,
+  "gluc": 36.610001,
+  "prot": 5.238,
+  "ingr": [
+   "white rice",
+   "broccoli"
+  ]
+ },
+ {
+  "id": "dish_1564686702",
+  "kcal": 307.944977,
+  "masse": 130.0,
+  "lip": 12.545,
+  "gluc": 36.75,
+  "prot": 11.96,
+  "ingr": [
+   "cheese pizza",
+   "olives"
+  ]
+ },
+ {
+  "id": "dish_1564086658",
+  "kcal": 260.852997,
+  "masse": 230.0,
+  "lip": 8.653,
+  "gluc": 38.712002,
+  "prot": 11.198001,
+  "ingr": [
+   "cheese pizza",
+   "corn on the cob",
+   "caesar salad"
+  ]
+ },
+ {
+  "id": "dish_1558633221",
+  "kcal": 176.878998,
+  "masse": 449.0,
+  "lip": 1.417,
+  "gluc": 42.901001,
+  "prot": 4.438,
+  "ingr": [
+   "corn on the cob",
+   "cherry tomatoes",
+   "apple",
+   "cauliflower",
+   "carrot"
+  ]
+ },
+ {
+  "id": "dish_1558636582",
+  "kcal": 530.551025,
+  "masse": 410.0,
+  "lip": 35.918999,
+  "gluc": 45.948002,
+  "prot": 18.895,
+  "ingr": [
+   "cherry tomatoes",
+   "apple",
+   "cauliflower",
+   "almonds"
+  ]
+ },
+ {
+  "id": "dish_1566317775",
+  "kcal": 237.399994,
+  "masse": 410.0,
+  "lip": 4.0,
+  "gluc": 47.183998,
+  "prot": 7.248,
+  "ingr": [
+   "oatmeal",
+   "blackberries",
+   "raspberries"
+  ]
+ },
+ {
+  "id": "dish_1561492519",
+  "kcal": 271.320007,
+  "masse": 206.0,
+  "lip": 2.954,
+  "gluc": 52.377998,
+  "prot": 11.528,
+  "ingr": [
+   "banana with peel",
+   "wheat bread"
+  ]
+ },
+ {
+  "id": "dish_1562170356",
+  "kcal": 385.333984,
+  "masse": 432.0,
+  "lip": 14.285,
+  "gluc": 55.529999,
+  "prot": 12.788,
+  "ingr": [
+   "turkey bacon",
+   "pineapple",
+   "watermelon",
+   "roasted potatoes",
+   "berries"
+  ]
+ },
+ {
+  "id": "dish_1558637932",
+  "kcal": 248.286987,
+  "masse": 393.0,
+  "lip": 2.309,
+  "gluc": 60.889999,
+  "prot": 4.282,
+  "ingr": [
+   "corn on the cob",
+   "apple",
+   "cauliflower",
+   "grapes"
+  ]
+ },
+ {
+  "id": "dish_1561146781",
+  "kcal": 300.100006,
+  "masse": 223.0,
+  "lip": 1.655,
+  "gluc": 63.77,
+  "prot": 9.783001,
+  "ingr": [
+   "bagels",
+   "apple"
+  ]
+ },
+ {
+  "id": "dish_1558723894",
+  "kcal": 757.612976,
+  "masse": 405.0,
+  "lip": 50.550999,
+  "gluc": 68.302002,
+  "prot": 26.312002,
+  "ingr": [
+   "almonds",
+   "cauliflower",
+   "corn on the cob",
+   "apple"
+  ]
+ }
+]

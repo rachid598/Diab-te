@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '42'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '43'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -733,6 +733,12 @@
      endroit (Estimator.refresh) — sinon corriger une portion laissait une
      charge glycémique périmée à l'écran. */
   function recomputeTotal() {
+    /* Corriger une portion à la main annule la fusion des deux avis : le total
+       redevient la somme des aliments tels que l'utilisateur les a corrigés. Le
+       garder ferait cohabiter à l'écran une moyenne calculée sur des valeurs
+       qui n'existent plus. */
+    delete lastResult.mergedTotalCarbsG;
+    delete lastResult.verifyTotalCarbsG;
     Estimator.refresh(lastResult);
   }
 
@@ -936,19 +942,33 @@
     return '<div class="macros">' + bits.join('') + '</div>';
   }
 
+  /* Chiffre AFFICHÉ, qui n'est pas toujours celui du modèle principal : quand la
+     fusion des deux avis est active, c'est leur moyenne. On ne touche jamais à
+     r.totalCarbsG pour autant — le détail par aliment reste celui du modèle
+     principal, et faire coller les deux demanderait de redistribuer l'écart sur
+     des aliments dont rien ne dit qu'ils sont en cause. */
+  function shownTotal(r) {
+    return (r && typeof r.mergedTotalCarbsG === 'number') ? r.mergedTotalCarbsG : (r ? r.totalCarbsG : 0);
+  }
+
   function renderResults(r, keepPosition) {
     var el = $('results');
-    var parts = partsFrom(r.totalCarbsG);
+    var total = shownTotal(r);
+    var parts = partsFrom(total);
     var nutrition = glycemicHtml(r) + giHtml(r) + macrosHtml(r);
 
     var html = '';
     html += '<div class="result-hero">';
-    html += '  <div class="hero-carbs">' + r.totalCarbsG + ' <small>g</small></div>';
+    html += '  <div class="hero-carbs">' + total + ' <small>g</small></div>';
     html += '  <div class="hero-parts">' + fr(parts) + ' <small>parts de glucides</small></div>';
-    html += rangeBarHtml(r.rangeLowG, r.totalCarbsG, r.rangeHighG);
+    html += rangeBarHtml(r.rangeLowG, total, r.rangeHighG);
     html += '  <div class="confidence conf-' + r.overallConfidence + '">' + CONF_LABEL[r.overallConfidence] + '</div>';
-    html += '  <div class="pump-hint">💉 À saisir dans ta pompe : <strong>' + r.totalCarbsG +
+    html += '  <div class="pump-hint">💉 À saisir dans ta pompe : <strong>' + total +
             ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>). Ta pompe calcule le bolus.</div>';
+    if (typeof r.mergedTotalCarbsG === 'number') {
+      html += '  <div class="merged-hint">⚖️ Moyenne de deux modèles (' + r.totalCarbsG +
+              ' g et ' + r.verifyTotalCarbsG + ' g). Le détail ci-dessous reste celui du modèle principal.</div>';
+    }
     /* Estimation sans photo : on le dit franchement. Le chiffre s'affiche
        exactement comme celui d'une photo, et rien à l'écran ne rappellerait
        sinon qu'aucune portion n'a été vue — c'est précisément le moment où
@@ -1171,6 +1191,25 @@
       if (generation !== estimateGeneration || lastResult !== verifiedResult) return;
       v.checkedAt = Date.now();
       lastVerification = v;
+      /* Fusion : la moyenne des deux avis remplace le chiffre affiché. Mesuré
+         meilleur que chacun des deux pris seul, parce que leurs erreurs sont
+         faiblement corrélées. On re-rend TOUTE la page plutôt que la seule
+         encadré de vérification, sinon le héros garderait l'ancien nombre —
+         et c'est le nombre saisi dans la pompe. */
+      if (settings.mergeVerification && v.ok && v.total > 0 && lastResult.totalCarbsG > 0) {
+        lastResult.mergedTotalCarbsG = Math.round((lastResult.totalCarbsG + v.total) / 2);
+        lastResult.verifyTotalCarbsG = v.total;
+        lastResult.rangeLowG = Math.min(lastResult.rangeLowG, v.total);
+        lastResult.rangeHighG = Math.max(lastResult.rangeHighG, v.total);
+        renderResults(lastResult, true);
+        if (verifiedDate) {
+          Storage.updateHistory(verifiedDate, {
+            totalCarbsG: lastResult.mergedTotalCarbsG,
+            parts: partsFrom(lastResult.mergedTotalCarbsG),
+            mergedFrom: [lastResult.totalCarbsG, v.total]
+          });
+        }
+      }
       renderVerificationState();
       if (verifiedDate) {
         Storage.updateHistory(verifiedDate, {
@@ -1465,8 +1504,13 @@
       // n'ont pas la même valeur selon qu'une portion a été vue ou décrite.
       source: lastResult.fromText ? 'texte' : 'photo',
       draft: !currentHistoryConfirmed,
-      totalCarbsG: lastResult.totalCarbsG,
-      parts: partsFrom(lastResult.totalCarbsG),
+      // Le total enregistré est celui qui a été AFFICHÉ, donc la moyenne des deux
+      // modèles quand la fusion est active : c'est lui qui a servi à doser, et
+      // c'est donc lui que la calibration doit comparer aux glucides réels.
+      totalCarbsG: shownTotal(lastResult),
+      parts: partsFrom(shownTotal(lastResult)),
+      mergedFrom: typeof lastResult.mergedTotalCarbsG === 'number'
+        ? [lastResult.totalCarbsG, lastResult.verifyTotalCarbsG] : null,
       partSizeG: settings.partSizeG,
       provider: lastResult.provider || settings.provider,
       model: lastResult.model || (settings.models || {})[settings.provider] || '',
@@ -2363,6 +2407,7 @@
     $('set-model').addEventListener('change', function () {
       $('set-model-custom-wrap').hidden = $('set-model').value !== CUSTOM_VALUE;
     });
+    $('set-merge').addEventListener('change', updateSettingsSummaries);
     $('set-verify-mode').addEventListener('change', function () {
       updateVerificationSettingsForm();
       updateSettingsSummaries();
@@ -2539,6 +2584,9 @@
     }
     $('set-verify-options').hidden = mode === 'off';
     $('set-verify-threshold-wrap').hidden = mode !== 'auto';
+    // Rien à moyenner tant que le second avis ne tourne pas à chaque estimation.
+    $('set-merge-wrap').hidden = mode !== 'auto';
+    if (mode !== 'auto') $('set-merge').checked = false;
   }
 
   function updateSettingsSummaries() {
@@ -2548,6 +2596,9 @@
     var mode = $('set-verify-mode').value;
     var suffix = mode === 'off' ? '' : ' · ' +
       (PROVIDER_NAME[$('set-verify-provider').value] || $('set-verify-provider').value);
+    // La fusion change le nombre affiché : elle mérite d'être lisible sans
+    // déplier la section.
+    if (mode === 'auto' && $('set-merge').checked) suffix += ' · moyenne des deux';
     $('settings-verification-summary').textContent = (labels[mode] || labels.off) + suffix;
   }
 
@@ -2575,6 +2626,7 @@
     $('set-verify-provider').value = vp;
     populateVerifyModelSelect(vp, models[vp] || Storage.DEFAULT_MODELS[vp] || '');
     $('set-verify-threshold').value = String(settings.verifyThresholdPct || 20);
+    $('set-merge').checked = !!settings.mergeVerification;
     $('set-partsize').value = settings.partSizeG;
     $('set-round-half').checked = settings.roundHalf;
     updateVerificationSettingsForm();
@@ -2628,6 +2680,7 @@
     settings.verifyEnabled = verificationMode === 'auto';
     settings.verifyProvider = verifyProvider;
     settings.verifyThresholdPct = parseInt($('set-verify-threshold').value, 10) || 20;
+    settings.mergeVerification = verificationMode === 'auto' && $('set-merge').checked;
     settings.models = settings.models || {};
     settings.models[provider] = getModelFrom('set-model', 'set-model-custom', provider);
     settings.compareProvider = verificationMode === 'ask' ? verifyProvider : '';
