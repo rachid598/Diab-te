@@ -908,3 +908,28 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
   border: 1px solid color-mix(in srgb, var(--info) 40%, var(--border)); }
 .similar-head { font-weight: 800; font-size: 13.5px; margin-bottom: 4px; }
 .similar-foot { font-size: 11.5px; color: var(--muted); margin-top: 7px; }
+
+/* Source de la valeur réelle */
+.real-source { margin-top: 10px; }
+.real-source label { margin-top: 0; font-size: 12px; }
+.real-source .hint { margin-bottom: 0; }
+
+/* Banc d'essai */
+.bench-cases { margin-bottom: 4px; }
+.bench-results { margin-top: 14px; }
+.bench-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.bench-table th, .bench-table td { padding: 7px 6px; border-bottom: 1px solid var(--border); text-align: left; }
+.bench-table th { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 700; }
+.bench-table .num { text-align: right; white-space: nowrap; }
+.bench-best { background: color-mix(in srgb, var(--ok) 10%, transparent); font-weight: 700; }
+#bench-models { height: auto; padding: 8px; }
+
+/* Consommation d'API */
+.usage-box { margin-top: 8px; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.usage-table td { padding: 6px 4px; border-bottom: 1px solid var(--border); }
+.usage-table .num { text-align: right; white-space: nowrap; }
+.usage-total td { font-weight: 800; border-bottom: none; border-top: 1px solid var(--border-strong); }
+
+/* Filtre du journal */
+.history-search { margin: 4px 0 12px; }

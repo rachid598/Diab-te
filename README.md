@@ -53,6 +53,15 @@ est imposée au modèle comme consigne :
 
 ### Les garde-fous
 
+**La photo est contrôlée avant l'appel.** Netteté (variance du laplacien) et exposition
+sont mesurées **en local**, en quelques millisecondes et sans aucun appel réseau. Une vue
+floue ou écrasée est signalée sur sa propre vignette — avant de payer une estimation qu'on
+saura mauvaise vingt secondes plus tard, sans savoir que la cause était la photo.
+
+**La deuxième vue est encouragée.** Sur une photo unique, l'épaisseur est déduite et non
+vue : c'est la principale source d'erreur sur une portion. L'app le dit dès la première
+vue, au moment où l'on peut encore agir.
+
 **Le repère doit être réellement trouvé.** Le modèle déclare s'il a effectivement localisé
 l'objet-repère. Sinon la marge d'erreur reste large et un bandeau le signale — plutôt
 qu'une fausse précision affichée au moment exact où une dose se calcule.
@@ -69,6 +78,25 @@ assurance. Elle dit alors précisément *« l'autre modèle voit du pain que le 
 **Inventaire de ce qui a été vu.** Une phrase décrivant l'assiette, chaque aliment avec sa
 portion retenue et l'hypothèse faite, l'échelle utilisée. C'est ce qui permet de repérer une
 confusion avant de doser.
+
+**Reconnaissance d'un repas déjà mangé.** Si le plat ressemble vraiment à un repas passé
+dont la valeur réelle a été relevée, l'app affiche l'écart constaté ce jour-là. Une mesure
+sur ce plat précis vaut mieux qu'un biais moyen. Comparaison locale : recouvrement des noms
+d'aliments et proximité du total, les deux étant nécessaires.
+
+**Relance sur un autre modèle sans reprendre la photo.** Un résultat douteux se rejoue
+depuis les images déjà en mémoire, avec n'importe quel modèle configuré, sans modifier les
+réglages par défaut.
+
+**Banc d'essai des modèles.** Rejoue d'anciens repas — photo conservée **et** valeur réelle
+pesée, lue sur l'emballage ou calculée — sur plusieurs modèles, et classe chacun par son
+écart moyen à cette valeur. Aucun classement public ne dit quel modèle lit le mieux *ton*
+assiette ; celui-ci le mesure. Chaque essai est un vrai appel : le coût est annoncé avant.
+
+**La source des valeurs réelles est qualifiée.** Pesée, étiquette, recette calculée ou
+estimation personnelle. Seules les trois premières calibrent le modèle et arbitrent le banc
+d'essai : corriger une estimation avec une autre estimation amplifie du bruit au lieu de le
+réduire.
 
 **Calibration personnelle.** Les écarts constatés entre estimations passées et valeurs
 réelles saisies sont transmis au modèle, par catégorie d'aliment — « les féculents sont
@@ -124,6 +152,12 @@ L'APK n'est pas qu'un habillage : il lève des limites réelles du navigateur.
   au retour de la connexion.
 - **Raccourcis** — appui long sur l'icône pour ouvrir directement l'appareil photo.
 
+## Suivi de la consommation
+
+Les Réglages affichent le nombre d'appels réellement effectués dans le mois, par modèle, et
+le coût approximatif d'après les tarifs publics. Le prix est appliqué à l'affichage et non
+enregistré : corriger un tarif ne réécrit pas l'historique.
+
 ## Confidentialité
 
 Tout reste sur l'appareil : réglages, historique, photos, aliments personnalisés. Les photos
@@ -158,6 +192,7 @@ l'APK est publié sous le tag `apk-latest`, le bundle de mise à jour sous `ota-
 | `js/off.js` | accès à OpenFoodFacts |
 | `js/queue.js` | file d'attente hors-ligne |
 | `js/report.js` | synthèse pour la consultation |
+| `js/bench.js` | banc d'essai des modèles |
 | `js/app.js` | interface |
 
 ---

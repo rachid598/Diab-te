@@ -771,6 +771,11 @@
              : provider === 'openai' ? callOpenAI
              : provider === 'gemini' ? callGemini
              : callClaude;
+    // Compté ici et pas dans l'interface : tous les appels passent par cette
+    // fonction, y compris la vérification croisée et le banc d'essai.
+    if (window.Storage && Storage.noteUsage) {
+      try { Storage.noteUsage(provider, model); } catch (e) {}
+    }
     return call(images, prompt, callSettings).then(function (result) {
       var out = sanitize(result, ctx);
       out.provider = provider;
