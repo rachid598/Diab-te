@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=39" />
+  <link rel="stylesheet" href="css/styles.css?v=40" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -336,12 +336,35 @@
         <div class="card">
           <h2>Journal des repas</h2>
           <p class="hint">Saisis les glucides réels quand tu les connais : c'est ce qui apprend à l'app tes écarts habituels.</p>
+          <div class="history-search" id="history-search-wrap" hidden>
+            <input id="history-search" class="input" type="search"
+                   placeholder="Filtrer par aliment (ex. couscous, pain…)" />
+          </div>
           <div id="history-list" class="history-list"><p class="empty">Aucune estimation enregistrée.</p></div>
           <button id="clear-history" class="btn btn-ghost" hidden>Vider l'historique</button>
         </div>
       </div>
 
       <div id="pane-analyse" class="mode-pane" data-pane="analyse" role="tabpanel">
+        <!-- Banc d'essai : quel modèle estime le mieux TES portions. Aucun
+             classement public ne répond à cette question. -->
+        <details class="card compact-card" id="bench-card">
+          <summary>
+            <span class="compact-title">Banc d'essai des modèles</span>
+            <span class="compact-value" id="bench-summary">—</span>
+          </summary>
+          <div class="compact-content">
+            <p class="hint">Rejoue d'anciens repas dont tu as gardé la photo <strong>et</strong> relevé la valeur réelle, sur plusieurs modèles, et compare chaque estimation à cette valeur. C'est la seule façon honnête de savoir lequel est le plus juste dans <em>ton</em> assiette.</p>
+            <div id="bench-cases" class="bench-cases"></div>
+            <label for="bench-models">Modèles à comparer</label>
+            <select id="bench-models" class="input" multiple size="6"></select>
+            <p class="hint tiny">Ctrl/⌘ + clic pour en choisir plusieurs. Chaque essai est un <strong>vrai appel facturé</strong> : le coût estimé s'affiche avant de lancer.</p>
+            <button id="bench-run" class="btn btn-primary">▶︎ Lancer le banc d'essai</button>
+            <div id="bench-status" class="status" hidden></div>
+            <div id="bench-results" class="bench-results"></div>
+          </div>
+        </details>
+
         <div class="card">
           <h2>Ce que l'app a appris</h2>
           <p class="hint">Calculé sur les repas dont tu as saisi les glucides réels. Ces écarts sont transmis à l'IA à chaque nouvelle estimation.</p>
@@ -518,6 +541,10 @@
         <p class="hint tiny">⚠️ L'export contient <strong>tes clés API</strong> pour que la restauration soit immédiate (bascule vers l'APK, changement de téléphone). Le fichier est donc personnel : <strong>ne le partage pas</strong> et ne l'envoie pas par mail.</p>
         <p class="hint tiny" id="keystore-note" hidden>🔒 Sur l'application Android, tes clés sont chiffrées par le Keystore du téléphone et ne sont plus stockées en clair.</p>
 
+        <h4>Consommation d'API</h4>
+        <p class="hint tiny">Appels réellement effectués ce mois-ci, et coût approximatif d'après les tarifs publics. Indicatif : seul le relevé de ton fournisseur fait foi.</p>
+        <div id="usage-box" class="usage-box">—</div>
+
         <h4>Mise à jour</h4>
         <p class="hint tiny">L'app se met à jour toute seule au lancement. Ce bouton force la vérification et dit précisément ce qu'il en est.</p>
         <button id="check-update" class="btn btn-ghost">🔄 Vérifier les mises à jour</button>
@@ -559,18 +586,19 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=39"></script>
-  <script src="js/native.js?v=39"></script>
-  <script src="js/storage.js?v=39"></script>
-  <script src="js/foods.js?v=39"></script>
-  <script src="js/gi.js?v=39"></script>
-  <script src="js/queue.js?v=39"></script>
-  <script src="js/report.js?v=39"></script>
-  <script src="js/estimator.js?v=39"></script>
-  <script src="js/camera.js?v=39"></script>
-  <script src="js/off.js?v=39"></script>
-  <script src="vendor/zxing.min.js?v=39"></script>
-  <script src="js/barcode.js?v=39"></script>
-  <script src="js/app.js?v=39"></script>
+  <script src="vendor/capacitor-plugins.js?v=40"></script>
+  <script src="js/native.js?v=40"></script>
+  <script src="js/storage.js?v=40"></script>
+  <script src="js/foods.js?v=40"></script>
+  <script src="js/gi.js?v=40"></script>
+  <script src="js/queue.js?v=40"></script>
+  <script src="js/report.js?v=40"></script>
+  <script src="js/bench.js?v=40"></script>
+  <script src="js/estimator.js?v=40"></script>
+  <script src="js/camera.js?v=40"></script>
+  <script src="js/off.js?v=40"></script>
+  <script src="vendor/zxing.min.js?v=40"></script>
+  <script src="js/barcode.js?v=40"></script>
+  <script src="js/app.js?v=40"></script>
 </body>
 </html>

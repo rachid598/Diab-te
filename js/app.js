@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '39'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '40'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -2010,17 +2010,64 @@
       '" data-real="' + e.date + '">' +
       '  <span class="real-unit">g</span>' +
       '</div>' +
+      /* La source qualifie la valeur : une pesée arbitre, une estimation à
+         l'oeil non. Sans ce champ, l'app calibrait le modèle avec du bruit. */
+      '<div class="real-source">' +
+      '  <label for="src-' + e.date + '">Source de cette valeur</label>' +
+      '  <select id="src-' + e.date + '" class="input real-source-sel" data-src="' + e.date + '">' +
+        (Storage.REAL_SOURCES || []).map(function (o) {
+          var sel = (e.realSource || 'estimation') === o.id ? ' selected' : '';
+          return '<option value="' + o.id + '"' + sel + '>' + escapeHtml(o.label) + '</option>';
+        }).join('') +
+      '  </select>' +
+      '  <p class="hint tiny">Seules une pesée, une étiquette ou une recette calculée servent à calibrer le modèle.</p>' +
+      '</div>' +
       '<button class="btn btn-ghost history-del" data-del="' + e.date + '">🗑️ Supprimer ce repas</button>';
     return out;
+  }
+
+  /* Filtre du journal. Avec 500 repas conservés, retrouver « le couscous de la
+     semaine dernière » était impossible. On cherche dans les noms d'aliments et
+     dans la phrase de lecture, pas dans les dates : c'est le plat qu'on a en
+     tête, pas la date. */
+  var historyFilter = '';
+
+  function matchesFilter(e) {
+    if (!historyFilter) return true;
+    var q = historyFilter;
+    var hay = ((e.items || []).map(function (it) { return it.name; }).join(' ') + ' ' +
+               (e.seen || '')).toLowerCase();
+    return hay.indexOf(q) !== -1;
+  }
+
+  function initHistorySearch() {
+    var inp = $('history-search');
+    if (!inp) return;
+    inp.addEventListener('input', function () {
+      historyFilter = inp.value.trim().toLowerCase();
+      renderHistory();
+    });
   }
 
   function renderHistory() {
     renderBiasCard();
     var list = $('history-list');
-    var h = Storage.getHistory();
-    if (!h.length) {
+    var tous = Storage.getHistory();
+    // Le champ de filtre n'apparaît que quand la liste devient longue : sur cinq
+    // repas il n'apporte rien et occupe de la place.
+    var wrap = $('history-search-wrap');
+    if (wrap) wrap.hidden = tous.length < 8;
+
+    if (!tous.length) {
       list.innerHTML = '<p class="empty">Aucune estimation enregistrée.</p>';
       $('clear-history').hidden = true;
+      return;
+    }
+    var h = tous.filter(matchesFilter);
+    if (!h.length) {
+      list.innerHTML = '<p class="empty">Aucun repas ne contient « ' +
+        escapeHtml(historyFilter) + ' ».</p>';
+      $('clear-history').hidden = false;
       return;
     }
     list.innerHTML = '';
@@ -2112,6 +2159,22 @@
     /* Saisie du réel. On met à jour UNIQUEMENT la ligne concernée et la carte de
        biais : re-rendre toute la liste ferait perdre la saisie en cours (le
        'change' se déclenche au moment où l'on quitte le champ). */
+    list.querySelectorAll('.real-source-sel').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        var date = Number(sel.dataset.src);
+        var entry = Storage.getHistory().filter(function (x) { return x.date === date; })[0];
+        if (!entry || entry.realCarbsG == null) {
+          toast('Saisis d\'abord les glucides réels.');
+          return;
+        }
+        Storage.setHistoryReal(date, entry.realCarbsG, sel.value);
+        refreshBiasCard();
+        toast(sel.value === 'estimation'
+          ? 'Marqué comme estimation : ne sert plus à calibrer.'
+          : 'Source enregistrée — cette valeur calibre le modèle.');
+      });
+    });
+
     list.querySelectorAll('.real-input').forEach(function (inp) {
       var commit = function (announce) {
         var date = Number(inp.dataset.real);
@@ -2226,10 +2289,12 @@
     });
     // La synthèse médecin vivait dans les Réglages, où personne ne la cherchait.
     initReport();
+    initBench();
+    initHistorySearch();
     // Le volet Analyse est recalculé à l'ouverture : le biais bouge à chaque
     // valeur réelle saisie dans le journal.
     initPanes('tab-history', function (pane) {
-      if (pane === 'analyse') renderBiasCard();
+      if (pane === 'analyse') { renderBiasCard(); renderBench(); }
     });
     initPanes('tab-manual');
   }
@@ -2476,6 +2541,7 @@
     $('set-round-half').checked = settings.roundHalf;
     updateVerificationSettingsForm();
     updateSettingsSummaries();
+    renderUsage();
     openNativeSettings();
     $('settings-modal').hidden = false;
   }
@@ -2571,6 +2637,146 @@
       var cb = $('compare-toggle');
       if (cb) cb.checked = false;
     }
+  }
+
+  /* ---------- Banc d'essai ----------
+     Aucun classement public ne dit quel modèle lit le mieux TES assiettes. La
+     seule référence valable est la valeur réelle relevée sur tes repas — et
+     seulement quand elle vient d'une pesée, d'une étiquette ou d'une recette.
+
+     Chaque essai est un vrai appel facturé : on annonce le coût AVANT, et on
+     exécute en série pour ne pas déclencher de limitation de débit. */
+  // Coût approximatif d'une estimation, en dollars, par identifiant de modèle.
+  var COST_HINT = {
+    'qwen/qwen3.7-flash': 0.00025, 'qwen/qwen3.7-plus': 0.0026,
+    'qwen/qwen3-vl-235b-a22b-instruct': 0.004,
+    'anthropic/claude-sonnet-5': 0.018, 'openai/gpt-5.6-terra': 0.0123,
+    'google/gemini-3.6-flash': 0.0135,
+    'claude-opus-5': 0.045, 'claude-opus-4-8': 0.045,
+    'claude-sonnet-5': 0.018, 'claude-haiku-4-5': 0.005,
+    'gpt-5.6-sol': 0.03, 'gpt-5.6-terra': 0.0123, 'gpt-5.6-luna': 0.004
+  };
+  function costOf(model) { return COST_HINT[model] != null ? COST_HINT[model] : 0.015; }
+
+  function benchModelList() {
+    var out = [];
+    (Storage.PROVIDERS || []).forEach(function (p) {
+      if (!(settings.apiKeys || {})[p]) return;
+      ((Storage.MODEL_CATALOG || {})[p] || []).forEach(function (m) {
+        out.push({ provider: p, model: m.id,
+                   label: (PROVIDER_NAME[p] || p) + ' · ' + m.label });
+      });
+    });
+    return out;
+  }
+
+  var benchList = [];
+
+  function renderBench() {
+    var box = $('bench-cases'), sel = $('bench-models'), sum = $('bench-summary');
+    if (!box || !sel) return;
+
+    benchList = Bench.cases(12);
+    var models = benchModelList();
+
+    if (!benchList.length) {
+      box.innerHTML = '<p class="empty">Aucun repas utilisable pour l\'instant. Il en faut ' +
+        'avec une <strong>photo conservée</strong> et une valeur réelle <strong>pesée, ' +
+        'lue sur l\'emballage ou calculée</strong> — une estimation personnelle ne peut ' +
+        'pas servir d\'arbitre.</p>';
+      if (sum) sum.textContent = 'aucun cas';
+      $('bench-run').disabled = true;
+    } else {
+      var vignettes = benchList.filter(function (c) { return c.isThumb; }).length;
+      box.innerHTML = '<p class="hint">' + benchList.length + ' repas utilisable' +
+        (benchList.length > 1 ? 's' : '') + ' comme cas de test.</p>' +
+        (vignettes
+          ? '<p class="hint tiny">⚠️ ' + vignettes + ' d\'entre eux n\'ont qu\'une vignette ' +
+            'de 320 px (repas enregistrés depuis la version web). La comparaison reste ' +
+            'valable entre modèles, mais elle les désavantage tous : leurs erreurs ' +
+            'paraîtront plus grandes qu\'en pleine définition.</p>'
+          : '');
+      if (sum) sum.textContent = benchList.length + ' cas';
+      $('bench-run').disabled = false;
+    }
+
+    sel.innerHTML = models.map(function (m, i) {
+      var pre = (m.provider === settings.provider || m.provider === settings.verifyProvider);
+      return '<option value="' + i + '"' + (pre ? ' selected' : '') + '>' +
+        escapeHtml(m.label) + '</option>';
+    }).join('');
+  }
+
+  function initBench() {
+    var btn = $('bench-run');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var models = benchModelList();
+      var choisis = [].slice.call($('bench-models').selectedOptions)
+        .map(function (o) { return models[parseInt(o.value, 10)]; })
+        .filter(Boolean);
+      if (!choisis.length) { toast('Choisis au moins un modèle.'); return; }
+      if (!benchList.length) return;
+
+      var total = choisis.reduce(function (s, m) {
+        return s + costOf(m.model) * benchList.length;
+      }, 0);
+      var msg = choisis.length + ' modèle(s) × ' + benchList.length + ' repas = ' +
+        (choisis.length * benchList.length) + ' appels.\n\n' +
+        'Coût estimé : environ ' + (total < 0.01 ? 'moins de 0,01 $' : total.toFixed(2) + ' $') +
+        '.\n\nLancer ?';
+      if (!confirm(msg)) return;
+
+      var status = $('bench-status'), out = $('bench-results');
+      status.hidden = false;
+      out.innerHTML = '';
+      btn.disabled = true;
+
+      var scores = [];
+      var next = function (i) {
+        if (i >= choisis.length) return Promise.resolve();
+        var m = choisis[i];
+        return Bench.runModel(m, benchList, settings, function (entry, k, n) {
+          status.innerHTML = '<div class="spinner"></div>' + escapeHtml(entry.label) +
+            ' — repas ' + (k + 1) + ' / ' + n + ' (modèle ' + (i + 1) + '/' + choisis.length + ')';
+        }).then(function (res) {
+          scores.push({ label: m.label, s: Bench.score(res) });
+          renderBenchResults(scores);
+          return next(i + 1);
+        });
+      };
+
+      next(0).then(function () {
+        status.hidden = true;
+        btn.disabled = false;
+        toast('Banc d\'essai terminé.');
+      });
+    });
+  }
+
+  function renderBenchResults(scores) {
+    var out = $('bench-results');
+    if (!out) return;
+    // Classement par erreur relative moyenne : comparable d'un repas à l'autre,
+    // contrairement à une erreur en grammes qui favorise les petits repas.
+    var tri = scores.slice().filter(function (x) { return x.s.n; })
+      .sort(function (a, b) { return a.s.mape - b.s.mape; });
+    if (!tri.length) { out.innerHTML = ''; return; }
+
+    out.innerHTML = '<table class="bench-table"><thead><tr>' +
+      '<th>Modèle</th><th class="num">Erreur</th><th class="num">En grammes</th>' +
+      '<th class="num">Tendance</th></tr></thead><tbody>' +
+      tri.map(function (x, i) {
+        var t = x.s.biais > 0 ? '+' + x.s.biais + ' g' : x.s.biais + ' g';
+        return '<tr' + (i === 0 ? ' class="bench-best"' : '') + '>' +
+          '<td>' + (i === 0 ? '🏆 ' : '') + escapeHtml(x.label) + '</td>' +
+          '<td class="num">' + x.s.mape + ' %</td>' +
+          '<td class="num">' + x.s.mae + ' g</td>' +
+          '<td class="num">' + t + '</td></tr>';
+      }).join('') + '</tbody></table>' +
+      '<p class="hint tiny">Erreur = écart moyen à ta valeur réelle, en pourcentage. ' +
+      'Tendance positive = le modèle surestime. Sur ' + tri[0].s.n + ' repas' +
+      (tri[0].s.failed ? ' (' + tri[0].s.failed + ' échec(s) ignoré(s))' : '') + '.</p>';
   }
 
   // ---------- Synthèse pour la consultation ----------
@@ -2715,6 +2921,37 @@
         if (!m) throw new Error('Version introuvable.');
         return { version: m[1], info: null };
       });
+  }
+
+  /* ---------- Consommation d'API ----------
+     Le coût est appliqué à l'AFFICHAGE et non enregistré : corriger un tarif ne
+     doit pas réécrire l'historique des appels déjà passés. */
+  function renderUsage() {
+    var box = $('usage-box');
+    if (!box || !Storage.getUsage) return;
+    var mois = new Date().toISOString().slice(0, 7);
+    var u = Storage.getUsage(mois);
+    var cles = Object.keys(u);
+    if (!cles.length) {
+      box.innerHTML = '<p class="hint tiny">Aucun appel ce mois-ci.</p>';
+      return;
+    }
+    var total = 0, lignes = cles.map(function (k) {
+      var parts = k.split('|');
+      var n = u[k], c = costOf(parts[1]) * n;
+      total += c;
+      return { label: (PROVIDER_NAME[parts[0]] || parts[0]) + ' · ' + parts[1], n: n, c: c };
+    }).sort(function (a, b) { return b.c - a.c; });
+
+    box.innerHTML = '<table class="usage-table"><tbody>' +
+      lignes.map(function (l) {
+        return '<tr><td>' + escapeHtml(l.label) + '</td>' +
+          '<td class="num">' + l.n + ' appel' + (l.n > 1 ? 's' : '') + '</td>' +
+          '<td class="num">' + (l.c < 0.01 ? '<0,01' : l.c.toFixed(2)) + ' $</td></tr>';
+      }).join('') +
+      '<tr class="usage-total"><td>Total du mois</td><td class="num"></td><td class="num">' +
+      (total < 0.01 ? '<0,01' : total.toFixed(2)) + ' $</td></tr>' +
+      '</tbody></table>';
   }
 
   function initUpdateCheck() {

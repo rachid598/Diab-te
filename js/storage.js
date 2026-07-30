@@ -11,6 +11,7 @@
   var native = window.Native && window.Native.isApp;
 
   var KEYS = {
+    usage: 'diabete.usage.v1',
     settings: 'diabete.settings.v1',
     history: 'diabete.history.v1',
     disclaimer: 'diabete.disclaimer.v1',
@@ -332,13 +333,34 @@
       return window.Native.photos.prune(keep);
     },
     // Enregistre les glucides RÉELS d'un repas (pour l'apprentissage post-repas).
-    setHistoryReal: function (date, realCarbsG) {
+    /* La SOURCE de la valeur réelle compte autant que la valeur. Une pesée et
+       une estimation à l'oeil ne méritent pas le même poids : calibrer le
+       modèle sur une valeur elle-même estimée amplifie du bruit au lieu de le
+       corriger. Par défaut on suppose une estimation personnelle, hypothèse
+       prudente. */
+    REAL_SOURCES: [
+      { id: 'pesee', label: 'Pesé à la balance' },
+      { id: 'etiquette', label: 'Lu sur l\'emballage' },
+      { id: 'recette', label: 'Calculé depuis la recette' },
+      { id: 'estimation', label: 'Estimation personnelle' }
+    ],
+
+    // Une estimation personnelle ne sert pas d'arbitre : ni pour le biais, ni
+    // pour le banc d'essai.
+    isReliableReal: function (e) {
+      return !!e && e.realSource !== 'estimation';
+    },
+
+    setHistoryReal: function (date, realCarbsG, source) {
       var h = this.getHistory();
       h.forEach(function (e) {
         if (e.date === date) {
-          if (realCarbsG == null || realCarbsG === '') delete e.realCarbsG;
-          else {
+          if (realCarbsG == null || realCarbsG === '') {
+            delete e.realCarbsG;
+            delete e.realSource;
+          } else {
             e.realCarbsG = Math.max(0, Math.round(realCarbsG));
+            e.realSource = source || e.realSource || 'estimation';
             e.draft = false;
           }
         }
@@ -348,7 +370,8 @@
     // Calcule le biais personnel : compare estimé vs réel sur les repas corrigés.
     // Renvoie { count, meanRatio, pct } (pct > 0 = tendance à SOUS-estimer).
     getBias: function () {
-      var h = this.getHistory();
+      var self = this;
+      var h = this.getHistory().filter(function (e) { return self.isReliableReal(e); });
       var ratios = [];
       h.forEach(function (e) {
         if (e.draft) return;
@@ -368,9 +391,11 @@
     getBiasByCategory: function (minMeals) {
       minMeals = minMeals || 3;
       var groups = {};
+      var self = this;
       this.getHistory().forEach(function (e) {
         if (e.draft) return;
         if (!(e.totalCarbsG > 0) || e.realCarbsG == null || !(e.realCarbsG > 0)) return;
+        if (!self.isReliableReal(e)) return;
         var cat = dominantCategory(e.items);
         if (!cat) return;
         (groups[cat] = groups[cat] || []).push(e.realCarbsG / e.totalCarbsG);
@@ -439,6 +464,31 @@
         names: (best.entry.items || []).filter(function (it) { return it.carbsG > 0; })
                  .map(function (it) { return it.name; }).slice(0, 3)
       };
+    },
+
+    /* ----- Consommation d'API -----
+       Depuis qu'un fournisseur se facture à l'usage et qu'une vérification
+       tourne à chaque repas, il faut pouvoir répondre à « combien ça me coûte ».
+       On compte les appels par modèle et par mois ; le prix est appliqué à
+       l'affichage, pour que corriger un tarif ne réécrive pas l'historique. */
+    noteUsage: function (provider, model) {
+      var u = read(KEYS.usage, {}) || {};
+      var mois = new Date().toISOString().slice(0, 7);   // AAAA-MM
+      u[mois] = u[mois] || {};
+      var k = provider + '|' + model;
+      u[mois][k] = (u[mois][k] || 0) + 1;
+      // On ne garde que 13 mois : de quoi comparer à l'an dernier, pas plus.
+      var mois_tries = Object.keys(u).sort().reverse().slice(0, 13);
+      var garde = {};
+      mois_tries.forEach(function (m) { garde[m] = u[m]; });
+      write(KEYS.usage, garde);
+      return garde;
+    },
+
+    getUsage: function (mois) {
+      var u = read(KEYS.usage, {}) || {};
+      if (mois) return u[mois] || {};
+      return u;
     },
 
     // ----- Repas enregistrés (« mes repas fréquents ») -----
