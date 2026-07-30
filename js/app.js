@@ -3,13 +3,19 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '36'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '37'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
   var images = [];        // [{base64, mediaType, previewUrl}]
   var lastResult = null;  // résultat IA (modifiable)
   var manualItems = [];   // [{name, carb(per100g), grams}]
+  var currentHistoryDate = null;
+  var currentHistoryConfirmed = false;
+  var currentHistoryPhotoStarted = false;
+  var lastEstimateContext = null;
+  var lastVerification = null;
+  var estimateGeneration = 0;
 
   // ---------- Utilitaires d'affichage ----------
   function fr(n) { return (Math.round(n * 10) / 10).toString().replace('.', ','); }
@@ -202,10 +208,13 @@
       $('notes-title').firstChild.nodeValue = 'Décris ton repas ';
       $('notes-tag').textContent = 'sans photo';
       $('notes-hint').innerHTML = 'Écris simplement ce que tu manges, en une phrase.';
+      $('notes-card').open = true;
+      $('notes-card').classList.add('required');
     } else {
       $('notes-title').firstChild.nodeValue = 'Précisions ';
       $('notes-tag').textContent = 'optionnel';
       $('notes-hint').innerHTML = 'Ce que tu sais déjà améliore l\'estimation (ex. « riz basmati ~150 g cuit, pain 60 g »).';
+      $('notes-card').classList.remove('required');
     }
     updateEstimateBtn();
   }
@@ -223,7 +232,11 @@
       : images.length > 0;
     var btn = $('estimate-btn');
     btn.disabled = !ready;
-    btn.textContent = textMode ? '✍️ Estimer d\'après ma description' : '🔎 Estimer les glucides';
+    $('estimate-btn-label').textContent = textMode
+      ? 'Estimer d\'après ma description'
+      : 'Estimer les glucides';
+    btn.classList.toggle('btn-ready', ready);
+    updateInputSummaries();
 
     /* Des photos prises puis laissées de côté ne sont PAS envoyées en mode
        description. On le dit, plutôt que de les ignorer en silence. */
@@ -239,6 +252,26 @@
       } else {
         warn.hidden = true;
       }
+    }
+  }
+
+  function updateInputSummaries() {
+    var notes = describedMeal();
+    var notesSummary = $('notes-summary');
+    if (notesSummary) notesSummary.textContent = notes ? 'Renseigné' : (inputMode === 'texte' ? 'À remplir' : 'Ajouter');
+
+    var extras = [];
+    if (($('extra-dessert').value || '').trim()) extras.push('dessert');
+    if (($('extra-drink').value || '').trim()) extras.push('boisson');
+    var extrasSummary = $('extras-summary');
+    if (extrasSummary) extrasSummary.textContent = extras.length ? extras.join(' + ') : 'Ajouter';
+
+    var ref = $('reference-object');
+    var refSummary = $('reference-summary');
+    if (ref && refSummary) {
+      refSummary.textContent = ref.value === 'none'
+        ? 'Aucun'
+        : (ref.options[ref.selectedIndex].textContent || '').replace(/\s*\(.*\)$/, '');
     }
   }
 
@@ -349,6 +382,7 @@
     });
     $('reference-object').addEventListener('change', function (e) {
       $('plate-diameter-wrap').hidden = e.target.value !== 'assiette';
+      updateInputSummaries();
     });
     // La saisie d'une description active à elle seule le bouton d'estimation.
     $('user-notes').addEventListener('input', updateEstimateBtn);
@@ -364,11 +398,16 @@
   }
 
   function runEstimate() {
+    var runGeneration = ++estimateGeneration;
     var status = $('analyze-status');
     var resultsEl = $('results');
     resultsEl.hidden = true;
     status.hidden = false;
     $('estimate-btn').disabled = true;
+    currentHistoryDate = null;
+    currentHistoryConfirmed = false;
+    currentHistoryPhotoStarted = false;
+    lastVerification = null;
 
     // En mode description, les photos éventuelles ne sont pas envoyées.
     var textOnly = inputMode === 'texte';
@@ -380,9 +419,10 @@
       extras: extrasText(),       // dessert / boisson, absents de la photo
       imageCount: sent.length     // 0 fait basculer l'estimateur en mode description
     };
+    lastEstimateContext = Object.assign({}, ctx);
 
-    var cmp = settings.compareProvider;
-    var wantCompare = cmp && cmp !== settings.provider &&
+    var cmp = settings.verifyProvider;
+    var wantCompare = settings.verificationMode === 'ask' && cmp && cmp !== settings.provider &&
                       $('compare-wrap') && !$('compare-wrap').hidden && $('compare-toggle').checked;
 
     if (wantCompare) {
@@ -416,7 +456,7 @@
       lastResult = result;
       status.hidden = true;
       renderResults(result);
-      attachVerification(verify);
+      attachVerification(verify, runGeneration);
     }).catch(function (e) {
       status.hidden = true;
       offerQueue(e, ctx, sent);
@@ -484,11 +524,21 @@
         .then(function (imgs) { return Estimator.estimate(imgs, item.ctx, settings); })
         .then(function (result) {
           var entry = {
-            date: item.date, source: 'photo', totalCarbsG: result.totalCarbsG,
+            date: item.date, source: 'photo', draft: true,
+            totalCarbsG: result.totalCarbsG,
             parts: partsFrom(result.totalCarbsG), partSizeG: settings.partSizeG,
+            provider: result.provider || settings.provider,
+            model: result.model || (settings.models || {})[settings.provider] || '',
             glycemicSpeed: result.glycemicSpeed || null,
             gi: result.gi ? { gl: result.gi.gl, gi: result.gi.gi } : null,
             seen: result.seen || '',
+            input: item.ctx ? {
+              referenceObject: item.ctx.referenceObject || '',
+              plateDiameterCm: item.ctx.plateDiameterCm || null,
+              notes: item.ctx.notes || '',
+              extras: item.ctx.extras || '',
+              imageCount: item.ctx.imageCount || 0
+            } : null,
             items: result.items.map(function (it) {
               return { name: it.name, carbsG: it.carbsG,
                        portion: it.portionDescription || '', added: !!it.added };
@@ -501,7 +551,7 @@
             id: Math.floor(item.date / 1000),
             title: 'Estimation prête',
             body: 'Le repas mis de côté a été analysé : ' + result.totalCarbsG + ' g (' +
-                  fr(partsFrom(result.totalCarbsG)) + ' parts).',
+                  fr(partsFrom(result.totalCarbsG)) + ' parts). Confirme-le dans l\'historique.',
             at: new Date(Date.now() + 1000)
           });
           return next(i + 1);
@@ -570,8 +620,8 @@
       return '<div class="cmp-card">' +
         '<div class="cmp-name">' + escapeHtml(name) + '</div>' +
         modelLine +
-        '<div class="cmp-parts">' + fr(parts) + ' <small>parts</small></div>' +
-        '<div class="cmp-grams">≈ ' + r.totalCarbsG + ' g</div>' +
+        '<div class="cmp-carbs">' + r.totalCarbsG + ' <small>g</small></div>' +
+        '<div class="cmp-parts">' + fr(parts) + ' parts</div>' +
         '<div class="cmp-range">' + r.rangeLowG + ' – ' + r.rangeHighG + ' g</div>' +
         '<div class="confidence conf-' + r.overallConfidence + '">' + CONF_LABEL[r.overallConfidence] + '</div>' +
         '<button class="btn btn-primary cmp-use" data-p="' + x.provider + '">Utiliser cet avis →</button>' +
@@ -595,8 +645,8 @@
                 'ajoute une photo <strong>de côté</strong> avec un objet-repère et relance, ' +
                 'ou regarde le détail par aliment pour trancher toi-même.</div>';
       }
-      html += '<div class="cmp-avg' + (bigGap ? ' muted' : '') + '">Moyenne : <strong>' + fr(pAvg) +
-              ' parts</strong> (≈ ' + avg + ' g) · écart : ' + diff + ' g' +
+      html += '<div class="cmp-avg' + (bigGap ? ' muted' : '') + '">Moyenne : <strong>' + avg +
+              ' g</strong> (' + fr(pAvg) + ' parts) · écart : ' + diff + ' g' +
               (bigGap ? '' : ' · <span class="cmp-agree">avis concordants ✓</span>') + '</div>';
     }
 
@@ -611,7 +661,12 @@
 
     el.querySelectorAll('.cmp-use').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        lastResult = results[btn.dataset.p];
+        var chosenProvider = btn.dataset.p;
+        var other = a.provider === chosenProvider ? b : a;
+        lastResult = results[chosenProvider];
+        lastVerification = other.ok
+          ? { ok: true, provider: other.provider, total: other.result.totalCarbsG, checkedAt: Date.now() }
+          : { ok: false, provider: other.provider, error: other.error, checkedAt: Date.now() };
         renderResults(lastResult); // remplace l'affichage par le détail éditable
       });
     });
@@ -802,14 +857,15 @@
     return '<div class="macros">' + bits.join('') + '</div>';
   }
 
-  function renderResults(r) {
+  function renderResults(r, keepPosition) {
     var el = $('results');
     var parts = partsFrom(r.totalCarbsG);
+    var nutrition = glycemicHtml(r) + giHtml(r) + macrosHtml(r);
 
     var html = '';
     html += '<div class="result-hero">';
-    html += '  <div class="hero-parts">' + fr(parts) + ' <small>parts</small></div>';
-    html += '  <div class="hero-grams">≈ ' + r.totalCarbsG + ' <small>g de glucides</small></div>';
+    html += '  <div class="hero-carbs">' + r.totalCarbsG + ' <small>g</small></div>';
+    html += '  <div class="hero-parts">' + fr(parts) + ' <small>parts de glucides</small></div>';
     html += rangeBarHtml(r.rangeLowG, r.totalCarbsG, r.rangeHighG);
     html += '  <div class="confidence conf-' + r.overallConfidence + '">' + CONF_LABEL[r.overallConfidence] + '</div>';
     html += '  <div class="pump-hint">💉 À saisir dans ta pompe : <strong>' + r.totalCarbsG +
@@ -823,13 +879,10 @@
         'La taille des portions est supposée, pas mesurée : la fourchette est plus large. ' +
         'Ajoute des quantités pour la resserrer.</div>';
     }
-    html += biasHintHtml(r.totalCarbsG, r.items);
-    html += glycemicHtml(r);
-    html += giHtml(r);
-    html += macrosHtml(r);
     html += '</div>';
 
     html += '<div id="verify-box" class="verify-box" hidden></div>';
+    html += biasHintHtml(r.totalCarbsG, r.items);
     html += seenHtml(r);
 
     // Détail par aliment (grammes éditables)
@@ -837,12 +890,19 @@
     html += '<p class="hint">Une portion te semble fausse dans la liste ci-dessus ? Corrige-la ici, le total se recalcule.</p>';
     html += '<div id="items-list"></div></div>';
 
-    if (r.notes) {
-      html += '<div class="card"><div class="notes-box">📝 ' + escapeHtml(r.notes) + '</div></div>';
+    if (nutrition || r.notes) {
+      html += '<details class="card result-more"><summary>Informations complémentaires</summary>' +
+        '<div class="result-more-content">' + nutrition;
+      if (r.notes) {
+        html += '<div class="notes-box">📝 ' + escapeHtml(r.notes) + '</div>';
+      }
+      html += '</div></details>';
     }
 
+    html += '<div id="result-save-status" class="autosave-status">' +
+            '<span class="autosave-dot"></span><span>Enregistrement du brouillon…</span></div>';
     html += '<div class="btn-row">' +
-            '<button id="save-result" class="btn btn-primary">💾 Enregistrer dans l\'historique</button>' +
+            '<button id="confirm-result" class="btn btn-primary">✓ Confirmer ce repas</button>' +
             '<button id="save-meal" class="btn btn-ghost">⭐ Repas fréquent</button>' +
             '</div>';
     html += '<div class="disclaimer-mini">Estimation indicative — vérifie toujours avant de doser.</div>';
@@ -850,9 +910,11 @@
     el.innerHTML = html;
     el.hidden = false;
     renderItems();
-    $('save-result').addEventListener('click', saveCurrentResult);
+    $('confirm-result').addEventListener('click', confirmCurrentResult);
     $('save-meal').addEventListener('click', function () { promptSaveMeal(lastResult.items); });
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    renderVerificationState();
+    autoSaveCurrentResult();
+    if (!keepPosition) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   /* ---------- Dessert et boisson ----------
@@ -878,6 +940,7 @@
       chips.querySelectorAll('[data-drink]').forEach(function (b) {
         b.addEventListener('click', function () {
           $('extra-drink').value = DRINK_CHIPS[parseInt(b.dataset.drink, 10)];
+          updateEstimateBtn();
         });
       });
     }
@@ -901,50 +964,75 @@
      avant que la dose ne soit saisie. */
   function startVerification(images, ctx) {
     var p = settings.verifyProvider;
-    if (!settings.verifyEnabled || !p || p === settings.provider) return null;
+    if (settings.verificationMode !== 'auto' || !p || p === settings.provider) return null;
     if (!(settings.apiKeys || {})[p]) return null;
     return Estimator.estimateWith(p, images, ctx, settings)
       .then(function (r) { return { ok: true, provider: p, total: r.totalCarbsG }; })
       .catch(function (e) { return { ok: false, provider: p, error: e.message }; });
   }
 
-  function attachVerification(promise) {
-    if (!promise) return;
-    var box = $('verify-box');
-    if (box) {
-      box.hidden = false;
-      box.className = 'verify-box';
-      box.innerHTML = '<span class="spinner"></span>Vérification croisée en cours…';
+  function renderVerificationState() {
+    var el = $('verify-box');
+    if (!el) return;
+    if (!lastVerification) {
+      el.hidden = true;
+      return;
     }
+    el.hidden = false;
+    if (lastVerification.loading) {
+      el.className = 'verify-box';
+      el.innerHTML = '<span class="spinner"></span>Vérification croisée en cours…';
+      return;
+    }
+
+    var v = lastVerification;
+    var nom = PROVIDER_NAME[v.provider] || v.provider;
+    if (!v.ok) {
+      el.className = 'verify-box v-off';
+      el.innerHTML = '⚪ Vérification croisée indisponible (' + escapeHtml(v.error || 'erreur') + ').';
+      return;
+    }
+
+    var main = lastResult.totalCarbsG;
+    var ecart = main > 0 ? Math.abs(v.total - main) / main * 100 : 0;
+    var seuil = settings.verifyThresholdPct || 20;
+    var parts = fr(partsFrom(v.total));
+
+    if (ecart <= seuil) {
+      el.className = 'verify-box v-ok';
+      el.innerHTML = '✅ <strong>Confirmé</strong> par ' + escapeHtml(nom) + ' : ' +
+        v.total + ' g (' + parts + ' parts), soit ' + Math.round(ecart) + ' % d\'écart.';
+    } else {
+      el.className = 'verify-box v-alert';
+      el.innerHTML = '⚠️ <strong>Écart important</strong> — ' + escapeHtml(nom) +
+        ' estime <strong>' + v.total + ' g</strong> (' + parts + ' parts), soit ' +
+        Math.round(ecart) + ' % de différence.<br>' +
+        'Deux modèles en désaccord sur un repas, c\'est souvent qu\'un aliment a été ' +
+        'mal identifié ou qu\'une portion est mal jugée. Relis « Ce que l\'IA a vu » ' +
+        'avant de saisir la dose.';
+    }
+  }
+
+  function attachVerification(promise, generation) {
+    if (!promise) return;
+    var verifiedResult = lastResult;
+    var verifiedDate = currentHistoryDate;
+    lastVerification = { loading: true };
+    renderVerificationState();
     promise.then(function (v) {
-      var el = $('verify-box');
-      if (!el || !lastResult) return;
-      var nom = PROVIDER_NAME[v.provider] || v.provider;
-
-      if (!v.ok) {
-        // Un échec de vérification n'invalide pas l'estimation : on le dit sans dramatiser.
-        el.className = 'verify-box v-off';
-        el.innerHTML = '⚪ Vérification croisée indisponible (' + escapeHtml(v.error || 'erreur') + ').';
-        return;
-      }
-
-      var main = lastResult.totalCarbsG;
-      var ecart = main > 0 ? Math.abs(v.total - main) / main * 100 : 0;
-      var seuil = settings.verifyThresholdPct || 20;
-      var parts = fr(partsFrom(v.total));
-
-      if (ecart <= seuil) {
-        el.className = 'verify-box v-ok';
-        el.innerHTML = '✅ <strong>Confirmé</strong> par ' + escapeHtml(nom) + ' : ' +
-          v.total + ' g (' + parts + ' parts), soit ' + Math.round(ecart) + ' % d\'écart.';
-      } else {
-        el.className = 'verify-box v-alert';
-        el.innerHTML = '⚠️ <strong>Écart important</strong> — ' + escapeHtml(nom) +
-          ' estime <strong>' + v.total + ' g</strong> (' + parts + ' parts), soit ' +
-          Math.round(ecart) + ' % de différence.<br>' +
-          'Deux modèles en désaccord sur un repas, c\'est souvent qu\'un aliment a été ' +
-          'mal identifié ou qu\'une portion est mal jugée. Relis « Ce que l\'IA a vu » ' +
-          'avant de saisir la dose.';
+      if (generation !== estimateGeneration || lastResult !== verifiedResult) return;
+      v.checkedAt = Date.now();
+      lastVerification = v;
+      renderVerificationState();
+      if (verifiedDate) {
+        Storage.updateHistory(verifiedDate, {
+          verification: {
+            provider: v.provider,
+            ok: !!v.ok,
+            totalCarbsG: v.ok ? v.total : null,
+            checkedAt: v.checkedAt
+          }
+        });
       }
     });
   }
@@ -1059,30 +1147,40 @@
           lastResult.items[i].carbsG = Math.round(v * d / 100);
         }
         recomputeTotal();
-        renderResults(lastResult);
+        renderResults(lastResult, true);
       });
     });
     list.querySelectorAll('.item-remove').forEach(function (b) {
       b.addEventListener('click', function () {
         lastResult.items.splice(parseInt(b.dataset.rm, 10), 1);
         recomputeTotal();
-        renderResults(lastResult);
+        renderResults(lastResult, true);
       });
     });
   }
 
-  function saveCurrentResult() {
+  function currentResultEntry(date) {
     var entry = {
-      date: Date.now(),
+      date: date,
       // Distinguer les trois origines : l'historique et la synthèse médecin
       // n'ont pas la même valeur selon qu'une portion a été vue ou décrite.
       source: lastResult.fromText ? 'texte' : 'photo',
+      draft: !currentHistoryConfirmed,
       totalCarbsG: lastResult.totalCarbsG,
       parts: partsFrom(lastResult.totalCarbsG),
       partSizeG: settings.partSizeG,
+      provider: lastResult.provider || settings.provider,
+      model: lastResult.model || (settings.models || {})[settings.provider] || '',
       glycemicSpeed: lastResult.glycemicSpeed || null,
       gi: lastResult.gi ? { gl: lastResult.gi.gl, gi: lastResult.gi.gi } : null,
       seen: lastResult.seen || '',
+      input: lastEstimateContext ? {
+        referenceObject: lastEstimateContext.referenceObject || '',
+        plateDiameterCm: lastEstimateContext.plateDiameterCm || null,
+        notes: lastEstimateContext.notes || '',
+        extras: lastEstimateContext.extras || '',
+        imageCount: lastEstimateContext.imageCount || 0
+      } : null,
       /* On garde la portion et l'origine de chaque aliment : c'est ce qui rend
          le détail de l'historique consultable des semaines plus tard. Ce sont
          des chaînes courtes, sans commune mesure avec le poids d'une image. */
@@ -1095,28 +1193,76 @@
         };
       })
     };
+    if (lastVerification && !lastVerification.loading) {
+      entry.verification = {
+        provider: lastVerification.provider,
+        ok: !!lastVerification.ok,
+        totalCarbsG: lastVerification.ok ? lastVerification.total : null,
+        error: lastVerification.ok ? '' : (lastVerification.error || ''),
+        checkedAt: lastVerification.checkedAt || Date.now()
+      };
+    }
+    return entry;
+  }
+
+  function updateResultSaveState() {
+    var status = $('result-save-status');
+    var btn = $('confirm-result');
+    if (!status || !btn) return;
+    status.classList.toggle('confirmed', currentHistoryConfirmed);
+    status.innerHTML = '<span class="autosave-dot"></span><span>' +
+      (currentHistoryConfirmed
+        ? 'Repas confirmé dans l\'historique'
+        : 'Brouillon sauvegardé automatiquement') + '</span>';
+    btn.disabled = currentHistoryConfirmed;
+    btn.textContent = currentHistoryConfirmed ? '✓ Repas confirmé' : '✓ Confirmer ce repas';
+  }
+
+  function prepareCurrentHistoryPhoto(date) {
+    if (currentHistoryPhotoStarted) return;
+    currentHistoryPhotoStarted = true;
+
     /* Image de la 1ʳᵉ vue, pour revoir plus tard à quoi ressemblait la portion.
        PWA : une vignette de 320 px en base64, seule taille que le quota de
        localStorage tolère. APK : la photo entière, écrite comme un vrai fichier
        — aucune raison de la dégrader puisqu'il n'y a plus de quota. */
     var first = images[0];
-    var prepare;
-    if (Native.isApp && first && first.previewUrl) {
-      prepare = Native.photos.save('meal-' + entry.date + '.jpg', first.previewUrl)
-        .then(function (name) { if (name) entry.photo = name; });
-    } else if (first && first.previewUrl && Camera.makeThumb) {
-      prepare = Camera.makeThumb(first.previewUrl)
-        .then(function (thumb) { if (thumb) entry.thumb = thumb; });
-    } else {
-      prepare = Promise.resolve();
-    }
+    if (!first || !first.previewUrl) return;
 
-    var done = function () {
-      Storage.addHistory(entry);
-      toast('Enregistré dans l\'historique.');
-      scheduleReminderFor(entry);
-    };
-    prepare.then(done, done);   // une image qui échoue ne doit pas perdre le repas
+    if (Native.isApp && first && first.previewUrl) {
+      Native.photos.save('meal-' + date + '.jpg', first.previewUrl)
+        .then(function (name) {
+          if (name) Storage.updateHistory(date, { photo: name });
+        })
+        .catch(function () {});
+    } else if (first && first.previewUrl && Camera.makeThumb) {
+      Camera.makeThumb(first.previewUrl)
+        .then(function (thumb) {
+          if (thumb) Storage.updateHistory(date, { thumb: thumb });
+        })
+        .catch(function () {});
+    }
+  }
+
+  function autoSaveCurrentResult() {
+    if (!lastResult) return;
+    if (!currentHistoryDate) currentHistoryDate = Date.now();
+    var entry = currentResultEntry(currentHistoryDate);
+    Storage.upsertHistory(entry);
+    prepareCurrentHistoryPhoto(currentHistoryDate);
+    updateResultSaveState();
+  }
+
+  function confirmCurrentResult() {
+    if (!lastResult) return;
+    autoSaveCurrentResult();
+    if (currentHistoryConfirmed) return;
+    currentHistoryConfirmed = true;
+    var entry = currentResultEntry(currentHistoryDate);
+    Storage.upsertHistory(entry);
+    updateResultSaveState();
+    scheduleReminderFor(entry);
+    toast('Repas confirmé dans l\'historique.');
   }
 
   // ---------- Rappel de contrôle (APK) ----------
@@ -1165,6 +1311,9 @@
     renderChips();
     renderFoodResults('');
     renderSavedMeals();
+    $('manual-dock-btn').addEventListener('click', function () {
+      $('manual-meal-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   }
 
   // ---------- Recherche en ligne (OpenFoodFacts) + code-barres ----------
@@ -1394,6 +1543,7 @@
     if (!manualItems.length) {
       wrap.innerHTML = '<p class="empty">Aucun aliment ajouté.</p>';
       $('manual-total').hidden = true;
+      $('manual-dock').hidden = true;
       return;
     }
     wrap.innerHTML = '';
@@ -1494,8 +1644,8 @@
     var el = $('manual-total');
     el.innerHTML =
       '<div class="result-hero">' +
-      '  <div class="hero-parts">' + fr(parts) + ' <small>parts</small></div>' +
-      '  <div class="hero-grams">= ' + total + ' <small>g de glucides</small></div>' +
+      '  <div class="hero-carbs">' + total + ' <small>g</small></div>' +
+      '  <div class="hero-parts">' + fr(parts) + ' <small>parts de glucides</small></div>' +
       '  <div class="pump-hint">💉 À saisir dans ta pompe : <strong>' + total + ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>).</div>' +
       giHtml({ gi: giInfo }) +
       '  <div class="btn-row" style="margin-top:12px">' +
@@ -1504,6 +1654,8 @@
       '  </div>' +
       '</div>';
     el.hidden = false;
+    $('manual-dock-total').textContent = total + ' g · ' + fr(parts) + ' parts';
+    $('manual-dock').hidden = false;
     $('save-manual-meal').addEventListener('click', function () {
       promptSaveMeal(manualItems.map(function (it) {
         return { name: it.name, carbsG: Math.round(itemGrams(it) * it.carb / 100) };
@@ -1582,6 +1734,13 @@
     }
     if (tags.length) out += '<div class="detail-tags">' + tags.join('') + '</div>';
 
+    if (e.draft) {
+      out += '<div class="draft-note">Sauvegardé automatiquement. Confirme ce repas pour ' +
+        'l\'inclure dans tes synthèses.</div>' +
+        '<button class="btn btn-primary history-confirm" data-confirm="' + e.date +
+        '">✓ Confirmer ce repas</button>';
+    }
+
     out += '<div class="history-real-line" data-line="' + e.date + '" hidden></div>' +
       '<div class="history-real">' +
       '  <label>Glucides réels</label>' +
@@ -1605,11 +1764,23 @@
     }
     list.innerHTML = '';
 
-    var avgParts = h.reduce(function (s, e) { return s + partsFromStored(e); }, 0) / h.length;
+    var confirmed = h.filter(function (e) { return !e.draft; });
+    var draftCount = h.length - confirmed.length;
     var summary = document.createElement('div');
     summary.className = 'history-summary';
-    summary.innerHTML = h.length + ' repas enregistré' + (h.length > 1 ? 's' : '') +
-      ' · moyenne <strong>' + fr(avgParts) + ' parts</strong>';
+    var summaryBits = [
+      h.length + ' repas enregistré' + (h.length > 1 ? 's' : '')
+    ];
+    if (draftCount) {
+      summaryBits.push(draftCount + ' brouillon' + (draftCount > 1 ? 's' : ''));
+    }
+    if (confirmed.length) {
+      var avgParts = confirmed.reduce(function (s, e) {
+        return s + partsFromStored(e);
+      }, 0) / confirmed.length;
+      summaryBits.push('moyenne <strong>' + fr(avgParts) + ' parts</strong>');
+    }
+    summary.innerHTML = summaryBits.join(' · ');
     list.appendChild(summary);
 
     h.forEach(function (e) {
@@ -1634,6 +1805,7 @@
               (HISTORY_SOURCE[e.source] || HISTORY_SOURCE.manuel) + '</span>' +
             '<span class="history-total"><b>' + fr(partsFromStored(e)) + ' parts</b> · ' +
               e.totalCarbsG + ' g' +
+              (e.draft ? ' <span class="history-draft-tag">brouillon</span>' : '') +
               (e.realCarbsG != null ? ' <span class="history-real-tag">réel ' + e.realCarbsG + ' g</span>' : '') +
             '</span>' +
           '</span>' +
@@ -1667,6 +1839,15 @@
       });
     });
 
+    list.querySelectorAll('.history-confirm').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var date = Number(b.dataset.confirm);
+        Storage.updateHistory(date, { draft: false });
+        renderHistory();
+        toast('Repas confirmé.');
+      });
+    });
+
     /* Saisie du réel. On met à jour UNIQUEMENT la ligne concernée et la carte de
        biais : re-rendre toute la liste ferait perdre la saisie en cours (le
        'change' se déclenche au moment où l'on quitte le champ). */
@@ -1688,7 +1869,11 @@
       });
       inp.addEventListener('change', function () {
         clearTimeout(inp._t);
+        var showedDraft = !!inp.closest('.history-item').querySelector('.history-draft-tag');
         commit(true);
+        var date = Number(inp.dataset.real);
+        var entry = Storage.getHistory().filter(function (x) { return x.date === date; })[0];
+        if (showedDraft && entry && !entry.draft) renderHistory();
       });
     });
     $('clear-history').hidden = false;
@@ -1807,19 +1992,25 @@
       var p = $('set-provider').value;
       var models = settings.models || {};
       populateModelSelect(p, models[p] || Storage.DEFAULT_MODELS[p] || '');
+      updateVerificationSettingsForm();
+      updateSettingsSummaries();
     });
     // Bascule vers le champ « modèle personnalisé » quand on choisit « Autre modèle… ».
     $('set-model').addEventListener('change', function () {
       $('set-model-custom-wrap').hidden = $('set-model').value !== CUSTOM_VALUE;
     });
-    // 2ᵉ avis : afficher/remplir la liste de modèles selon le fournisseur choisi.
-    $('set-compare').addEventListener('change', function () {
-      var cp = $('set-compare').value;
-      var models = settings.models || {};
-      populateCompareModelSelect(cp, cp ? (models[cp] || Storage.DEFAULT_MODELS[cp] || '') : '');
+    $('set-verify-mode').addEventListener('change', function () {
+      updateVerificationSettingsForm();
+      updateSettingsSummaries();
     });
-    $('set-compare-model').addEventListener('change', function () {
-      $('set-compare-model-custom-wrap').hidden = $('set-compare-model').value !== CUSTOM_VALUE;
+    $('set-verify-provider').addEventListener('change', function () {
+      var cp = $('set-verify-provider').value;
+      var models = settings.models || {};
+      populateVerifyModelSelect(cp, models[cp] || Storage.DEFAULT_MODELS[cp] || '');
+      updateSettingsSummaries();
+    });
+    $('set-verify-model').addEventListener('change', function () {
+      $('set-verify-model-custom-wrap').hidden = $('set-verify-model').value !== CUSTOM_VALUE;
     });
     initUpdateCheck();
     var purge = $('purge-photos');
@@ -1946,22 +2137,54 @@
     }
   }
 
-  // Menu déroulant des modèles du 2ᵉ AVIS (masqué si aucun 2ᵉ fournisseur).
-  function populateCompareModelSelect(provider, current) {
-    var wrap = $('set-compare-model-wrap');
-    if (!provider) { wrap.hidden = true; return; }
-    wrap.hidden = false;
-    var matched = fillModelSelect($('set-compare-model'), provider, current);
-    var cw = $('set-compare-model-custom-wrap');
+  // Menu du modèle utilisé pour le second avis, quel que soit son mode.
+  function populateVerifyModelSelect(provider, current) {
+    var matched = fillModelSelect($('set-verify-model'), provider, current);
+    var cw = $('set-verify-model-custom-wrap');
     if (!matched && current) {
-      $('set-compare-model').value = CUSTOM_VALUE;
-      $('set-compare-model-custom').value = current;
+      $('set-verify-model').value = CUSTOM_VALUE;
+      $('set-verify-model-custom').value = current;
       cw.hidden = false;
     } else {
       cw.hidden = true;
-      $('set-compare-model-custom').value = '';
+      $('set-verify-model-custom').value = '';
     }
-    $('set-compare-provider-name').textContent = PROVIDER_NAME[provider] || provider;
+    $('set-verify-provider-name').textContent = PROVIDER_NAME[provider] || provider;
+  }
+
+  function updateVerificationSettingsForm() {
+    var mode = $('set-verify-mode').value;
+    var provider = $('set-provider').value;
+    var verifyProvider = $('set-verify-provider');
+    Array.from(verifyProvider.options).forEach(function (opt) {
+      opt.disabled = opt.value === provider;
+    });
+    if (mode !== 'off' && (!verifyProvider.value || verifyProvider.value === provider)) {
+      var order = ['openrouter', 'claude', 'gemini', 'openai'];
+      var replacement = order.filter(function (candidate) {
+        return candidate !== provider &&
+          Array.from(verifyProvider.options).some(function (opt) {
+            return opt.value === candidate;
+          });
+      })[0];
+      if (!replacement) return;
+      verifyProvider.value = replacement;
+      var models = settings.models || {};
+      populateVerifyModelSelect(replacement,
+        models[replacement] || Storage.DEFAULT_MODELS[replacement] || '');
+    }
+    $('set-verify-options').hidden = mode === 'off';
+    $('set-verify-threshold-wrap').hidden = mode !== 'auto';
+  }
+
+  function updateSettingsSummaries() {
+    var provider = $('set-provider').value;
+    $('settings-ai-summary').textContent = PROVIDER_NAME[provider] || provider;
+    var labels = { off: 'Désactivé', ask: 'Sur demande', auto: 'Automatique' };
+    var mode = $('set-verify-mode').value;
+    var suffix = mode === 'off' ? '' : ' · ' +
+      (PROVIDER_NAME[$('set-verify-provider').value] || $('set-verify-provider').value);
+    $('settings-verification-summary').textContent = (labels[mode] || labels.off) + suffix;
   }
 
   // Renvoie l'id de modèle sélectionné dans une paire (select + champ perso).
@@ -1982,15 +2205,16 @@
     $('set-key-gemini').value = keys.gemini || '';
     $('set-key-openai').value = keys.openai || '';
     populateModelSelect(settings.provider, models[settings.provider] || Storage.DEFAULT_MODELS[settings.provider] || '');
-    var cp = settings.compareProvider || '';
-    $('set-compare').value = cp;
-    populateCompareModelSelect(cp, cp ? (models[cp] || Storage.DEFAULT_MODELS[cp] || '') : '');
-    $('set-key-openrouter').value = settings.apiKeys.openrouter || '';
-    $('set-verify').checked = !!settings.verifyEnabled;
-    $('set-verify-provider').value = settings.verifyProvider || 'openrouter';
+    $('set-key-openrouter').value = keys.openrouter || '';
+    $('set-verify-mode').value = settings.verificationMode || 'off';
+    var vp = settings.verifyProvider || 'openrouter';
+    $('set-verify-provider').value = vp;
+    populateVerifyModelSelect(vp, models[vp] || Storage.DEFAULT_MODELS[vp] || '');
     $('set-verify-threshold').value = String(settings.verifyThresholdPct || 20);
     $('set-partsize').value = settings.partSizeG;
     $('set-round-half').checked = settings.roundHalf;
+    updateVerificationSettingsForm();
+    updateSettingsSummaries();
     openNativeSettings();
     $('settings-modal').hidden = false;
   }
@@ -2029,17 +2253,22 @@
     settings.apiKeys.gemini = $('set-key-gemini').value.trim();
     settings.apiKeys.openai = $('set-key-openai').value.trim();
     settings.apiKeys.openrouter = $('set-key-openrouter').value.trim();
-    settings.verifyEnabled = $('set-verify').checked;
-    settings.verifyProvider = $('set-verify-provider').value;
+    var verificationMode = $('set-verify-mode').value;
+    var verifyProvider = $('set-verify-provider').value;
+    if (verificationMode !== 'off' && verifyProvider === provider) {
+      toast('Choisis un fournisseur différent pour le second avis.');
+      return;
+    }
+    settings.verificationMode = verificationMode;
+    settings.verifyEnabled = verificationMode === 'auto';
+    settings.verifyProvider = verifyProvider;
     settings.verifyThresholdPct = parseInt($('set-verify-threshold').value, 10) || 20;
     settings.models = settings.models || {};
     settings.models[provider] = getModelFrom('set-model', 'set-model-custom', provider);
-    var cmp = $('set-compare').value;
-    settings.compareProvider = (cmp && cmp !== provider) ? cmp : '';
-    // Modèle choisi pour le 2ᵉ avis (stocké par fournisseur, comme le principal).
-    if (settings.compareProvider) {
-      settings.models[settings.compareProvider] =
-        getModelFrom('set-compare-model', 'set-compare-model-custom', settings.compareProvider);
+    settings.compareProvider = verificationMode === 'ask' ? verifyProvider : '';
+    if (verificationMode !== 'off') {
+      settings.models[verifyProvider] =
+        getModelFrom('set-verify-model', 'set-verify-model-custom', verifyProvider);
     }
     var ps = parseInt($('set-partsize').value, 10);
     settings.partSizeG = (ps >= 5 && ps <= 20) ? ps : 10;
@@ -2066,14 +2295,14 @@
     toast('Réglages enregistrés.');
   }
 
-  // Affiche la case « 2ᵉ avis » sur l'écran Photo si un 2ᵉ fournisseur est configuré.
+  // En mode « sur demande », affiche une seule case près de l'action principale.
   function updateCompareToggle() {
     var wrap = $('compare-wrap');
     if (!wrap) return;
-    var cmp = settings.compareProvider;
-    if (cmp && cmp !== settings.provider) {
+    var cmp = settings.verifyProvider;
+    if (settings.verificationMode === 'ask' && cmp && cmp !== settings.provider) {
       wrap.hidden = false;
-      $('compare-label').textContent = '🔬 Demander un 2ᵉ avis (' +
+      $('compare-label').textContent = 'Demander un 2ᵉ avis (' +
         (PROVIDER_NAME[settings.provider] || settings.provider) + ' + ' +
         (PROVIDER_NAME[cmp] || cmp) + ')';
     } else {
