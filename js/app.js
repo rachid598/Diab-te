@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '40'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '41'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -1246,9 +1246,13 @@
           return '<option value="' + i + '">' + escapeHtml(o.label) + '</option>';
         }).join('') +
       '</select>' +
-      '<button id="rerun-btn" class="btn btn-ghost">↻ Relancer</button>' +
+      '<button id="rerun-btn" class="btn btn-primary">↻ Relancer</button>' +
       '</div>' +
-      '<p class="hint tiny">Même repas, même photo, autre modèle. Aucune photo à reprendre.</p>' +
+      /* Le retour visuel doit être ICI, pas en haut de page : le bouton est en
+         bas du résultat, et un indicateur placé au-dessus de l'écran ne se voit
+         pas — l'appel semblait ne rien déclencher. */
+      '<div id="rerun-status" class="rerun-status" hidden></div>' +
+      '<p class="hint tiny" id="rerun-hint">Même repas, même photo, autre modèle. Aucune photo à reprendre.</p>' +
       '</div>';
   }
 
@@ -1260,11 +1264,35 @@
       var o = opts[parseInt($('rerun-model').value, 10)];
       if (!o) return;
 
-      var status = $('analyze-status');
-      status.hidden = false;
-      status.innerHTML = '<div class="spinner"></div>Nouvelle estimation avec ' +
-        escapeHtml(o.label) + '…';
+      var status = $('rerun-status');
+      var sel = $('rerun-model');
+      var hint = $('rerun-hint');
+      var debut = Date.now();
+
+      // Tout se verrouille et s'annonce sur place : bouton, sélecteur, message.
       btn.disabled = true;
+      btn.textContent = '↻ En cours…';
+      if (sel) sel.disabled = true;
+      if (hint) hint.hidden = true;
+      if (status) {
+        status.hidden = false;
+        status.className = 'rerun-status';
+        status.innerHTML = '<span class="spinner"></span>Nouvelle estimation avec <strong>' +
+          escapeHtml(o.label) + '</strong>… <span id="rerun-timer">0 s</span>';
+      }
+      /* Un compteur : ces modèles prennent 10 à 40 s, et sans lui on ne sait pas
+         si l'app travaille ou si elle est bloquée. */
+      var tick = setInterval(function () {
+        var el = $('rerun-timer');
+        if (el) el.textContent = Math.round((Date.now() - debut) / 1000) + ' s';
+      }, 1000);
+      var fini = function () {
+        clearInterval(tick);
+        btn.disabled = false;
+        btn.textContent = '↻ Relancer';
+        if (sel) sel.disabled = false;
+        if (hint) hint.hidden = false;
+      };
 
       /* On force le modèle pour CE seul appel, sans toucher aux réglages : une
          relance ponctuelle ne doit pas changer le fournisseur par défaut. */
@@ -1282,17 +1310,27 @@
         imageCount: sent.length
       };
 
+      var avant = lastResult ? lastResult.totalCarbsG : null;
+
       Estimator.estimateWith(o.provider, sent, ctx, ponctuel).then(function (r) {
-        status.hidden = true;
+        fini();
         lastRunProvider = o.provider;
         lastRunModel = o.model;
         lastResult = r;
-        renderResults(r);
-        toast('Nouvelle estimation : ' + r.totalCarbsG + ' g (' +
-              fr(partsFrom(r.totalCarbsG)) + ' parts).');
+        /* keepPosition : sans ça la page remonte en haut et on perd le fil de ce
+           qu'on était en train de comparer. */
+        renderResults(r, true);
+        var ecart = (avant != null && avant > 0)
+          ? ' · ' + (r.totalCarbsG > avant ? '+' : '') + (r.totalCarbsG - avant) + ' g vs ' + avant + ' g'
+          : '';
+        toast(escapeHtml(o.label) + ' : ' + r.totalCarbsG + ' g (' +
+              fr(partsFrom(r.totalCarbsG)) + ' parts)' + ecart);
       }).catch(function (e) {
-        status.hidden = true;
-        btn.disabled = false;
+        fini();
+        if (status) {
+          status.className = 'rerun-status rerun-fail';
+          status.innerHTML = '❌ ' + escapeHtml(e.message);
+        }
         toast(e.message);
       });
     });
