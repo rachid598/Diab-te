@@ -124,7 +124,11 @@
   var PROVIDERS = ['claude', 'gemini', 'openai', 'openrouter'];
 
   var DEFAULT_SETTINGS = {
-    provider: 'claude',                                   // fournisseur actif
+    /* Fournisseur par défaut : Gemini, pour son modèle 3.1 Flash-Lite — meilleur
+       rapport précision/prix mesuré au banc d'essai (BENCHMARK.md), et palier
+       gratuit chez Google. Ce défaut ne concerne QUE les installations neuves :
+       un réglage déjà enregistré n'est jamais écrasé. */
+    provider: 'gemini',                                   // fournisseur actif
     compareProvider: '',                                  // compatibilité avant v37
     apiKeys: { claude: '', gemini: '', openai: '', openrouter: '' },
     models: {                                             // un modèle par fournisseur
