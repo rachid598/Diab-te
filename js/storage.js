@@ -44,12 +44,18 @@
        ramenées au coût d'UNE estimation (photo + prompt + réponse), seule unité
        parlante ici — les tarifs au million de jetons ne disent rien. */
     openrouter: [
-      { id: 'qwen/qwen3.7-flash', label: 'Qwen 3.7 Flash', note: '~4000 repas pour 1 $ · vérification', stars: 2 },
-      { id: 'qwen/qwen3.7-plus', label: 'Qwen 3.7 Plus', note: '~380 repas pour 1 $', stars: 3 },
-      { id: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5', note: '~55 repas pour 1 $', stars: 3 },
+      { id: 'qwen/qwen3-vl-235b-a22b-thinking', label: 'Qwen3-VL 235B Thinking',
+        note: 'raisonnement visuel · ~70 repas pour 1 $ · vérification', stars: 3 },
+      { id: 'qwen/qwen3.7-plus', label: 'Qwen 3.7 Plus',
+        note: 'raisonnement · récent · ~180 repas pour 1 $', stars: 3 },
+      { id: 'qwen/qwen3.7-flash', label: 'Qwen 3.7 Flash',
+        note: 'le moins cher · ~1800 repas pour 1 $', stars: 2 },
+      { id: 'qwen/qwen3-vl-235b-a22b-instruct', label: 'Qwen3-VL 235B',
+        note: 'sans raisonnement · ~250 repas pour 1 $', stars: 2 },
+      { id: 'anthropic/claude-opus-5', label: 'Claude Opus 5', note: '~10 repas pour 1 $', stars: 3 },
+      { id: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5', note: '~25 repas pour 1 $', stars: 3 },
       { id: 'openai/gpt-5.6-terra', label: 'GPT-5.6 Terra', note: '~80 repas pour 1 $', stars: 2 },
-      { id: 'google/gemini-3.6-flash', label: 'Gemini 3.6 Flash', note: '~75 repas pour 1 $', stars: 2 },
-      { id: 'qwen/qwen3-vl-235b-a22b-instruct', label: 'Qwen3-VL 235B', note: '~250 repas pour 1 $', stars: 2 }
+      { id: 'google/gemini-3.6-flash', label: 'Gemini 3.6 Flash', note: '~75 repas pour 1 $', stars: 2 }
     ]
   };
 
@@ -64,15 +70,21 @@
     'gpt-4o': 'gpt-5.6-terra',
     'gpt-4o-mini': 'gpt-5.6-luna',
     'gpt-4-turbo': 'gpt-5.6-terra',
-    'gpt-4-vision-preview': 'gpt-5.6-terra'
+    'gpt-4-vision-preview': 'gpt-5.6-terra',
+    /* Vérification croisée : on passe à la variante « Thinking », qui raisonne
+       avant de répondre. Sur une tâche d'estimation de volume, un modèle rapide
+       tranche trop vite ; un désaccord signalé par un modèle qui a réellement
+       raisonné vaut beaucoup plus qu'un désaccord dû à sa propre précipitation.
+       Coût : ~0,014 $ par repas au lieu de 0,0005 $. */
+    'qwen/qwen3.7-flash': 'qwen/qwen3-vl-235b-a22b-thinking'
   };
 
   // Modèles par défaut suggérés par fournisseur.
   var DEFAULT_MODELS = {
-    claude: 'claude-sonnet-5',
+    claude: 'claude-opus-5',
     gemini: 'gemini-3.6-flash',
     openai: 'gpt-5.6-terra',
-    openrouter: 'qwen/qwen3.7-flash'
+    openrouter: 'qwen/qwen3-vl-235b-a22b-thinking'
   };
 
   var PROVIDERS = ['claude', 'gemini', 'openai', 'openrouter'];

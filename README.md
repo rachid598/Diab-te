@@ -127,7 +127,7 @@ serveur intermédiaire** en dehors du fournisseur choisi.
 | **Anthropic** (Claude) | [console.anthropic.com](https://console.anthropic.com/settings/keys) | ~0,018 $ (Sonnet 5) |
 | **Google** (Gemini) | [aistudio.google.com](https://aistudio.google.com/app/apikey) | palier gratuit généreux |
 | **OpenAI** (ChatGPT) | [platform.openai.com](https://platform.openai.com/api-keys) | ~0,012 $ |
-| **OpenRouter** (tous modèles) | [openrouter.ai/keys](https://openrouter.ai/keys) | jusqu'à ~0,00025 $ |
+| **OpenRouter** (tous modèles) | [openrouter.ai/keys](https://openrouter.ai/keys) | de ~0,0005 $ à ~0,10 $ selon le modèle |
 
 ⚠️ L'abonnement **ChatGPT Plus/Pro ne donne pas accès à l'API** — c'est une facturation
 séparée. Idem pour Claude Pro.

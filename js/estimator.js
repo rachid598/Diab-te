@@ -493,7 +493,13 @@
         ]
       };
       if (useCompletionTokens) body.max_completion_tokens = THINKING_MAX_TOKENS;
-      else body.max_tokens = (url === OPENROUTER_URL) ? THINKING_MAX_TOKENS : 1600;
+      /* Les modèles « Thinking » d'OpenRouter dépensent leur raisonnement DANS
+         le budget de sortie. Avec 8000 jetons, le raisonnement peut tout
+         consommer et la réponse JSON arriver tronquée. On double le plafond
+         pour eux ; ce n'est pas facturé s'il n'est pas utilisé. */
+      else if (url === OPENROUTER_URL) {
+        body.max_tokens = /thinking|plus|max/.test(model) ? 16000 : THINKING_MAX_TOKENS;
+      } else body.max_tokens = 1600;
 
       var headers = {
         'content-type': 'application/json',
