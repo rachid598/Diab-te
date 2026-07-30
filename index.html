@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0f766e" />
+  <meta name="theme-color" content="#f5f8f8" />
   <title>GlucoVision — Estimateur de glucides</title>
   <meta name="description" content="Estime les glucides d'un repas à partir d'une photo et convertit en parts de glucides pour ta pompe à insuline." />
   <link rel="manifest" href="manifest.webmanifest" />
@@ -11,26 +11,47 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=36" />
+  <link rel="stylesheet" href="css/styles.css?v=37" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
   <header class="app-header">
     <div class="brand">
-      <span class="brand-logo">🩸</span>
+      <span class="brand-logo"><img src="icons/icon-192.png" alt="" /></span>
       <div>
         <div class="brand-name">GlucoVision</div>
         <div class="brand-sub">Estimateur de glucides</div>
       </div>
     </div>
-    <button id="open-settings" class="icon-btn" aria-label="Réglages">⚙️</button>
+    <button id="open-settings" class="icon-btn" aria-label="Réglages">
+      <svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M20 7h-9M14 17H5" />
+        <circle cx="7" cy="7" r="3" />
+        <circle cx="17" cy="17" r="3" />
+      </svg>
+    </button>
   </header>
 
   <!-- ============ Navigation (barre du bas) ============ -->
   <nav class="tabs">
-    <button class="tab active" data-tab="analyze"><span class="tab-ico">🔎</span>Estimer</button>
-    <button class="tab" data-tab="manual"><span class="tab-ico">✍️</span>Manuel</button>
-    <button class="tab" data-tab="history"><span class="tab-ico">🕑</span>Historique</button>
+    <button class="tab active" data-tab="analyze">
+      <svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10" />
+      </svg>
+      <span>Estimer</span>
+    </button>
+    <button class="tab" data-tab="manual">
+      <svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M11 6H3M11 12H3M11 18H3M18 9v6M21 12h-6" />
+      </svg>
+      <span>Manuel</span>
+    </button>
+    <button class="tab" data-tab="history">
+      <svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l4 2" />
+      </svg>
+      <span>Historique</span>
+    </button>
   </nav>
 
   <!-- Bandeau de mise à jour (affiché quand une nouvelle version est prête) -->
@@ -66,10 +87,17 @@
            Les empiler verticalement laissait croire qu'il fallait faire les deux. -->
       <div class="mode-switch" role="tablist" aria-label="Méthode d'estimation">
         <button class="mode-btn active" data-mode="photo" role="tab" aria-selected="true">
-          <span class="mode-ico">📷</span>Photo
+          <svg class="mode-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M14.5 5h-5L7.5 8H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-2.5z" />
+            <circle cx="12" cy="13" r="3" />
+          </svg>
+          Photo
         </button>
         <button class="mode-btn" data-mode="texte" role="tab" aria-selected="false">
-          <span class="mode-ico">✍️</span>Description
+          <svg class="mode-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 6h16M4 12h16M4 18h10" />
+          </svg>
+          Description
         </button>
       </div>
 
@@ -80,47 +108,65 @@
 
       <!-- ----- Volet PHOTO ----- -->
       <div id="pane-photo" class="mode-pane active" data-pane="photo" role="tabpanel">
-        <div class="card">
+        <div class="card capture-card">
           <h2>Photographie ton repas</h2>
           <p class="hint">Plus il y a d'angles, plus l'estimation est fiable : ajoute <strong>plusieurs photos</strong> (dessus + côté) ou <strong>une courte vidéo</strong> en tournant autour de l'assiette. Jusqu'à 6 vues.</p>
 
           <div id="thumbs" class="thumbs"></div>
           <p id="angle-count" class="angle-count" hidden></p>
 
-          <div class="btn-row">
+          <div class="btn-row capture-actions">
             <label id="btn-photo" class="btn btn-primary">
-              📷 Photo
+              <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M14.5 5h-5L7.5 8H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-2.5z" />
+                <circle cx="12" cy="13" r="3" />
+              </svg>
+              Photo
               <input id="camera-input" type="file" accept="image/*" capture="environment" hidden />
             </label>
-            <label class="btn btn-primary">
-              🎥 Vidéo
+            <label class="btn btn-secondary">
+              <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="6" width="13" height="12" rx="2" />
+                <path d="m16 11 5-3v8l-5-3" />
+              </svg>
+              Vidéo
               <input id="video-input" type="file" accept="video/*" capture="environment" hidden />
             </label>
             <label id="btn-gallery" class="btn">
-              🖼️ Galerie
+              <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="9" cy="9" r="2" />
+                <path d="m21 15-5-5L5 21" />
+              </svg>
+              Galerie
               <input id="gallery-input" type="file" accept="image/*,video/*" multiple hidden />
             </label>
             <button id="clear-photos" class="btn btn-ghost" hidden>Effacer</button>
           </div>
         </div>
 
-        <div class="card">
-          <h2>Repère d'échelle <span class="tag">recommandé</span></h2>
-          <p class="hint">Un objet de taille connue dans la photo réduit fortement l'erreur de portion. Pose-le à côté de l'assiette.</p>
-          <select id="reference-object" class="input">
-            <option value="pompe à insuline Medtronic MiniMed 780G, face rectangulaire d'environ 96 mm de long sur 55 mm de large" selected>Ma pompe MiniMed 780G (96 × 55 mm)</option>
-            <option value="none">Aucun repère</option>
-            <option value="carte bancaire (85 mm de large)">Carte bancaire (8,5 cm)</option>
-            <option value="fourchette standard (~19 cm)">Fourchette (~19 cm)</option>
-            <option value="cuillère à soupe (~19 cm)">Cuillère à soupe (~19 cm)</option>
-            <option value="pièce de 2 € (25,75 mm)">Pièce de 2 € (2,6 cm)</option>
-            <option value="assiette">Assiette (préciser Ø)</option>
-          </select>
-          <div id="plate-diameter-wrap" class="inline-field" hidden>
-            <label>Diamètre de l'assiette (cm)</label>
-            <input id="plate-diameter" class="input small" type="number" inputmode="decimal" min="10" max="40" step="0.5" placeholder="ex. 26" />
+        <details class="card compact-card" id="reference-card">
+          <summary>
+            <span class="compact-title">Repère d'échelle <span class="tag">recommandé</span></span>
+            <span class="compact-value" id="reference-summary">Ma pompe</span>
+          </summary>
+          <div class="compact-content">
+            <p class="hint">Un objet de taille connue dans la photo réduit fortement l'erreur de portion. Pose-le à côté de l'assiette.</p>
+            <select id="reference-object" class="input">
+              <option value="pompe à insuline Medtronic MiniMed 780G, face rectangulaire d'environ 96 mm de long sur 55 mm de large" selected>Ma pompe MiniMed 780G (96 × 55 mm)</option>
+              <option value="none">Aucun repère</option>
+              <option value="carte bancaire (85 mm de large)">Carte bancaire (8,5 cm)</option>
+              <option value="fourchette standard (~19 cm)">Fourchette (~19 cm)</option>
+              <option value="cuillère à soupe (~19 cm)">Cuillère à soupe (~19 cm)</option>
+              <option value="pièce de 2 € (25,75 mm)">Pièce de 2 € (2,6 cm)</option>
+              <option value="assiette">Assiette (préciser Ø)</option>
+            </select>
+            <div id="plate-diameter-wrap" class="inline-field" hidden>
+              <label>Diamètre de l'assiette (cm)</label>
+              <input id="plate-diameter" class="input small" type="number" inputmode="decimal" min="10" max="40" step="0.5" placeholder="ex. 26" />
+            </div>
           </div>
-        </div>
+        </details>
       </div>
 
       <!-- ----- Volet DESCRIPTION -----
@@ -129,39 +175,55 @@
            saisi ne disparaisse pas quand on change d'onglet. -->
       <div id="pane-texte" class="mode-pane" data-pane="texte" role="tabpanel"></div>
 
-      <div class="card" id="notes-card">
-        <h2 id="notes-title">Décris ton repas <span class="tag" id="notes-tag">sans photo</span></h2>
-        <p class="hint" id="notes-hint">Écris simplement ce que tu manges, en une phrase.</p>
-        <textarea id="user-notes" class="input" rows="3" placeholder="Ex. : une assiette de pâtes à la bolognaise, deux tranches de pain et un yaourt nature"></textarea>
-        <p class="hint tiny" id="notes-foot">Plus tu donnes de quantités, plus c'est juste : « 150 g de riz <em>cuit</em> » vaut mieux qu'« un peu de riz ». Tu peux dicter avec le micro de ton clavier.</p>
-      </div>
+      <details class="card compact-card" id="notes-card">
+        <summary>
+          <span class="compact-title" id="notes-title">Décris ton repas <span class="tag" id="notes-tag">sans photo</span></span>
+          <span class="compact-value" id="notes-summary">Ajouter</span>
+        </summary>
+        <div class="compact-content">
+          <p class="hint" id="notes-hint">Écris simplement ce que tu manges, en une phrase.</p>
+          <textarea id="user-notes" class="input" rows="3" placeholder="Ex. : une assiette de pâtes à la bolognaise, deux tranches de pain et un yaourt nature"></textarea>
+          <p class="hint tiny" id="notes-foot">Plus tu donnes de quantités, plus c'est juste : « 150 g de riz <em>cuit</em> » vaut mieux qu'« un peu de riz ». Tu peux dicter avec le micro de ton clavier.</p>
+        </div>
+      </details>
 
       <!-- Dessert et boisson : saisis AVANT l'estimation pour partir dans le
            même appel que la photo. Les demander après le résultat obligeait à
            une seconde requête, donc à payer deux fois et à attendre deux fois. -->
-      <div class="card extras-card">
-        <h2>🍰 Dessert et boisson <span class="tag">optionnel</span></h2>
-        <p class="hint">Rarement sur la photo, mais ils comptent dans le total. Indique-les ici avant d'estimer.</p>
+      <details class="card compact-card extras-card" id="extras-card">
+        <summary>
+          <span class="compact-title">Dessert et boisson <span class="tag">optionnel</span></span>
+          <span class="compact-value" id="extras-summary">Ajouter</span>
+        </summary>
+        <div class="compact-content">
+          <p class="hint">Rarement sur la photo, mais ils comptent dans le total. Indique-les ici avant d'estimer.</p>
 
-        <label for="extra-dessert">Dessert prévu</label>
-        <input id="extra-dessert" class="input" type="text"
-               placeholder="ex. une part de tarte aux pommes, un yaourt nature…" />
+          <label for="extra-dessert">Dessert prévu</label>
+          <input id="extra-dessert" class="input" type="text"
+                 placeholder="ex. une part de tarte aux pommes, un yaourt nature…" />
 
-        <label for="extra-drink">Boisson</label>
-        <input id="extra-drink" class="input" type="text"
-               placeholder="ex. un verre de jus d'orange" />
-        <div id="drink-chips" class="chips extras-chips"></div>
-        <p class="hint tiny">Eau, café ou thé sans sucre, soda light : <strong>0 g</strong>, rien à indiquer.</p>
-      </div>
+          <label for="extra-drink">Boisson</label>
+          <input id="extra-drink" class="input" type="text"
+                 placeholder="ex. un verre de jus d'orange" />
+          <div id="drink-chips" class="chips extras-chips"></div>
+          <p class="hint tiny">Eau, café ou thé sans sucre, soda light : <strong>0 g</strong>, rien à indiquer.</p>
+        </div>
+      </details>
 
       <p id="mode-warning" class="mode-warning" hidden></p>
 
-      <label id="compare-wrap" class="check compare-toggle" hidden>
-        <input type="checkbox" id="compare-toggle" />
-        <span id="compare-label">🔬 Demander un 2ᵉ avis</span>
-      </label>
-
-      <button id="estimate-btn" class="btn btn-primary btn-lg" disabled>🔎 Estimer les glucides</button>
+      <div class="workflow-dock estimate-dock">
+        <label id="compare-wrap" class="check compare-toggle" hidden>
+          <input type="checkbox" id="compare-toggle" />
+          <span id="compare-label">Demander un 2ᵉ avis</span>
+        </label>
+        <button id="estimate-btn" class="btn btn-primary btn-lg" disabled>
+          <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10" />
+          </svg>
+          <span id="estimate-btn-label">Estimer les glucides</span>
+        </button>
+      </div>
 
       <div id="analyze-status" class="status" hidden></div>
       <div id="results" class="results" hidden></div>
@@ -175,13 +237,13 @@
            sous les volets, quelle que soit la source utilisée. -->
       <div class="mode-switch" role="tablist" aria-label="Source des aliments">
         <button class="mode-btn active" data-mode="base" role="tab" aria-selected="true">
-          <span class="mode-ico">🥖</span>Aliments
+          Aliments
         </button>
         <button class="mode-btn" data-mode="produit" role="tab" aria-selected="false">
-          <span class="mode-ico">🏷️</span>Produit
+          Produit
         </button>
         <button class="mode-btn" data-mode="repas" role="tab" aria-selected="false">
-          <span class="mode-ico">⭐</span>Mes repas
+          Mes repas
         </button>
       </div>
 
@@ -240,12 +302,18 @@
       </div>
 
       <!-- Composition en cours : commune aux trois sources. -->
-      <div class="card">
+      <div class="card" id="manual-meal-card">
         <h2>Ton repas</h2>
         <div id="manual-items" class="manual-items"><p class="empty">Aucun aliment ajouté.</p></div>
       </div>
 
       <div id="manual-total" class="results" hidden></div>
+      <div id="manual-dock" class="workflow-dock manual-dock" hidden>
+        <button id="manual-dock-btn" class="manual-dock-btn">
+          <span id="manual-dock-total">0 g</span>
+          <span>Voir le repas ↑</span>
+        </button>
+      </div>
     </section>
 
     <!-- ============ Onglet Historique ============ -->
@@ -256,10 +324,10 @@
            des centaines de repas pour atteindre la synthèse. -->
       <div class="mode-switch" role="tablist" aria-label="Vue de l'historique">
         <button class="mode-btn active" data-mode="journal" role="tab" aria-selected="true">
-          <span class="mode-ico">🕑</span>Mes repas
+          Mes repas
         </button>
         <button class="mode-btn" data-mode="analyse" role="tab" aria-selected="false">
-          <span class="mode-ico">📈</span>Analyse
+          Analyse
         </button>
       </div>
 
@@ -305,9 +373,13 @@
         <button id="close-settings" class="icon-btn" aria-label="Fermer">✕</button>
       </div>
 
-      <!-- Fournisseur & modèle -->
-      <div class="set-group">
-        <h3>Analyse par IA</h3>
+      <!-- Fournisseur, modèle et clés -->
+      <details class="set-group" open>
+        <summary>
+          <span class="set-title">Analyse par IA</span>
+          <span class="set-summary" id="settings-ai-summary">Claude</span>
+        </summary>
+        <div class="set-content">
         <label>Fournisseur actif</label>
         <select id="set-provider" class="input">
           <option value="claude">Claude (Anthropic)</option>
@@ -321,33 +393,7 @@
           <input id="set-model-custom" class="input" type="text" placeholder="id du modèle (ex. gemini-2.5-flash)" />
         </div>
         <p class="hint tiny" id="model-hint"></p>
-      </div>
-
-      <!-- 2ᵉ avis -->
-      <div class="set-group">
-        <h3>2ᵉ avis <span class="tag">optionnel</span></h3>
-        <label>Comparer avec un 2ᵉ fournisseur</label>
-        <select id="set-compare" class="input">
-          <option value="">Aucun (un seul avis)</option>
-          <option value="claude">Claude</option>
-          <option value="gemini">Gemini</option>
-          <option value="openai">OpenAI (ChatGPT)</option>
-        </select>
-
-        <div id="set-compare-model-wrap" hidden>
-          <label>Modèle du 2ᵉ avis (<span id="set-compare-provider-name"></span>)</label>
-          <select id="set-compare-model" class="input"></select>
-          <div id="set-compare-model-custom-wrap" class="inline-field" hidden>
-            <input id="set-compare-model-custom" class="input" type="text" placeholder="id du modèle (ex. gemini-2.5-flash)" />
-          </div>
-        </div>
-
-        <p class="hint tiny">Active une case « 2ᵉ avis » sous le bouton Estimer : l'app interroge deux fournisseurs et affiche les deux estimations côte à côte (utile pour recouper).</p>
-      </div>
-
-      <!-- Clés API -->
-      <div class="set-group">
-        <h3>Clés API <span class="tag">sur cet appareil</span></h3>
+        <h4>Clés API <span class="tag">sur cet appareil</span></h4>
         <label>Anthropic (Claude)</label>
         <input id="set-key-claude" class="input" type="password" placeholder="sk-ant-…" autocomplete="off" />
         <p class="hint tiny">console.anthropic.com — payant à l'usage.</p>
@@ -365,16 +411,24 @@
         <p class="hint tiny">openrouter.ai/keys — un seul compte pour Claude, Gemini, ChatGPT, Qwen… Facturation à l'usage, sans abonnement.</p>
 
         <button id="clear-key" class="btn btn-ghost" style="margin-top:10px">Effacer la clé du fournisseur actif</button>
-      </div>
+        </div>
+      </details>
 
-      <!-- Vérification croisée -->
-      <div class="set-group">
-        <h3>Vérification croisée <span class="tag">recommandé</span></h3>
-        <p class="hint tiny">Un second modèle estime le même repas en parallèle. L'app compare et t'alerte seulement si les deux sont en désaccord — c'est ce qui rattrape une erreur grossière avant que tu saisisses la dose.</p>
-        <label class="check">
-          <input type="checkbox" id="set-verify" />
-          <span>Vérifier chaque estimation avec un 2ᵉ modèle</span>
-        </label>
+      <!-- Second avis unifié -->
+      <details class="set-group" open>
+        <summary>
+          <span class="set-title">Second avis <span class="tag">recommandé</span></span>
+          <span class="set-summary" id="settings-verification-summary">Désactivé</span>
+        </summary>
+        <div class="set-content">
+        <p class="hint tiny">Un second modèle peut être lancé sur demande ou automatiquement. En mode automatique, l'estimation principale s'affiche sans l'attendre.</p>
+        <label>Mode</label>
+        <select id="set-verify-mode" class="input">
+          <option value="off">Désactivé</option>
+          <option value="ask">Sur demande — afficher une case avant l'estimation</option>
+          <option value="auto">Automatique — vérifier chaque estimation</option>
+        </select>
+        <div id="set-verify-options" hidden>
         <label>Fournisseur de vérification</label>
         <select id="set-verify-provider" class="input">
           <option value="openrouter">OpenRouter</option>
@@ -382,30 +436,43 @@
           <option value="gemini">Gemini</option>
           <option value="openai">ChatGPT</option>
         </select>
-        <label>Alerter à partir de</label>
-        <select id="set-verify-threshold" class="input">
-          <option value="10">10 % d'écart — très sensible</option>
-          <option value="15">15 % d'écart</option>
-          <option value="20" selected>20 % d'écart — recommandé</option>
-          <option value="30">30 % d'écart — seulement les gros écarts</option>
-        </select>
+        <label>Modèle de vérification (<span id="set-verify-provider-name">OpenRouter</span>)</label>
+        <select id="set-verify-model" class="input"></select>
+        <div id="set-verify-model-custom-wrap" class="inline-field" hidden>
+          <input id="set-verify-model-custom" class="input" type="text" placeholder="id du modèle (ex. qwen/qwen3.7-flash)" />
+        </div>
+        <div id="set-verify-threshold-wrap">
+          <label>Alerter à partir de</label>
+          <select id="set-verify-threshold" class="input">
+            <option value="10">10 % d'écart — très sensible</option>
+            <option value="15">15 % d'écart</option>
+            <option value="20" selected>20 % d'écart — recommandé</option>
+            <option value="30">30 % d'écart — seulement les gros écarts</option>
+          </select>
+        </div>
         <p class="hint tiny">Avec OpenRouter et Qwen 3.7 Flash, une vérification coûte environ <strong>0,025 centime</strong> : tu peux la laisser allumée en permanence.</p>
-      </div>
+        </div>
+        </div>
+      </details>
 
-      <!-- Parts -->
-      <div class="set-group">
-        <h3>Parts de glucides</h3>
+      <!-- Préférences -->
+      <details class="set-group">
+        <summary>
+          <span class="set-title">Préférences</span>
+          <span class="set-summary">Parts et rappels</span>
+        </summary>
+        <div class="set-content">
+        <h4>Parts de glucides</h4>
         <label>1 part = ? grammes</label>
         <input id="set-partsize" class="input small" type="number" min="5" max="20" step="1" />
         <label class="check">
           <input type="checkbox" id="set-round-half" />
           <span>Arrondir les parts au 0,5 le plus proche</span>
         </label>
-      </div>
 
-      <!-- Rappel de contrôle (application Android uniquement) -->
-      <div class="set-group" id="set-group-remind" hidden>
-        <h3>Rappel de contrôle</h3>
+        <!-- Rappel de contrôle (application Android uniquement) -->
+        <div id="set-group-remind" hidden>
+        <h4>Rappel de contrôle</h4>
         <label class="check">
           <input type="checkbox" id="set-remind" />
           <span>Me rappeler de contrôler ma glycémie après un repas analysé</span>
@@ -419,19 +486,26 @@
           <option value="180">3 h après le repas</option>
         </select>
         <p class="hint tiny">En automatique : <strong>1 h 30</strong> si la montée est rapide, <strong>2 h</strong> si elle est progressive, <strong>3 h</strong> si elle est retardée (repas gras). C'est un rappel de <strong>mesure</strong> — l'app ne propose jamais de dose, c'est ta pompe qui dose.</p>
-      </div>
+        </div>
+        </div>
+      </details>
 
-      <!-- Stockage (application Android uniquement) -->
-      <div class="set-group" id="set-group-storage" hidden>
-        <h3>Stockage des photos</h3>
+      <!-- Données et application -->
+      <details class="set-group">
+        <summary>
+          <span class="set-title">Données et application</span>
+          <span class="set-summary">Sauvegarde et mises à jour</span>
+        </summary>
+        <div class="set-content">
+        <!-- Stockage (application Android uniquement) -->
+        <div id="set-group-storage" hidden>
+        <h4>Stockage des photos</h4>
         <p class="hint tiny" id="storage-usage">Calcul…</p>
         <button id="purge-photos" class="btn btn-ghost">Supprimer toutes les photos de l'historique</button>
         <p class="hint tiny">Les repas et leurs estimations sont conservés : seules les images sont effacées.</p>
-      </div>
+        </div>
 
-      <!-- Sauvegarde -->
-      <div class="set-group">
-        <h3>Sauvegarde</h3>
+        <h4>Sauvegarde</h4>
         <p class="hint tiny">Tes repas, aliments perso et ta calibration ne vivent que dans ce navigateur. Exporte-les avant de changer de téléphone ou de nettoyer tes données.</p>
         <div class="btn-row">
           <button id="export-data" class="btn btn-ghost">⬇️ Exporter</button>
@@ -442,17 +516,17 @@
         </div>
         <p class="hint tiny">⚠️ L'export contient <strong>tes clés API</strong> pour que la restauration soit immédiate (bascule vers l'APK, changement de téléphone). Le fichier est donc personnel : <strong>ne le partage pas</strong> et ne l'envoie pas par mail.</p>
         <p class="hint tiny" id="keystore-note" hidden>🔒 Sur l'application Android, tes clés sont chiffrées par le Keystore du téléphone et ne sont plus stockées en clair.</p>
-      </div>
 
-      <!-- Mise à jour -->
-      <div class="set-group">
-        <h3>Mise à jour</h3>
+        <h4>Mise à jour</h4>
         <p class="hint tiny">L'app se met à jour toute seule au lancement. Ce bouton force la vérification et dit précisément ce qu'il en est.</p>
         <button id="check-update" class="btn btn-ghost">🔄 Vérifier les mises à jour</button>
         <p id="update-status" class="update-status" hidden></p>
-      </div>
+        </div>
+      </details>
 
-      <button id="save-settings" class="btn btn-primary btn-lg" style="margin-bottom:12px">Enregistrer</button>
+      <div class="modal-actions">
+        <button id="save-settings" class="btn btn-primary btn-lg">Enregistrer</button>
+      </div>
       <p class="hint tiny">Sécurité : les clés et les photos ne quittent ton téléphone que pour l'appel direct au fournisseur choisi. Rien n'est stocké sur un serveur.</p>
       <p class="hint tiny app-version-line" id="app-version">Version…</p>
     </div>
@@ -484,18 +558,18 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=36"></script>
-  <script src="js/native.js?v=36"></script>
-  <script src="js/storage.js?v=36"></script>
-  <script src="js/foods.js?v=36"></script>
-  <script src="js/gi.js?v=36"></script>
-  <script src="js/queue.js?v=36"></script>
-  <script src="js/report.js?v=36"></script>
-  <script src="js/estimator.js?v=36"></script>
-  <script src="js/camera.js?v=36"></script>
-  <script src="js/off.js?v=36"></script>
-  <script src="vendor/zxing.min.js?v=36"></script>
-  <script src="js/barcode.js?v=36"></script>
-  <script src="js/app.js?v=36"></script>
+  <script src="vendor/capacitor-plugins.js?v=37"></script>
+  <script src="js/native.js?v=37"></script>
+  <script src="js/storage.js?v=37"></script>
+  <script src="js/foods.js?v=37"></script>
+  <script src="js/gi.js?v=37"></script>
+  <script src="js/queue.js?v=37"></script>
+  <script src="js/report.js?v=37"></script>
+  <script src="js/estimator.js?v=37"></script>
+  <script src="js/camera.js?v=37"></script>
+  <script src="js/off.js?v=37"></script>
+  <script src="vendor/zxing.min.js?v=37"></script>
+  <script src="js/barcode.js?v=37"></script>
+  <script src="js/app.js?v=37"></script>
 </body>
 </html>

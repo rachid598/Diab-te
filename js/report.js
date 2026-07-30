@@ -44,7 +44,7 @@
   function analyse(days) {
     var since = Date.now() - days * 86400000;
     var meals = Storage.getHistory().filter(function (e) {
-      return e.date >= since && e.totalCarbsG > 0;
+      return !e.draft && e.date >= since && e.totalCarbsG > 0;
     }).sort(function (a, b) { return a.date - b.date; });
 
     if (!meals.length) return null;

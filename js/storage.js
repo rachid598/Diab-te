@@ -78,7 +78,7 @@
 
   var DEFAULT_SETTINGS = {
     provider: 'claude',                                   // fournisseur actif
-    compareProvider: '',                                  // 2ᵉ avis (vide = aucun)
+    compareProvider: '',                                  // compatibilité avant v37
     apiKeys: { claude: '', gemini: '', openai: '', openrouter: '' },
     models: {                                             // un modèle par fournisseur
       claude: DEFAULT_MODELS.claude,
@@ -94,7 +94,8 @@
        parallèle à chaque estimation ; on n'alerte que si l'écart dépasse le
        seuil. C'est le seul garde-fou capable de rattraper une erreur grossière
        du modèle principal, et à ce prix il n'y a pas de raison de l'éteindre. */
-    verifyEnabled: false,
+    verificationMode: 'off', // off | ask | auto
+    verifyEnabled: false,    // compatibilité avant v37
     verifyProvider: 'openrouter',
     verifyThresholdPct: 20
   };
@@ -239,6 +240,20 @@
         var repl = MODEL_MIGRATIONS[merged.models[p]];
         if (repl) merged.models[p] = repl;
       });
+      /* v37 réunit l'ancien « 2e avis » et la vérification automatique sous un
+         seul mode. On interprète les anciens réglages sans modifier leur blob :
+         ils seront normalisés au prochain Enregistrer. */
+      if (!s.verificationMode) {
+        if (s.verifyEnabled) {
+          merged.verificationMode = 'auto';
+        } else if (s.compareProvider) {
+          merged.verificationMode = 'ask';
+          merged.verifyProvider = s.compareProvider;
+        }
+      }
+      if (!/^(off|ask|auto)$/.test(merged.verificationMode)) {
+        merged.verificationMode = 'off';
+      }
       return merged;
     },
     saveSettings: function (s) {
@@ -258,8 +273,16 @@
       return read(KEYS.history, []);
     },
     addHistory: function (entry) {
+      return this.upsertHistory(entry);
+    },
+    /* Insère un repas ou met à jour le brouillon qui porte le même horodatage.
+       Les corrections de portions peuvent donc être sauvegardées à chaque
+       rendu sans créer une ligne d'historique par frappe. */
+    upsertHistory: function (entry) {
       var h = this.getHistory();
-      h.unshift(entry);
+      var idx = h.findIndex(function (e) { return e.date === entry.date; });
+      if (idx >= 0) h[idx] = Object.assign({}, h[idx], entry);
+      else h.unshift(entry);
       if (h.length > MAX_HISTORY) h = h.slice(0, MAX_HISTORY);
       /* PWA : les vignettes en base64 sont ce qui sature localStorage, on ne les
          garde donc que sur les repas récents. APK : l'image est un fichier, la
@@ -267,6 +290,19 @@
       if (!native) {
         h.forEach(function (e, i) { if (i >= 40 && e.thumb) delete e.thumb; });
       }
+      var saved = writeHistory(h);
+      if (native) this.prunePhotos(saved);
+      return saved;
+    },
+    updateHistory: function (date, patch) {
+      var h = this.getHistory();
+      var changed = false;
+      h = h.map(function (e) {
+        if (e.date !== date) return e;
+        changed = true;
+        return Object.assign({}, e, patch || {});
+      });
+      if (!changed) return h;
       var saved = writeHistory(h);
       if (native) this.prunePhotos(saved);
       return saved;
@@ -301,7 +337,10 @@
       h.forEach(function (e) {
         if (e.date === date) {
           if (realCarbsG == null || realCarbsG === '') delete e.realCarbsG;
-          else e.realCarbsG = Math.max(0, Math.round(realCarbsG));
+          else {
+            e.realCarbsG = Math.max(0, Math.round(realCarbsG));
+            e.draft = false;
+          }
         }
       });
       return writeHistory(h);
@@ -312,6 +351,7 @@
       var h = this.getHistory();
       var ratios = [];
       h.forEach(function (e) {
+        if (e.draft) return;
         var est = e.totalCarbsG, real = e.realCarbsG;
         if (est > 0 && real != null && real > 0) ratios.push(real / est);
       });
@@ -329,6 +369,7 @@
       minMeals = minMeals || 3;
       var groups = {};
       this.getHistory().forEach(function (e) {
+        if (e.draft) return;
         if (!(e.totalCarbsG > 0) || e.realCarbsG == null || !(e.realCarbsG > 0)) return;
         var cat = dominantCategory(e.items);
         if (!cat) return;
