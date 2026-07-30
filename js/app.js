@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '38'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '39'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -136,7 +136,17 @@
     images.forEach(function (img, i) {
       var d = document.createElement('div');
       d.className = 'thumb';
-      d.innerHTML = '<img src="' + img.previewUrl + '" alt="angle ' + (i + 1) + '">' +
+      var q = img.quality;
+      // Une pastille sur la vignette : on voit d'un coup d'oeil QUELLE vue pose
+      // probleme, ce qu'un message global ne dirait pas.
+      var badge = '';
+      if (q && q.verdict === 'bad') {
+        d.className += ' thumb-bad';
+        badge = '<span class="thumb-flag flag-bad">⚠️ ' + escapeHtml(q.issues[0] || 'illisible') + '</span>';
+      } else if (q && q.verdict === 'soft') {
+        badge = '<span class="thumb-flag flag-soft">' + escapeHtml(q.issues[0] || '') + '</span>';
+      }
+      d.innerHTML = '<img src="' + img.previewUrl + '" alt="angle ' + (i + 1) + '">' + badge +
                     '<button data-i="' + i + '" aria-label="Retirer">✕</button>';
       wrap.appendChild(d);
     });
@@ -155,6 +165,46 @@
     } else {
       ac.hidden = true;
     }
+    renderPhotoAdvice();
+  }
+
+  /* ---------- Conseils sur les photos ----------
+     Deux messages, et seulement quand ils servent :
+
+     1) Une vue floue ou mal exposee : le modele estimera quand meme, mais a
+        vue, et rien dans le resultat ne dirait que la photo etait la cause.
+        Autant le savoir AVANT de payer l'appel et d'attendre.
+
+     2) Une seule vue : la hauteur est la principale inconnue geometrique, le
+        prompt le dit lui-meme. Une vue de cote la leve. C'est le levier de
+        precision le plus efficace de toute l'app, et jusqu'ici rien ne le
+        signalait au moment ou l'on pouvait encore agir. */
+  function renderPhotoAdvice() {
+    var el = $('photo-advice');
+    if (!el) return;
+    if (!images.length) { el.hidden = true; return; }
+
+    var mauvaises = images.filter(function (im) {
+      return im.quality && im.quality.verdict === 'bad';
+    });
+    var msgs = [];
+
+    if (mauvaises.length) {
+      var quoi = mauvaises.map(function (im) { return im.quality.issues.join(', '); });
+      msgs.push('<div class="advice advice-warn">⚠️ ' +
+        (mauvaises.length > 1 ? mauvaises.length + ' vues semblent' : 'Une vue semble') +
+        ' inexploitable (' + escapeHtml(quoi[0]) + '). Le modèle estimera quand même, ' +
+        'mais à vue : reprends-la si tu peux, c\'est ce qui pèse le plus sur la précision.</div>');
+    }
+
+    if (images.length === 1) {
+      msgs.push('<div class="advice advice-tip">💡 Ajoute une <strong>vue de côté</strong> : ' +
+        'sur une seule photo, l\'épaisseur est déduite et non vue — c\'est la principale ' +
+        'source d\'erreur sur la portion.</div>');
+    }
+
+    el.innerHTML = msgs.join('');
+    el.hidden = msgs.length === 0;
   }
 
   /* ---------- Source de l'estimation : photo ou description ----------
@@ -163,6 +213,8 @@
      photos : sans ça, ajouter une photo par erreur ferait basculer
      silencieusement une estimation qu'on voulait textuelle. */
   var inputMode = 'photo';
+  // Fournisseur/modèle du dernier appel : sert à ne pas reproposer l'identique.
+  var lastRunProvider = null, lastRunModel = null;
 
   function describedMeal() {
     var el = $('user-notes');
@@ -452,6 +504,8 @@
        arrive après et complète l'affichage. Son échec est sans conséquence. */
     var verify = startVerification(sent, ctx);
 
+    lastRunProvider = settings.provider;
+    lastRunModel = (settings.models || {})[settings.provider] || null;
     Estimator.estimate(sent, ctx, settings).then(function (result) {
       lastResult = result;
       status.hidden = true;
@@ -909,6 +963,7 @@
     html += '<div id="verify-box" class="verify-box" hidden></div>';
     html += biasHintHtml(r.totalCarbsG, r.items);
     html += warningsHtml(r);
+    html += similarMealHtml(r);
     html += seenHtml(r);
 
     // Détail par aliment (grammes éditables)
@@ -931,6 +986,7 @@
             '<button id="confirm-result" class="btn btn-primary">✓ Confirmer ce repas</button>' +
             '<button id="save-meal" class="btn btn-ghost">⭐ Repas fréquent</button>' +
             '</div>';
+    html += rerunHtml();
     html += '<div class="disclaimer-mini">Estimation indicative — vérifie toujours avant de doser.</div>';
 
     el.innerHTML = html;
@@ -938,6 +994,7 @@
     renderItems();
     $('confirm-result').addEventListener('click', confirmCurrentResult);
     $('save-meal').addEventListener('click', function () { promptSaveMeal(lastResult.items); });
+    initRerun();
     renderVerificationState();
     autoSaveCurrentResult();
     if (!keepPosition) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1125,6 +1182,119 @@
           }
         });
       }
+    });
+  }
+
+  /* ---------- « Tu as déjà mangé ça » ----------
+     Affiché seulement quand un repas passé RESSEMBLE vraiment et que sa valeur
+     réelle a été relevée. C'est une mesure sur ce plat précis, pas une moyenne :
+     ça vaut mieux que le biais global, qui mélange tous les repas. */
+  function similarMealHtml(r) {
+    if (!Storage.findSimilarMeal) return '';
+    var sim = null;
+    try { sim = Storage.findSimilarMeal(r.items, r.totalCarbsG); } catch (e) { sim = null; }
+    if (!sim) return '';
+
+    var d = new Date(sim.date).toLocaleDateString('fr-FR');
+    var sens = sim.pct > 0 ? 'plus' : 'moins';
+    var ligne = Math.abs(sim.pct) < 5
+      ? 'L\'estimation était juste ce jour-là (' + sim.estimated + ' g estimés, ' +
+        sim.real + ' g réels).'
+      : 'Ce jour-là le repas contenait <strong>' + Math.abs(sim.pct) + ' % de ' + sens +
+        '</strong> que l\'estimation : ' + sim.estimated + ' g estimés, <strong>' +
+        sim.real + ' g réels</strong>.';
+
+    return '<div class="similar-box">' +
+      '<div class="similar-head">🔁 Tu as déjà mangé quelque chose de très proche</div>' +
+      '<div class="similar-body">Le ' + d + ' — ' + escapeHtml(sim.names.join(', ')) + '.<br>' +
+      ligne + '</div>' +
+      '<div class="similar-foot">Une valeur mesurée sur ce plat précis est un meilleur ' +
+      'repère qu\'une moyenne. À toi de juger si la portion est comparable.</div>' +
+      '</div>';
+  }
+
+  /* ---------- Relancer avec un autre modèle ----------
+     Quand un résultat paraît douteux, il fallait ouvrir les Réglages, changer
+     de fournisseur, revenir, puis REPRENDRE la photo — souvent impossible,
+     l'assiette est entamée. Les images sont déjà en mémoire : on relance
+     simplement le même repas ailleurs, et le résultat remplace l'affichage. */
+  function rerunOptions() {
+    var out = [];
+    (Storage.PROVIDERS || []).forEach(function (p) {
+      if (!(settings.apiKeys || {})[p]) return;          // pas de clé, pas d'option
+      var cat = (Storage.MODEL_CATALOG || {})[p] || [];
+      cat.forEach(function (m) {
+        // On ne propose pas de refaire exactement ce qui vient d'être fait.
+        var dejaFait = (p === lastRunProvider && m.id === lastRunModel);
+        if (dejaFait) return;
+        out.push({ provider: p, model: m.id,
+                   label: (PROVIDER_NAME[p] || p) + ' · ' + m.label });
+      });
+    });
+    return out;
+  }
+
+  function rerunHtml() {
+    if (!images.length && !describedMeal()) return '';
+    var opts = rerunOptions();
+    if (!opts.length) return '';
+    return '<div class="rerun-box">' +
+      '<label for="rerun-model">Ce résultat te paraît douteux ?</label>' +
+      '<div class="rerun-row">' +
+      '<select id="rerun-model" class="input">' +
+        opts.map(function (o, i) {
+          return '<option value="' + i + '">' + escapeHtml(o.label) + '</option>';
+        }).join('') +
+      '</select>' +
+      '<button id="rerun-btn" class="btn btn-ghost">↻ Relancer</button>' +
+      '</div>' +
+      '<p class="hint tiny">Même repas, même photo, autre modèle. Aucune photo à reprendre.</p>' +
+      '</div>';
+  }
+
+  function initRerun() {
+    var btn = $('rerun-btn');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var opts = rerunOptions();
+      var o = opts[parseInt($('rerun-model').value, 10)];
+      if (!o) return;
+
+      var status = $('analyze-status');
+      status.hidden = false;
+      status.innerHTML = '<div class="spinner"></div>Nouvelle estimation avec ' +
+        escapeHtml(o.label) + '…';
+      btn.disabled = true;
+
+      /* On force le modèle pour CE seul appel, sans toucher aux réglages : une
+         relance ponctuelle ne doit pas changer le fournisseur par défaut. */
+      var ponctuel = Object.assign({}, settings, {
+        models: Object.assign({}, settings.models, (function () {
+          var m = {}; m[o.provider] = o.model; return m;
+        })())
+      });
+      var sent = inputMode === 'texte' ? [] : images;
+      var ctx = {
+        referenceObject: $('reference-object').value,
+        plateDiameterCm: $('plate-diameter').value ? parseFloat($('plate-diameter').value) : null,
+        notes: $('user-notes').value,
+        extras: extrasText(),
+        imageCount: sent.length
+      };
+
+      Estimator.estimateWith(o.provider, sent, ctx, ponctuel).then(function (r) {
+        status.hidden = true;
+        lastRunProvider = o.provider;
+        lastRunModel = o.model;
+        lastResult = r;
+        renderResults(r);
+        toast('Nouvelle estimation : ' + r.totalCarbsG + ' g (' +
+              fr(partsFrom(r.totalCarbsG)) + ' parts).');
+      }).catch(function (e) {
+        status.hidden = true;
+        btn.disabled = false;
+        toast(e.message);
+      });
     });
   }
 
