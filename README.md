@@ -203,6 +203,7 @@ npm install                       # dépendances Capacitor + esbuild
 npx http-server -p 8080           # servir en local ; aucune étape de build pour le web
 bash scripts/build-plugins.sh     # après un changement de version de plugin Capacitor
 bash scripts/build-www.sh         # prépare www/ pour l'APK
+node scripts/render-icons.mjs     # régénère les PNG d'icônes depuis icons/*.svg
 ```
 
 JavaScript sans dépendance à l'exécution (modules IIFE exposant des globales), aucun
