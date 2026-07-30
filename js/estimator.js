@@ -89,6 +89,14 @@
     "     partiellement caché. C'est le texte que l'utilisateur relira pour",
     "     confirmer que tu as bien lu SON repas.",
     "",
+    "J. AS-TU VRAIMENT TROUVÉ LE REPÈRE ? — champ 'referenceFound'.",
+    "   Mets true UNIQUEMENT si tu as effectivement localisé l'objet-repère dans",
+    "   l'image et t'en es servi pour mesurer. Mets false s'il est hors cadre,",
+    "   masqué, flou, ou si tu n'en es pas sûr.",
+    "   Ne dis pas true « pour faire plaisir » : l'application resserre sa marge",
+    "   d'erreur quand tu réponds true. Annoncer une mesure qui n'a pas eu lieu",
+    "   produit une fausse précision sur une dose d'insuline.",
+    "",
     "SORTIE : réponds UNIQUEMENT avec un objet JSON valide, sans texte ni balises markdown.",
     "Schéma exact :",
     "{",
@@ -116,6 +124,7 @@
     '  "glycemicSpeed": "rapide" | "moderee" | "lente",',
     '  "glycemicNote": "ce qui, dans ce repas, détermine la vitesse d\'absorption",',
     '  "notes": "LE facteur d\'incertitude dominant + action concrète pour l\'affiner",',
+    '  "referenceFound": true | false,',
     '  "referenceUsed": "objet-repère utilisé et échelle déduite (ex: pompe 96 mm → 0,3 cm/px)"',
     "}"
   ].join('\n');
@@ -548,11 +557,18 @@
   // -------- Normalisation / garde-fous sur le résultat --------
   function sanitize(result, ctx) {
     var fromText = !(ctx && ctx.imageCount);
-    /* En mode description il n'y a pas d'image, donc pas de repère d'échelle —
-       même si le sélecteur en affiche encore un. Sans ce garde-fou, la fourchette
-       serait resserrée comme si une mesure avait eu lieu. */
-    var hasReference = !fromText &&
-      !!(ctx && ctx.referenceObject && ctx.referenceObject !== 'none');
+    var refAsked = !fromText && !!(ctx && ctx.referenceObject && ctx.referenceObject !== 'none');
+
+    /* Le repère ne compte que si le modèle l'a RÉELLEMENT trouvé.
+       Auparavant on se fiait au réglage de l'utilisateur : dès qu'un repère
+       était sélectionné, la marge d'erreur était resserrée de 6 points — même
+       si la pompe était hors cadre, masquée ou floue, et que le modèle avait
+       donc estimé à vue. C'était une fausse précision affichée au moment
+       exact où une dose d'insuline est calculée.
+       Faute de réponse explicite, on retombe sur « non trouvé » : mieux vaut
+       une marge trop large qu'une marge trop serrée. */
+    var refFound = refAsked && result.referenceFound === true;
+    var hasReference = refFound;
     var items = Array.isArray(result.items) ? result.items : [];
     items = items.map(function (it) {
       var carbs = num(it.carbsG);
@@ -607,6 +623,7 @@
 
     // Index et charge glycémiques, calculés depuis la table locale (js/gi.js).
     var gi = (window.GI && window.GI.meal) ? window.GI.meal(items) : null;
+    var alerts = plausibility(items, total);
 
     return {
       items: items,
@@ -618,6 +635,9 @@
       rangeHighG: Math.round(high),
       overallConfidence: conf,
       fromText: fromText,
+      refAsked: refAsked,
+      refFound: refFound,
+      alerts: alerts,
       seen: (result.seen || '').toString().trim(),
       gi: gi,
       glycemicSpeed: glycemicSpeed(result.glycemicSpeed, total, totalFat, totalProtein, gi),
@@ -656,6 +676,47 @@
 
     if (fatG != null && v === null && fatG < 5 && carbsG >= 20) return 'rapide';
     return v || 'moderee';
+  }
+
+  /* Contrôle de vraisemblance — dernier filet avant l'affichage.
+     Un modèle peut se tromper d'un facteur 10 (virgule décimale perdue,
+     portion multipliée, densité confondue entre cru et cuit) et renvoyer un
+     JSON parfaitement valide. Rien ne l'attrapait : le chiffre s'affichait
+     tel quel, prêt à être saisi dans une pompe.
+     Ces contrôles sont arithmétiques et locaux — aucun appel réseau, aucun
+     coût, et ils ne modifient jamais le résultat : ils le signalent. */
+  function plausibility(items, total) {
+    var out = [];
+
+    items.forEach(function (it) {
+      var d = it.carbDensityPer100g;
+      // Aucun aliment ne dépasse 100 g de glucides pour 100 g.
+      if (d != null && (d < 0 || d > 100)) {
+        out.push('« ' + it.name + ' » : densité annoncée de ' + Math.round(d) +
+          ' g pour 100 g, ce qui est impossible.');
+      }
+      // Les glucides doivent découler de la masse et de la densité.
+      if (it.estimatedMassG > 0 && d != null && d >= 0) {
+        var attendu = it.estimatedMassG * d / 100;
+        if (attendu > 2 && Math.abs(it.carbsG - attendu) > Math.max(8, attendu * 0.35)) {
+          out.push('« ' + it.name + ' » : ' + it.carbsG + ' g de glucides annoncés, mais ' +
+            Math.round(it.estimatedMassG) + ' g à ' + Math.round(d) + ' g/100 g donnent ' +
+            Math.round(attendu) + ' g.');
+        }
+      }
+      // Plus de glucides que le poids de l'aliment lui-même.
+      if (it.estimatedMassG > 0 && it.carbsG > it.estimatedMassG) {
+        out.push('« ' + it.name + ' » : ' + it.carbsG + ' g de glucides pour ' +
+          Math.round(it.estimatedMassG) + ' g d\'aliment.');
+      }
+    });
+
+    // Total hors de toute portion réaliste pour un seul repas.
+    if (total > 400) {
+      out.push('Total de ' + total + ' g pour un repas : c\'est très au-delà d\'une ' +
+        'portion habituelle, vérifie les quantités.');
+    }
+    return out;
   }
 
   function sumOf(items, key) {

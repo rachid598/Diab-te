@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '37'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '38'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -805,6 +805,31 @@
      C'est ce qui permet de repérer en un coup d'œil que le modèle a pris le
      poulet pour du poisson, ou n'a pas vu le pain à côté de l'assiette — deux
      erreurs qui changent le total sans que rien d'autre ne les signale. */
+  /* Repère demandé mais non trouvé, et incohérences arithmétiques.
+     Ces deux signaux étaient totalement absents : la marge d'erreur était
+     resserrée sur un repère supposé, et aucun garde-fou n'existait contre une
+     valeur absurde. Ce sont des avertissements de PRÉCISION, donc affichés
+     juste sous le chiffre, avant tout le reste. */
+  function warningsHtml(r) {
+    var out = '';
+
+    if (r.refAsked && !r.refFound) {
+      out += '<div class="warn-box"><strong>⚠️ Repère d\'échelle non retrouvé sur la photo.</strong><br>' +
+        'Le modèle n\'a pas pu identifier ton objet-repère : les portions ont été ' +
+        'estimées à vue, pas mesurées. La marge d\'erreur affichée est donc plus ' +
+        'large — c\'est normal. Pour la resserrer, reprends la photo avec le repère ' +
+        'bien visible, à plat et dans le même plan que l\'assiette.</div>';
+    }
+
+    if (r.alerts && r.alerts.length) {
+      out += '<div class="warn-box warn-hard"><strong>⚠️ Incohérence détectée dans le calcul.</strong><ul>' +
+        r.alerts.map(function (a) { return '<li>' + escapeHtml(a) + '</li>'; }).join('') +
+        '</ul>Vérifie les portions ci-dessous, ou relance l\'estimation. ' +
+        'Ne saisis pas ce chiffre tel quel.</div>';
+    }
+    return out;
+  }
+
   function seenHtml(r) {
     var ligne = function (it) {
       var carb = it.carbsG > 0
@@ -883,6 +908,7 @@
 
     html += '<div id="verify-box" class="verify-box" hidden></div>';
     html += biasHintHtml(r.totalCarbsG, r.items);
+    html += warningsHtml(r);
     html += seenHtml(r);
 
     // Détail par aliment (grammes éditables)
@@ -967,8 +993,51 @@
     if (settings.verificationMode !== 'auto' || !p || p === settings.provider) return null;
     if (!(settings.apiKeys || {})[p]) return null;
     return Estimator.estimateWith(p, images, ctx, settings)
-      .then(function (r) { return { ok: true, provider: p, total: r.totalCarbsG }; })
+      .then(function (r) {
+        return { ok: true, provider: p, total: r.totalCarbsG, items: r.items || [] };
+      })
       .catch(function (e) { return { ok: false, provider: p, error: e.message }; });
+  }
+
+  /* Comparaison ALIMENT PAR ALIMENT, et pas seulement des totaux.
+     Deux modèles peuvent tomber sur 70 g pour des raisons opposées : l'un voit
+     du pain que l'autre ignore, l'autre surcharge le riz. Annoncer « Confirmé »
+     sur la seule égalité des totaux est alors une FAUSSE ASSURANCE — pire que
+     pas de vérification, puisqu'elle invite à ne pas relire.
+     Le rapprochement se fait sur des racines de mots : les deux modèles ne
+     nomment jamais un aliment exactement pareil (« pavé de saumon » vs
+     « saumon grillé »). */
+  function foodKey(name) {
+    return (name || '').toString().toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z ]/g, ' ')
+      .split(/\s+/)
+      .filter(function (w) { return w.length > 3; })
+      .sort()
+      .join(' ');
+  }
+
+  function sameFood(a, b) {
+    var ka = foodKey(a), kb = foodKey(b);
+    if (!ka || !kb) return false;
+    if (ka === kb) return true;
+    // Un mot significatif partagé suffit : « riz blanc » ≈ « riz long grain ».
+    var wa = ka.split(' '), wb = kb.split(' ');
+    return wa.some(function (w) { return wb.indexOf(w) !== -1; });
+  }
+
+  // Aliments porteurs de glucides vus par l'un et pas par l'autre.
+  function foodDisagreements(mine, theirs) {
+    var carbed = function (list) {
+      return (list || []).filter(function (it) { return (it.carbsG || 0) >= 5; });
+    };
+    var a = carbed(mine), b = carbed(theirs);
+    var missing = function (from, into) {
+      return from.filter(function (x) {
+        return !into.some(function (y) { return sameFood(x.name, y.name); });
+      });
+    };
+    return { onlyMine: missing(a, b), onlyTheirs: missing(b, a) };
   }
 
   function renderVerificationState() {
@@ -998,18 +1067,40 @@
     var seuil = settings.verifyThresholdPct || 20;
     var parts = fr(partsFrom(v.total));
 
-    if (ecart <= seuil) {
+    var d = foodDisagreements(lastResult.items, v.items);
+    var listeEcarts = '';
+    if (d.onlyTheirs.length) {
+      listeEcarts += '<br>• ' + escapeHtml(nom) + ' voit aussi : <strong>' +
+        d.onlyTheirs.map(function (x) {
+          return escapeHtml(x.name) + ' (' + x.carbsG + ' g)';
+        }).join(', ') + '</strong>';
+    }
+    if (d.onlyMine.length) {
+      listeEcarts += '<br>• ' + escapeHtml(nom) + ' ne voit pas : <strong>' +
+        d.onlyMine.map(function (x) {
+          return escapeHtml(x.name) + ' (' + x.carbsG + ' g)';
+        }).join(', ') + '</strong>';
+    }
+
+    if (ecart <= seuil && !listeEcarts) {
       el.className = 'verify-box v-ok';
       el.innerHTML = '✅ <strong>Confirmé</strong> par ' + escapeHtml(nom) + ' : ' +
-        v.total + ' g (' + parts + ' parts), soit ' + Math.round(ecart) + ' % d\'écart.';
+        v.total + ' g (' + parts + ' parts), soit ' + Math.round(ecart) + ' % d\'écart, ' +
+        'et les deux modèles voient les mêmes aliments.';
+    } else if (ecart <= seuil) {
+      /* Totaux proches mais désaccord sur le CONTENU : c'est le cas que la
+         comparaison des seuls totaux laissait passer pour une confirmation. */
+      el.className = 'verify-box v-warn';
+      el.innerHTML = '🔍 <strong>Totaux proches, mais pas le même repas</strong> — ' +
+        escapeHtml(nom) + ' arrive à ' + v.total + ' g (' + Math.round(ecart) +
+        ' % d\'écart) en comptant des aliments différents.' + listeEcarts +
+        '<br>Les deux erreurs se compensent peut-être. Relis « Ce que l\'IA a vu ».';
     } else {
       el.className = 'verify-box v-alert';
       el.innerHTML = '⚠️ <strong>Écart important</strong> — ' + escapeHtml(nom) +
         ' estime <strong>' + v.total + ' g</strong> (' + parts + ' parts), soit ' +
-        Math.round(ecart) + ' % de différence.<br>' +
-        'Deux modèles en désaccord sur un repas, c\'est souvent qu\'un aliment a été ' +
-        'mal identifié ou qu\'une portion est mal jugée. Relis « Ce que l\'IA a vu » ' +
-        'avant de saisir la dose.';
+        Math.round(ecart) + ' % de différence.' + listeEcarts +
+        '<br>Relis « Ce que l\'IA a vu » avant de saisir la dose.';
     }
   }
 

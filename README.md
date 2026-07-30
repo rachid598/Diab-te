@@ -1,149 +1,168 @@
 # GlucoVision — Estimateur de glucides 🩸
 
-Application web (PWA) qui estime les **glucides d'un repas à partir d'une photo** et les
-convertit en **parts de glucides** (1 part = 10 g par défaut) à saisir dans une pompe à
-insuline. Pensée pour l'**insulinothérapie fonctionnelle** (diabète de type 1).
+Estime les **glucides d'un repas à partir d'une photo** (ou d'une simple description écrite)
+et les convertit en **grammes et en parts** à saisir dans une pompe à insuline. Pensée pour
+l'**insulinothérapie fonctionnelle** (diabète de type 1), utilisable en PWA ou en
+application Android.
 
 > ⚠️ **Avertissement médical.** Cet outil est une **aide à l'estimation**, pas un dispositif
-> médical. Toute estimation de glucides à partir d'une photo comporte une marge d'erreur
-> (les meilleures méthodes tournent autour de 5 à 15 g d'erreur, ce n'est **pas** infaillible).
-> Vérifie toujours le résultat avec ton propre jugement avant de doser, contrôle ta glycémie,
-> et ne modifie jamais tes réglages sans ton équipe soignante. Tu restes responsable de la
-> dose finale.
+> médical. Toute estimation de glucides à partir d'une photo comporte une marge d'erreur.
+> L'app **ne propose jamais de dose** : elle donne une quantité de glucides, c'est la pompe
+> qui dose. Vérifie toujours le résultat avec ton propre jugement avant de saisir, contrôle
+> ta glycémie, et ne modifie jamais tes réglages sans ton équipe soignante. Tu restes
+> responsable de la dose finale.
+
+## 📥 Utiliser l'app
+
+| | |
+|---|---|
+| **Web (PWA)** | **[rachid598.github.io/Diab-te](https://rachid598.github.io/Diab-te/)** — installable depuis le navigateur |
+| **Android (APK)** | **[glucovision.apk](https://github.com/rachid598/Diab-te/releases/download/apk-latest/glucovision.apk)** — lien permanent, toujours le dernier build |
+
+L'APK se met à jour **tout seul** : il vérifie au lancement s'il existe une version plus
+récente du contenu web, la télécharge et propose « Actualiser ». Une réinstallation n'est
+nécessaire que si une capacité **native** est ajoutée. Un bouton
+*Réglages → Vérifier les mises à jour* force le contrôle et dit précisément où ça bloque.
 
 ---
 
-## Comment ça marche (la méthode)
+## Trois façons d'estimer
 
-La précision d'une estimation photo repose surtout sur **l'estimation de la portion/volume**,
-pas sur la reconnaissance de l'aliment. L'app applique donc une méthode structurée, envoyée
-comme consigne au modèle de vision :
+**📷 Photo** — une à six vues du repas. Un **objet-repère de taille connue** posé à côté de
+l'assiette (par défaut la pompe MiniMed 780G, 96 × 55 mm) permet au modèle de calibrer
+l'échelle et de *mesurer* les portions au lieu de les deviner.
 
-1. **Identifier** chaque composant du repas.
-2. **Estimer le volume** de chacun — en s'appuyant sur un **objet-repère de taille connue**
-   présent dans la photo (carte bancaire, fourchette, pièce de 2 €, ou diamètre d'assiette),
-   et en **croisant plusieurs angles** (vue de dessus + vue de côté).
-3. **Convertir le volume en masse** selon la densité et la consistance (riz aéré vs compact,
-   friture gorgée d'huile, sauce…).
-4. **Appliquer la densité glucidique** (g de glucides pour 100 g) de l'aliment *tel que consommé*.
-5. **Sommer** et compter les **glucides cachés** (sauces sucrées, panure, sucre, boissons).
+**✍️ Description** — aucune photo : tu écris ce que tu manges. Le modèle interprète les
+portions courantes françaises. La marge d'erreur est structurellement plus large, et l'app
+le dit au lieu de le masquer.
 
-Pour réduire les erreurs, l'app :
+**🥖 Manuel** — base d'aliments hors ligne, produits emballés via
+[OpenFoodFacts](https://world.openfoodfacts.org) (recherche par nom ou scan de code-barres),
+repas fréquents enregistrés. Fonctionne sans réseau et sans clé API.
 
-- affiche une **fourchette basse–haute** et un **niveau de confiance** (jamais un faux chiffre
-  « précis ») ;
-- permet de **corriger la portion** de chaque aliment à la main (le total se recalcule) ;
-- gère **plusieurs angles** de la même assiette ;
-- garde un **historique** pour comparer estimations et réalité et affiner ton œil ;
-- propose un **mode manuel hors-ligne** (base d'aliments) qui ne nécessite aucune clé API.
+## Comment la précision est obtenue
 
-L'app affiche **grammes + parts** ; c'est **ta pompe qui calcule le bolus**. Aucune dose
-d'insuline n'est suggérée.
+La difficulté n'est pas de reconnaître l'aliment, c'est d'**estimer la portion**. La méthode
+est imposée au modèle comme consigne :
 
----
+1. **Calibrer l'échelle** sur l'objet-repère, puis mesurer chaque aliment en centimètres.
+2. **Croiser les angles** pour la hauteur, invisible sur une vue de dessus seule.
+3. **Volume → masse** via la densité et la consistance (riz aéré ou tassé, mie dense, friture).
+4. **Masse × densité glucidique**, sans oublier les glucides cachés (sauces, panure, sucre).
+5. **Resserrer l'incertitude** au maximum honnête, sans la gonfler « par sécurité ».
 
-## Mise en route
+### Les garde-fous
 
-### 1. Obtenir une clé API (pour le mode photo)
+**Le repère doit être réellement trouvé.** Le modèle déclare s'il a effectivement localisé
+l'objet-repère. Sinon la marge d'erreur reste large et un bandeau le signale — plutôt
+qu'une fausse précision affichée au moment exact où une dose se calcule.
 
-Le mode photo utilise un modèle de **vision**. Par défaut : **Claude (Anthropic)**.
+**Contrôle de vraisemblance.** Recoupement arithmétique local de chaque aliment : densité
+hors bornes, glucides incohérents avec masse × densité, glucides supérieurs au poids de
+l'aliment, total absurde. Aucun appel réseau, aucun coût.
 
-- **Claude** : crée une clé sur [console.anthropic.com](https://console.anthropic.com) →
-  colle-la dans **Réglages**. Modèle recommandé : `claude-sonnet-5` (bon rapport
-  précision/coût) ; `claude-opus-4-8` pour un maximum de précision.
-- **OpenAI** (alternative) : crée une clé sur
-  [platform.openai.com/api-keys](https://platform.openai.com/api-keys), choisis le fournisseur
-  *OpenAI* dans les Réglages, modèle `gpt-4o`.
-  > Note : « Codex » est un modèle de *code*, il ne lit pas les images — il faut un modèle de
-  > vision comme `gpt-4o`.
+**Vérification croisée, aliment par aliment.** Un second modèle estime le même repas en
+parallèle. L'app compare les totaux **et le contenu** : deux modèles peuvent tomber sur
+70 g pour des raisons opposées, et annoncer « confirmé » là-dessus serait une fausse
+assurance. Elle dit alors précisément *« l'autre modèle voit du pain que le premier ignore »*.
 
-La clé est stockée **uniquement sur ton appareil** (localStorage). Les photos ne sont envoyées
-qu'au fournisseur d'IA choisi, en appel direct depuis le navigateur — rien ne transite par un
-serveur tiers.
+**Inventaire de ce qui a été vu.** Une phrase décrivant l'assiette, chaque aliment avec sa
+portion retenue et l'hypothèse faite, l'échelle utilisée. C'est ce qui permet de repérer une
+confusion avant de doser.
 
-### 2. Lancer l'app
+**Calibration personnelle.** Les écarts constatés entre estimations passées et valeurs
+réelles saisies sont transmis au modèle, par catégorie d'aliment — « les féculents sont
+sous-estimés de 20 % » est exploitable, une moyenne globale ne l'est pas.
 
-La caméra exige un **contexte sécurisé** (HTTPS ou `localhost`).
+## Ce que l'app donne aussi
 
-**En local :**
+- **Index et charge glycémiques** depuis une table de référence locale (valeurs mesurées et
+  publiées, pas retrouvées de mémoire par un modèle). La charge est mise en avant car elle
+  tient compte de la portion.
+- **Vitesse d'absorption** du repas — rapide, progressive ou retardée. C'est une propriété
+  du repas, **pas une prédiction de glycémie** : celle-là demanderait le capteur et
+  l'insuline active, que la pompe possède et l'app non.
+- **Rappel de contrôle** programmé après le repas, calé sur la vitesse d'absorption (Android).
+- **Synthèse pour le médecin** — document autonome et lisible, sans dose ni glycémie.
+- **Apprentissage post-repas** : saisis les glucides réels quand tu les connais, l'app en
+  déduit tes écarts habituels.
+- **Sauvegarde automatique** de chaque estimation, pour qu'un oubli ne fasse pas perdre le
+  repas ni l'apprentissage.
+
+## Fournisseurs d'IA
+
+Une clé personnelle, appelée directement depuis l'appareil. **Rien ne transite par un
+serveur intermédiaire** en dehors du fournisseur choisi.
+
+| Fournisseur | Où obtenir une clé | Coût indicatif par estimation |
+|---|---|---|
+| **Anthropic** (Claude) | [console.anthropic.com](https://console.anthropic.com/settings/keys) | ~0,018 $ (Sonnet 5) |
+| **Google** (Gemini) | [aistudio.google.com](https://aistudio.google.com/app/apikey) | palier gratuit généreux |
+| **OpenAI** (ChatGPT) | [platform.openai.com](https://platform.openai.com/api-keys) | ~0,012 $ |
+| **OpenRouter** (tous modèles) | [openrouter.ai/keys](https://openrouter.ai/keys) | jusqu'à ~0,00025 $ |
+
+⚠️ L'abonnement **ChatGPT Plus/Pro ne donne pas accès à l'API** — c'est une facturation
+séparée. Idem pour Claude Pro.
+
+Le coût dérisoire d'OpenRouter est ce qui rend la **vérification croisée systématique**
+tenable : environ 4000 estimations pour 1 $ avec Qwen 3.7 Flash. Elle est proposée pour
+*vérifier*, pas comme modèle principal — sa précision sur des portions n'est pas démontrée
+pour cet usage, et c'est le seul critère qui compte quand une dose en dépend.
+
+## Capacités natives (Android)
+
+L'APK n'est pas qu'un habillage : il lève des limites réelles du navigateur.
+
+- **Plus de blocage CORS** — les requêtes partent du code natif, ce qui rend à nouveau
+  utilisables des services que le navigateur refusait.
+- **Appareil photo du système** — pleine résolution, une seule compression au lieu de deux.
+- **Stockage sans quota** — les photos sont de vrais fichiers ; fini le rognage de
+  l'historique imposé par la limite de localStorage.
+- **Clés API dans le Keystore**, chiffrées par le matériel du téléphone.
+- **Notifications programmées** fiables, déclenchées par le système.
+- **File d'attente hors-ligne** — au restaurant sans réseau, le repas est gardé et analysé
+  au retour de la connexion.
+- **Raccourcis** — appui long sur l'icône pour ouvrir directement l'appareil photo.
+
+## Confidentialité
+
+Tout reste sur l'appareil : réglages, historique, photos, aliments personnalisés. Les photos
+ne partent que vers le fournisseur d'IA choisi, le temps de l'estimation. Aucun compte,
+aucune télémétrie, aucun serveur intermédiaire.
+
+⚠️ L'**export de sauvegarde contient les clés API** en clair, pour qu'une restauration soit
+immédiate lors d'un changement d'appareil. Le fichier est nommé
+`glucovision-sauvegarde-PRIVEE-<date>.json` : il ne doit pas être partagé.
+
+## Développement
 
 ```bash
-# depuis le dossier du projet
-python3 -m http.server 8000
-# puis ouvre http://localhost:8000  (la caméra marche sur localhost)
+npm install                       # dépendances Capacitor + esbuild
+npx http-server -p 8080           # servir en local ; aucune étape de build pour le web
+bash scripts/build-plugins.sh     # après un changement de version de plugin Capacitor
+bash scripts/build-www.sh         # prépare www/ pour l'APK
 ```
 
-**Hébergement gratuit (recommandé) — GitHub Pages :**
+JavaScript sans dépendance à l'exécution (modules IIFE exposant des globales), aucun
+transpileur, aucun framework. L'APK est produit par GitHub Actions (Capacitor 8, Node 22) :
+l'APK est publié sous le tag `apk-latest`, le bundle de mise à jour sous `ota-latest`.
 
-1. Pousse ce dépôt sur GitHub.
-2. *Settings → Pages → Build and deployment → Source: Deploy from a branch*, branche
-   `main` (ou ta branche), dossier `/root`.
-3. Ouvre l'URL fournie sur ton téléphone → **Ajouter à l'écran d'accueil** pour l'installer
-   comme une app.
-
----
-
-## Utilisation
-
-1. Onglet **📷 Photo** → prends 1 à 4 photos (idéalement dessus + côté), avec un objet-repère.
-2. Sélectionne l'objet-repère, ajoute d'éventuelles précisions (« riz ~150 g cuit »).
-3. **Estimer les glucides** → l'app affiche parts + grammes + fourchette + détail par aliment.
-4. Ajuste une portion si besoin, puis saisis le chiffre dans ta pompe.
-5. **✍️ Manuel** : mode hors-ligne sans IA. **🕑 Historique** : tes estimations passées.
-
----
-
-## Réglages
-
-- **Fournisseur / clé / modèle** de vision.
-- **Taille d'une part** : 10 g (France, défaut), 12 g ou 15 g — modifiable.
-- **Arrondi des parts** au 0,5 le plus proche.
+| Fichier | Rôle |
+|---|---|
+| `js/estimator.js` | prompts, appels aux quatre fournisseurs, normalisation, garde-fous |
+| `js/storage.js` | persistance, calibration personnelle, sauvegarde/restauration |
+| `js/gi.js` | table locale d'index glycémiques |
+| `js/foods.js` | base glucidique hors-ligne du mode manuel |
+| `js/native.js` | pont unique vers Capacitor, avec repli web transparent |
+| `js/camera.js` | capture et compression des images |
+| `js/off.js` | accès à OpenFoodFacts |
+| `js/queue.js` | file d'attente hors-ligne |
+| `js/report.js` | synthèse pour la consultation |
+| `js/app.js` | interface |
 
 ---
 
-## Confidentialité & sécurité
-
-- Aucune donnée n'est stockée sur un serveur : réglages, historique et clé restent dans le
-  navigateur de l'appareil.
-- Les appels IA vont **directement** au fournisseur que tu choisis, avec ta propre clé.
-- ⚠️ Comme il s'agit d'une app **personnelle** côté navigateur, ta clé API est présente dans la
-  page. C'est acceptable pour un usage privé sur ton téléphone. Pour un usage partagé/public,
-  il faudrait passer par un petit serveur relais (proxy) qui garde la clé côté serveur.
-
----
-
-## Migration vers une APK Android (plus tard)
-
-L'app est une PWA 100 % statique, donc simple à empaqueter :
-
-- **Le plus simple — PWABuilder / Bubblewrap (TWA)** : va sur
-  [pwabuilder.com](https://www.pwabuilder.com), entre l'URL GitHub Pages, télécharge le paquet
-  Android (TWA). Les icônes et le manifeste sont déjà prêts.
-- **Plus de contrôle — Capacitor** :
-  ```bash
-  npm init -y && npm i @capacitor/core @capacitor/cli @capacitor/camera
-  npx cap init "GlucoVision" com.example.diabete --web-dir=.
-  npx cap add android && npx cap open android
-  ```
-  Capacitor régénère les icônes natives et permet d'utiliser la caméra native.
-
----
-
-## Structure du projet
-
-```
-index.html            Interface (FR)
-css/styles.css         Styles (mobile-first, clair/sombre)
-js/storage.js          Réglages + historique (localStorage)
-js/foods.js            Base glucidique hors-ligne (mode manuel)
-js/estimator.js        Prompt + appels API vision (Claude / OpenAI) + garde-fous
-js/camera.js           Capture, compression des photos
-js/app.js              Orchestration de l'UI
-manifest.webmanifest   Manifeste PWA
-service-worker.js      Cache hors-ligne de la coquille
-icons/                 Icônes (SVG + PNG 192/512/maskable/180)
-```
-
----
+Projet personnel, sans garantie. Ce n'est pas un produit certifié et il ne doit pas être
+présenté comme tel.
 
 *Prends soin de toi. En cas de doute sur une dose : glycémie + jugement + équipe soignante.*
