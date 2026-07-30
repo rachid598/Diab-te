@@ -373,6 +373,13 @@ select.input { -webkit-appearance: none; appearance: none;
   font-size: 13.5px; text-align: left;
 }
 .pump-hint strong { color: #ffffff; }
+/* Le chiffre du héros vient de la moyenne de deux modèles : on le dit sous la
+   ligne « à saisir dans ta pompe », pas ailleurs, pour que l'origine du nombre
+   soit lue au moment où il est lu. */
+.merged-hint {
+  margin-top: 8px; font-size: 12.5px; text-align: left;
+  color: rgba(255, 255, 255, .82);
+}
 .result-hero .gi, .result-hero .gly {
   background: rgba(255, 255, 255, .08); border-color: rgba(255, 255, 255, .2); color: #f7fbfa;
 }

@@ -14,20 +14,32 @@
     "MÉTHODE OBLIGATOIRE (raisonne étape par étape) :",
     "",
     "A. CALIBRATION DE L'ÉCHELLE (déterminante).",
-    "   Si un objet-repère de dimension CONNUE est fourni (ex. pompe à insuline 96×55 mm,",
-    "   carte 85 mm, pièce, diamètre d'assiette) : repère-le dans l'image et déduis l'échelle",
-    "   réelle (cm par pixel). Puis MESURE chaque aliment en cm (longueur, largeur, et",
+    "   Si un objet-repère de dimension CONNUE est fourni (pompe à insuline, carte 85 mm,",
+    "   pièce, diamètre d'assiette) : repère-le dans l'image et déduis l'échelle réelle",
+    "   (cm par pixel). Puis MESURE chaque aliment en cm (longueur, largeur, et",
     "   diamètre/épaisseur visibles). Indique ces mesures dans 'assumptions'.",
-    "   ⇒ Quand le repère est présent et exploitable, l'erreur sur la TAILLE (longueur/largeur/",
-    "   surface au sol) devient FAIBLE. NE GONFLE PAS l'incertitude pour ce que le repère",
-    "   permet de mesurer. La fourchette ne doit refléter QUE les facteurs réellement non",
-    "   résolubles (voir E).",
+    "   Procède DANS CET ORDRE, sans sauter d'étape :",
+    "     1. localise le repère et estime la longueur en PIXELS de sa plus grande arête ;",
+    "     2. échelle = dimension réelle connue ÷ cette longueur en pixels ;",
+    "     3. reporte les deux nombres dans 'referenceUsed' (ex. « pompe 96,8 mm sur",
+    "        ~310 px → 0,031 cm/px »). Un 'referenceUsed' sans ces deux nombres signifie",
+    "        que la calibration n'a pas eu lieu : mets alors 'referenceFound': false.",
+    "   ⚠️ PLAN DE MESURE. Le repère et les aliments doivent être à la MÊME distance de",
+    "   l'objectif. Si le repère est posé sur la table et la nourriture dans une assiette",
+    "   creuse ou surélevée, les aliments sont plus PRÈS de l'objectif : appliquer l'échelle",
+    "   du repère les fait paraître plus gros qu'ils ne sont, et SURESTIME les glucides.",
+    "   Quand tu vois cette configuration, dis-le dans 'notes' et corrige à la baisse.",
     "",
     "B. TROISIÈME DIMENSION (hauteur/épaisseur).",
     "   Avec plusieurs angles : croise-les pour juger le volume précisément (confiance haute).",
     "   Avec une seule vue de dessus : tu ne vois pas directement la hauteur — estime-la à",
     "   partir d'indices (ombres, empilement, type d'aliment) et considère-la comme la",
     "   principale inconnue géométrique de cet aliment (une vue de côté la lèverait).",
+    "   ⇒ SAUF si le repère a lui-même une épaisseur connue et repose à plat à côté de",
+    "   l'assiette : c'est alors la seule RÈGLE VERTICALE de l'image. Compare la hauteur",
+    "   des aliments à celle du repère (« le tas de riz monte à environ deux fois",
+    "   l'épaisseur de la pompe ≈ 5 cm ») et dis-le dans 'assumptions'. Une hauteur",
+    "   ainsi rapportée à un objet vaut bien mieux qu'une hauteur devinée.",
     "",
     "C. VOLUME → MASSE via la densité et la consistance (riz aéré vs compact, mie de pain",
     "   aérée vs dense, aliment frit gorgé d'huile, sauce). Recoupe avec des portions types",
@@ -143,6 +155,12 @@
       lines.push('Calibre l\'échelle à partir de ce repère, MESURE chaque aliment en cm, et');
       lines.push('reporte les mesures dans "assumptions". Comme la taille est mesurée, la');
       lines.push('fourchette ne doit couvrir que la densité/hauteur/sucre caché, pas la taille.');
+      lines.push('Donne dans "referenceUsed" la longueur en pixels de l\'arête que tu as');
+      lines.push('mesurée ET l\'échelle qui en découle, sinon mets "referenceFound": false.');
+      if (!ctx.plateDiameterCm) {
+        lines.push('Si ce repère a une épaisseur connue et repose à plat, sers-t\'en aussi');
+        lines.push('comme règle VERTICALE pour juger la hauteur de ce qu\'il y a dans l\'assiette.');
+      }
     } else {
       lines.push('Aucun objet-repère : estime l\'échelle via l\'assiette/les couverts et baisse la confiance.');
     }

@@ -152,14 +152,14 @@
             <span class="compact-value" id="reference-summary">Ma pompe</span>
           </summary>
           <div class="compact-content">
-            <p class="hint">Un objet de taille connue dans la photo réduit fortement l'erreur de portion. Pose-le à côté de l'assiette.</p>
+            <p class="hint">Un objet de taille connue dans la photo réduit fortement l'erreur de portion. Pose-le <strong>à plat, sur le bord de l'assiette</strong> plutôt que sur la table : à la même hauteur que la nourriture, l'échelle est juste.</p>
             <select id="reference-object" class="input">
-              <option value="pompe à insuline Medtronic MiniMed 780G, face rectangulaire d'environ 96 mm de long sur 55 mm de large" selected>Ma pompe MiniMed 780G (96 × 55 mm)</option>
+              <option value="pompe à insuline Medtronic MiniMed 780G : boîtier rectangulaire à écran couleur et coins arrondis, d'où sort une fine tubulure ; 96,8 mm de long sur 53,6 mm de large et 24,9 mm d'épaisseur" selected>Ma pompe MiniMed 780G (96,8 × 53,6 × 24,9 mm)</option>
               <option value="none">Aucun repère</option>
-              <option value="carte bancaire (85 mm de large)">Carte bancaire (8,5 cm)</option>
-              <option value="fourchette standard (~19 cm)">Fourchette (~19 cm)</option>
-              <option value="cuillère à soupe (~19 cm)">Cuillère à soupe (~19 cm)</option>
-              <option value="pièce de 2 € (25,75 mm)">Pièce de 2 € (2,6 cm)</option>
+              <option value="carte bancaire : rectangle de 85,6 mm de long sur 54 mm de large, 0,76 mm d'épaisseur">Carte bancaire (8,6 cm)</option>
+              <option value="fourchette de table standard, environ 19 cm de long">Fourchette (~19 cm)</option>
+              <option value="cuillère à soupe standard, environ 19 cm de long, cuilleron d'environ 4 cm de large">Cuillère à soupe (~19 cm)</option>
+              <option value="pièce de 2 € : disque de 25,75 mm de diamètre et 2,20 mm d'épaisseur">Pièce de 2 € (2,6 cm)</option>
               <option value="assiette">Assiette (préciser Ø)</option>
             </select>
             <div id="plate-diameter-wrap" class="inline-field" hidden>
@@ -474,7 +474,16 @@
             <option value="30">30 % d'écart — seulement les gros écarts</option>
           </select>
         </div>
-        <p class="hint tiny">Avec OpenRouter et Qwen 3.7 Flash, une vérification coûte environ <strong>0,025 centime</strong> : tu peux la laisser allumée en permanence.</p>
+        <div id="set-merge-wrap">
+          <label class="check"><input id="set-merge" type="checkbox" /> Utiliser la <strong>moyenne des deux</strong> comme estimation</label>
+          <p class="hint tiny">Mesuré sur 44 plats pesés : la moyenne de Gemini 3.1 Flash-Lite et de
+          Qwen3-VL 235B Thinking se trompe moins que <em>chacun</em> des deux (6,8 g contre 8,7 et 11,9
+          sur la manche de validation), parce que leurs erreurs vont rarement dans le même sens.
+          Réserve honnête : sur 38 plats comparables, l'intervalle de confiance de ce gain contient
+          encore zéro. Sans cette case, le second avis ne fait que t'alerter — il ne change pas le chiffre.</p>
+        </div>
+        <p class="hint tiny">Une vérification avec Qwen3-VL 235B Thinking coûte environ <strong>1,4 centime</strong> ;
+        avec Qwen 3.7 Flash, <strong>0,04 centime</strong>. Dans les deux cas tu peux la laisser allumée en permanence.</p>
         </div>
         </div>
       </details>
