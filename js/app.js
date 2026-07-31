@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '53'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '54'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant

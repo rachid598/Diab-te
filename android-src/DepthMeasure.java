@@ -50,11 +50,19 @@ class DepthMeasure {
         String diag = "";       // résumé technique, affiché en cas de refus
     }
 
+    /* Resume technique. « champ » est la largeur reelle couverte par l'image a la
+       distance mesuree : c'est le seul nombre qui permette de trancher entre une
+       distance fausse et une focale fausse, puisqu'on peut le comparer a ce que
+       montre l'ecran. Si l'ecran cadre 35 cm de table et que le champ annonce
+       120 cm, ce sont les intrinseques qui mentent ; s'il annonce 35 cm alors
+       que la distance dit 1 m, c'est la profondeur. */
     private static String diag(Result r, int dw, int dh, float fx, float fy) {
-        return "carte " + dw + "×" + dh + " · f=" + Math.round(fx) + "/" + Math.round(fy) +
-               " · px " + r.depthPixels + " · plage " + r.inRange +
-               " · plan " + r.onPlane + " · écart " + String.format("%.1f", r.planeRmsCm) +
-               " cm · incl " + Math.round(r.tiltDeg) + "°";
+        double fovCm = fx > 0 ? r.distanceCm * dw / fx : 0;
+        return "carte " + dw + "x" + dh + " f=" + Math.round(fx) + "/" + Math.round(fy) +
+               " dist " + Math.round(r.distanceCm) + "cm champ " + Math.round(fovCm) + "cm" +
+               " px " + r.depthPixels + " plan " + r.onPlane +
+               " ecart " + String.format("%.1f", r.planeRmsCm) + "cm" +
+               " incl " + Math.round(r.tiltDeg) + "deg";
     }
 
     private static final float MIN_HEIGHT_M = 0.004f;
@@ -149,6 +157,11 @@ class DepthMeasure {
             }
         }
         r.onPlane = n;
+        if (n > 0) {
+            float[] ringDepths = new float[n];
+            for (int i = 0; i < n; i++) ringDepths[i] = (float) pz[i];
+            r.distanceCm = median(ringDepths, n) * 100;
+        }
 
         if (n < MIN_PLANE_POINTS) {
             r.note = r.depthPixels == 0

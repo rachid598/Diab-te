@@ -78,6 +78,7 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
 
     private GLSurfaceView surfaceView;
     private TextView status;
+    private TextView debug;
     private Button shoot;
 
     private Session session;
@@ -127,6 +128,21 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
         status.setShadowLayer(6f, 0f, 2f, Color.BLACK);
         status.setText("Tiens le téléphone À PLAT au-dessus de l'assiette,\nécran horizontal, à 50-60 cm.");
         panel.addView(status);
+
+        /* Nombres bruts affichés en permanence, y compris quand la mesure
+           réussit. Sans eux, une capture d'écran ne dit pas si c'est la
+           profondeur ou la matrice de caméra qui dérape, et chaque hypothèse
+           coûte une compilation et une installation à l'utilisateur. */
+        debug = new TextView(this);
+        debug.setTextColor(Color.argb(210, 255, 255, 255));
+        debug.setTextSize(10.5f);
+        debug.setGravity(Gravity.CENTER);
+        debug.setShadowLayer(5f, 0f, 1f, Color.BLACK);
+        LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        dp.topMargin = 10;
+        debug.setLayoutParams(dp);
+        panel.addView(debug);
 
         shoot = new Button(this);
         shoot.setText("Capturer");
@@ -288,7 +304,7 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
         }
         if (!r.ok) {
             recent.clear();
-            setStatus(r.note, false);
+            setStatus(r.note, false, r.diag);
             return;
         }
 
@@ -297,12 +313,14 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
 
         if (!stable()) {
             setStatus("Mesure en cours : " + Math.round(r.volumeCm3) + " cm³ à "
-                    + Math.round(r.distanceCm) + " cm.\nTiens le téléphone immobile, le chiffre doit se stabiliser.", false);
+                    + Math.round(r.distanceCm) + " cm.\nTiens le téléphone immobile, le chiffre doit se stabiliser.",
+                    false, r.diag);
             return;
         }
-        setStatus("✓ Relief stable : " + Math.round(r.volumeCm3) + " cm³, hauteur "
-                + String.format("%.1f", r.heightMaxCm) + " cm\nà " + Math.round(r.distanceCm)
-                + " cm, inclinaison " + Math.round(r.tiltDeg) + "°.", true);
+        setStatus("✓ Relief stable : " + Math.round(r.volumeCm3) + " cm³ sur "
+                + Math.round(r.areaCm2) + " cm², hauteur " + String.format("%.1f", r.heightMaxCm)
+                + " cm\nà " + Math.round(r.distanceCm) + " cm, inclinaison "
+                + Math.round(r.tiltDeg) + "°.", true, r.diag);
     }
 
     /* Le relief n'est proposé que si plusieurs mesures d'affilée se rejoignent.
@@ -416,8 +434,13 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
        renvoie quand même la photo, qui suffit au chemin normal — le désactiver
        obligerait à ressortir et à tout reprendre. */
     private void setStatus(String message, boolean depthReady) {
+        setStatus(message, depthReady, null);
+    }
+
+    private void setStatus(String message, boolean depthReady, String diagLine) {
         runOnUiThread(() -> {
             status.setText(message);
+            if (diagLine != null) debug.setText(diagLine);
             if (!capturing) {
                 shoot.setEnabled(true);
                 shoot.setText(depthReady ? "Capturer avec le relief" : "Capturer la photo seule");
