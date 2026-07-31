@@ -46,13 +46,15 @@ class DepthMeasure {
         int inRange;
         int onPlane;
         double planeRmsCm;      // planéité de la couronne : le juge du plan d'appui
+        double tiltDeg;         // inclinaison du téléphone par rapport à la table
         String diag = "";       // résumé technique, affiché en cas de refus
     }
 
     private static String diag(Result r, int dw, int dh, float fx, float fy) {
         return "carte " + dw + "×" + dh + " · f=" + Math.round(fx) + "/" + Math.round(fy) +
                " · px " + r.depthPixels + " · plage " + r.inRange +
-               " · plan " + r.onPlane + " · écart " + String.format("%.1f", r.planeRmsCm) + " cm";
+               " · plan " + r.onPlane + " · écart " + String.format("%.1f", r.planeRmsCm) +
+               " cm · incl " + Math.round(r.tiltDeg) + "°";
     }
 
     private static final float MIN_HEIGHT_M = 0.004f;
@@ -76,6 +78,18 @@ class DepthMeasure {
        autour, ou carte de profondeur trop bruitée pour être exploitée. */
     private static final double MAX_PLANE_RMS_M = 0.012;
     private static final double OUTLIER_M = 0.02;
+
+    /* La méthode intègre une CARTE D'ALTITUDE : elle suppose un point de mesure
+       par unité de surface de table, donc une vue de dessus. Prise de biais, la
+       face verticale d'un objet occupe beaucoup de pixels dont la surface au sol
+       est minuscule ; la correction 1/cos les fait alors exploser et le volume
+       avec eux. C'est ce qui donnait 3638 cm³ pour une brique de lait debout,
+       photographiée de trois quarts.
+
+       Deux garde-fous : l'inclinaison globale du téléphone, et le rejet des
+       pixels rasants — ceux-là décrivent des flancs, pas une épaisseur. */
+    private static final double MAX_TILT_DEG = 35;
+    private static final double MIN_COS = 0.5;
 
     /* Bornes de vraisemblance d'un repas. Ce sont elles qui auraient arrêté les
        « 5500 cm³ » avant qu'ils n'atteignent l'écran. */
@@ -183,6 +197,17 @@ class DepthMeasure {
             return r;
         }
 
+        /* Inclinaison du téléphone par rapport à la table : la normale du plan
+           ajusté fait cet angle avec l'axe optique. À plat au-dessus de
+           l'assiette, elle vaut zéro. */
+        r.tiltDeg = Math.toDegrees(Math.acos(Math.min(1, 1 / nrm)));
+        if (r.tiltDeg > MAX_TILT_DEG) {
+            r.note = "Téléphone trop incliné (" + Math.round(r.tiltDeg) + "°) : tiens-le " +
+                     "à plat, écran horizontal, juste au-dessus de l'assiette.";
+            r.diag = diag(r, dw, dh, fx, fy);
+            return r;
+        }
+
         // ---- Centre : le relief au-dessus de ce plan ----
         double volume = 0, area = 0, heightSum = 0, maxHeight = 0;
         int count = 0;
@@ -206,7 +231,7 @@ class DepthMeasure {
                 double pixelArea = (z / fx) * (z / fy);
                 double len = Math.sqrt(qx * qx + qy * qy + z * z);
                 double cos = len > 0 ? Math.abs((-a * qx - b * qy + z) / (nrm * len)) : 1;
-                if (cos < 0.10) continue;
+                if (cos < MIN_COS) continue;
 
                 double flatArea = pixelArea / cos;
                 volume += h * flatArea;

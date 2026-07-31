@@ -125,7 +125,7 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
         status.setTextSize(15f);
         status.setGravity(Gravity.CENTER);
         status.setShadowLayer(6f, 0f, 2f, Color.BLACK);
-        status.setText("Vise l'assiette d'en haut, à 50-60 cm.\nBouge doucement le téléphone.");
+        status.setText("Tiens le téléphone À PLAT au-dessus de l'assiette,\nécran horizontal, à 50-60 cm.");
         panel.addView(status);
 
         shoot = new Button(this);
@@ -301,7 +301,8 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
             return;
         }
         setStatus("✓ Relief stable : " + Math.round(r.volumeCm3) + " cm³, hauteur "
-                + String.format("%.1f", r.heightMaxCm) + " cm, à " + Math.round(r.distanceCm) + " cm.", true);
+                + String.format("%.1f", r.heightMaxCm) + " cm\nà " + Math.round(r.distanceCm)
+                + " cm, inclinaison " + Math.round(r.tiltDeg) + "°.", true);
     }
 
     /* Le relief n'est proposé que si plusieurs mesures d'affilée se rejoignent.
