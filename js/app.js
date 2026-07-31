@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '47'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '48'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -2650,6 +2650,88 @@
       };
       reader.onerror = function () { toast('Impossible de lire le fichier.'); };
       reader.readAsText(file);
+    });
+
+    initTextBackup();
+  }
+
+  /* ---------- Sauvegarde par copier-coller ----------
+     Le seul chemin qui ne dépend d'AUCUNE écriture de fichier : ni partage, ni
+     gestionnaire de fichiers, ni permission de stockage. C'est ce qui reste
+     quand tout le reste échoue — et c'est aussi la seule façon de récupérer ses
+     clés API avant de réinstaller un APK signé d'une autre clé, qu'Android
+     refuse d'installer par-dessus et qui oblige donc à désinstaller. */
+  function initTextBackup() {
+    var wrap = $('text-backup-wrap');
+    var box = $('text-backup-box');
+    var hint = $('text-backup-hint');
+    var copy = $('text-backup-copy');
+    var apply = $('text-backup-apply');
+
+    function open(mode) {
+      wrap.hidden = false;
+      if (mode === 'export') {
+        var payload = Storage.exportAll();
+        box.value = JSON.stringify(payload);
+        box.readOnly = true;
+        copy.hidden = false;
+        apply.hidden = true;
+        hint.innerHTML = payload.containsApiKeys
+          ? 'Copie ce texte et colle-le dans une note. Il contient <strong>tes clés API</strong> : garde-le pour toi.'
+          : 'Copie ce texte et colle-le dans une note.';
+        box.focus();
+        box.setSelectionRange(0, box.value.length);
+      } else {
+        box.value = '';
+        box.readOnly = false;
+        copy.hidden = true;
+        apply.hidden = false;
+        hint.textContent = 'Colle ici le texte d\'une sauvegarde, puis « Restaurer ce texte ».';
+        box.focus();
+      }
+    }
+
+    $('text-backup').addEventListener('click', function () { open('export'); });
+    $('text-restore').addEventListener('click', function () { open('import'); });
+    $('text-backup-close').addEventListener('click', function () {
+      wrap.hidden = true; box.value = '';
+    });
+
+    copy.addEventListener('click', function () {
+      box.focus();
+      box.setSelectionRange(0, box.value.length);
+      /* execCommand est déprécié mais reste le seul chemin fiable dans une
+         WebView sans contexte sécurisé : on tente l'API moderne d'abord. */
+      var done = function () { toast('Sauvegarde copiée. Colle-la dans une note MAINTENANT.'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(box.value).then(done).catch(function () {
+          if (document.execCommand('copy')) done();
+          else toast('Copie refusée : sélectionne le texte et copie-le à la main.');
+        });
+      } else if (document.execCommand('copy')) {
+        done();
+      } else {
+        toast('Copie refusée : sélectionne le texte et copie-le à la main.');
+      }
+    });
+
+    apply.addEventListener('click', function () {
+      var raw = box.value.trim();
+      if (!raw) { toast('Colle d\'abord le texte de ta sauvegarde.'); return; }
+      if (!confirm('Restaurer remplacera ton historique, tes aliments perso et ta calibration actuels. Continuer ?')) return;
+      try {
+        var restored = Storage.importAll(JSON.parse(raw));
+        settings = Storage.getSettings();
+        renderSavedMeals();
+        renderHistory();
+        renderChips();
+        renderFoodResults($('food-search').value);
+        wrap.hidden = true; box.value = '';
+        $('settings-modal').hidden = true;
+        toast('Sauvegarde restaurée (' + restored.length + ' éléments), clés API comprises si le texte en contenait.');
+      } catch (err) {
+        toast('Texte illisible : ' + (err.message || 'ce n\'est pas une sauvegarde JSON.'));
+      }
     });
   }
 

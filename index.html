@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=47" />
+  <link rel="stylesheet" href="css/styles.css?v=48" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -559,6 +559,24 @@
           </label>
         </div>
         <p class="hint tiny">⚠️ L'export contient <strong>tes clés API</strong> pour que la restauration soit immédiate (bascule vers l'APK, changement de téléphone). Le fichier est donc personnel : <strong>ne le partage pas</strong> et ne l'envoie pas par mail.</p>
+
+        <!-- Sauvegarde SANS fichier. Indispensable quand l'écriture de fichier
+             échoue, et surtout avant une réinstallation d'APK : c'est le seul
+             chemin qui ne dépend ni du gestionnaire de fichiers, ni du partage,
+             ni des permissions de stockage. -->
+        <div class="btn-row">
+          <button id="text-backup" class="btn btn-ghost">📋 Copier la sauvegarde</button>
+          <button id="text-restore" class="btn btn-ghost">📥 Coller une sauvegarde</button>
+        </div>
+        <div id="text-backup-wrap" hidden>
+          <p class="hint tiny" id="text-backup-hint">Copie ce texte et colle-le dans une note. Il contient <strong>tes clés API</strong> : garde-le pour toi.</p>
+          <textarea id="text-backup-box" class="input" rows="6" spellcheck="false"></textarea>
+          <div class="btn-row">
+            <button id="text-backup-copy" class="btn btn-primary">Copier</button>
+            <button id="text-backup-apply" class="btn btn-primary" hidden>Restaurer ce texte</button>
+            <button id="text-backup-close" class="btn btn-ghost">Fermer</button>
+          </div>
+        </div>
         <p class="hint tiny" id="keystore-note" hidden>🔒 Sur l'application Android, tes clés sont chiffrées par le Keystore du téléphone et ne sont plus stockées en clair.</p>
 
         <h4>Consommation d'API</h4>
@@ -606,19 +624,19 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=47"></script>
-  <script src="js/native.js?v=47"></script>
-  <script src="js/storage.js?v=47"></script>
-  <script src="js/foods.js?v=47"></script>
-  <script src="js/gi.js?v=47"></script>
-  <script src="js/queue.js?v=47"></script>
-  <script src="js/report.js?v=47"></script>
-  <script src="js/bench.js?v=47"></script>
-  <script src="js/estimator.js?v=47"></script>
-  <script src="js/camera.js?v=47"></script>
-  <script src="js/off.js?v=47"></script>
-  <script src="vendor/zxing.min.js?v=47"></script>
-  <script src="js/barcode.js?v=47"></script>
-  <script src="js/app.js?v=47"></script>
+  <script src="vendor/capacitor-plugins.js?v=48"></script>
+  <script src="js/native.js?v=48"></script>
+  <script src="js/storage.js?v=48"></script>
+  <script src="js/foods.js?v=48"></script>
+  <script src="js/gi.js?v=48"></script>
+  <script src="js/queue.js?v=48"></script>
+  <script src="js/report.js?v=48"></script>
+  <script src="js/bench.js?v=48"></script>
+  <script src="js/estimator.js?v=48"></script>
+  <script src="js/camera.js?v=48"></script>
+  <script src="js/off.js?v=48"></script>
+  <script src="vendor/zxing.min.js?v=48"></script>
+  <script src="js/barcode.js?v=48"></script>
+  <script src="js/app.js?v=48"></script>
 </body>
 </html>
