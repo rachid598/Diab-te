@@ -353,26 +353,52 @@
      d'Android (mail, messagerie, Drive…). Le cache convient : le fichier n'a
      pas à survivre au partage, et il est nettoyé par le système.
      Renvoie false sur le web, où l'appelant retombe sur un téléchargement. */
+  /* Renvoie { ok, error, step } plutôt qu'un booléen : un échec silencieux ici
+     se traduisait à l'écran par un bouton qui ne fait rien, sans le moindre
+     indice sur l'étape fautive — écriture du fichier ou ouverture de la feuille
+     de partage. Impossible à diagnostiquer autrement qu'en devinant. */
   function shareFile(name, content, title) {
-    if (!isApp) return resolved(false);
+    if (!isApp) return resolved({ ok: false, error: 'web' });
+    var step = 'ecriture';
     return Cap.Filesystem.writeFile({
       path: name,
       data: content,
       directory: Cap.Directory.Cache,
       encoding: 'utf8'
     }).then(function (res) {
+      step = 'partage';
       return Cap.Share.share({
         title: title || name,
         // Certains destinataires n'acceptent qu'un texte : le titre sert de secours.
         files: [res.uri]
       });
-    }).then(function () { return true; })
+    }).then(function () { return { ok: true }; })
       .catch(function (err) {
         // Annulation par l'utilisateur : ce n'est pas une erreur.
-        var m = (err && err.message) || '';
-        if (/cancel|abort|dismiss/i.test(m)) return true;
-        return false;
+        var m = (err && (err.message || err.errorMessage)) || String(err || '');
+        if (/cancel|abort|dismiss/i.test(m)) return { ok: true, cancelled: true };
+        return { ok: false, error: m || 'échec inconnu', step: step };
       });
+  }
+
+  /* Repli quand la feuille de partage échoue : on écrit dans le dossier de
+     documents de l'appareil, qui est visible depuis le gestionnaire de fichiers.
+     Moins pratique que de choisir la destination, mais au moins le fichier
+     existe quelque part de retrouvable — et l'URI renvoyée le dit. */
+  function saveToDocuments(name, content) {
+    if (!isApp) return resolved(null);
+    var dirs = [Cap.Directory.Documents, Cap.Directory.External, Cap.Directory.Data];
+    var i = 0;
+    function attempt() {
+      if (i >= dirs.length) return resolved(null);
+      var dir = dirs[i++];
+      return Cap.Filesystem.writeFile({
+        path: name, data: content, directory: dir, encoding: 'utf8', recursive: true
+      }).then(function (r) {
+        return { uri: (r && r.uri) || name, directory: String(dir) };
+      }).catch(function () { return attempt(); });
+    }
+    return attempt();
   }
 
   // ---------- Raccourcis de l'écran d'accueil ----------
@@ -449,6 +475,7 @@
     camera: { capture: capture, pickMany: pickMany },
     depth: { available: depthAvailable, capture: depthCapture },
     shareFile: shareFile,
+    saveToDocuments: saveToDocuments,
     onLaunchAction: onLaunchAction,
     onResume: onResume,
     photos: {
