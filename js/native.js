@@ -340,7 +340,8 @@
             distanceCm: r.distanceCm || 0,
             cmPerPixel: r.cmPerPixel || 0,
             samples: r.samples || 0,
-            note: r.note || ''
+            note: r.note || '',
+            diag: r.diag || ''
           }
         };
       })
