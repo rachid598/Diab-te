@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '43'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '44'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -2439,29 +2439,79 @@
     initBackup();
   }
 
+  /* ---------- Écriture d'un fichier vers l'extérieur ----------
+
+     Trois chemins, du meilleur au pire, parce qu'aucun n'existe partout :
+
+     1. APK → feuille de partage Android. C'est elle qui laisse choisir la
+        destination (Fichiers, Drive, mail…). Sans elle, l'ancre <a download>
+        d'une WebView écrit dans un dossier interne que le gestionnaire de
+        fichiers ne montre pas : le fichier existe, mais reste introuvable.
+     2. Navigateur avec showSaveFilePicker → vraie boîte « Enregistrer sous ».
+        Doit être appelé DANS le geste utilisateur, d'où l'absence d'await
+        avant l'appel.
+     3. Repli <a download> pour les navigateurs sans l'API. */
+  function saveTextFile(name, content, mime, title) {
+    function fallback() {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([content], { type: mime }));
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 30000);
+      return Promise.resolve('telecharge');
+    }
+
+    if (Native.isApp) {
+      return Native.shareFile(name, content, title).then(function (ok) {
+        return ok ? 'partage' : fallback();
+      });
+    }
+
+    if (typeof window.showSaveFilePicker === 'function') {
+      var ext = (name.split('.').pop() || 'json');
+      return window.showSaveFilePicker({
+        suggestedName: name,
+        types: [{ description: title || name, accept: (function (o) { o[mime] = ['.' + ext]; return o; })({}) }]
+      }).then(function (handle) {
+        return handle.createWritable();
+      }).then(function (w) {
+        return w.write(content).then(function () { return w.close(); });
+      }).then(function () { return 'enregistre'; })
+        .catch(function (err) {
+          // Annulation : l'utilisateur a fermé la boîte, il ne s'est rien passé.
+          if (err && (err.name === 'AbortError' || /abort/i.test(err.message || ''))) return 'annule';
+          return fallback();
+        });
+    }
+
+    return fallback();
+  }
+
   // ---------- Sauvegarde / restauration ----------
   function initBackup() {
     $('export-data').addEventListener('click', function () {
       var payload = Storage.exportAll();
-      var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
       var d = new Date();
       var stamp = d.getFullYear() + '-' +
                   ('0' + (d.getMonth() + 1)).slice(-2) + '-' +
                   ('0' + d.getDate()).slice(-2);
       // Le nom du fichier dit lui-même qu'il contient des secrets : c'est ce
       // qu'on voit dans le gestionnaire de fichiers avant de le partager.
-      a.href = url;
-      a.download = (payload.containsApiKeys ? 'glucovision-sauvegarde-PRIVEE-' : 'glucovision-sauvegarde-')
-                   + stamp + '.json';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
-      toast(payload.containsApiKeys
-        ? '🔑 Sauvegarde exportée AVEC tes clés API. Garde ce fichier pour toi : ne le partage pas et ne l\'envoie pas par mail.'
-        : 'Sauvegarde exportée. Range-la ailleurs que sur ce téléphone.');
+      var name = (payload.containsApiKeys ? 'glucovision-sauvegarde-PRIVEE-' : 'glucovision-sauvegarde-')
+                 + stamp + '.json';
+
+      saveTextFile(name, JSON.stringify(payload, null, 2), 'application/json',
+                   'Sauvegarde GlucoVision').then(function (mode) {
+        if (mode === 'annule') return;
+        var ou = mode === 'partage' ? 'Choisis où la ranger dans la feuille de partage.'
+               : mode === 'enregistre' ? 'Enregistrée à l\'emplacement choisi.'
+               : 'Téléchargée dans le dossier de téléchargements.';
+        toast((payload.containsApiKeys
+          ? '🔑 Sauvegarde AVEC tes clés API — ne la partage pas, ne l\'envoie pas par mail. '
+          : 'Sauvegarde exportée. ') + ou);
+      });
     });
 
     $('import-data').addEventListener('click', function (e) {
@@ -2908,15 +2958,9 @@
       var name = 'glucovision-synthese-' + stamp + '.html';
       var title = 'Synthèse glucides — ' + r.stats.count + ' repas';
 
-      Native.shareFile(name, r.html, title).then(function (ok) {
-        // Sur le web (et si le partage natif échoue) : téléchargement classique.
-        if (ok) return;
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(new Blob([r.html], { type: 'text/html' }));
-        a.download = name;
-        a.click();
-        setTimeout(function () { URL.revokeObjectURL(a.href); }, 30000);
-        toast('Synthèse téléchargée.');
+      saveTextFile(name, r.html, 'text/html', title).then(function (mode) {
+        if (mode === 'annule' || mode === 'partage') return;
+        toast(mode === 'enregistre' ? 'Synthèse enregistrée.' : 'Synthèse téléchargée.');
       });
     });
   }
