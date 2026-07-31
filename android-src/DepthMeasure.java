@@ -156,7 +156,7 @@ class DepthMeasure {
 
         double sq = 0; int used = 0;
         for (int i = 0; i < n; i++) {
-            if (kept.length == n && !keep[i]) continue;
+            if (!keep[i]) continue;
             double d = (a * px[i] + b * py[i] + c - pz[i]) / nrm;
             sq += d * d; used++;
         }
