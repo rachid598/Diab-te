@@ -30,6 +30,7 @@ public abstract class Image {
   public abstract int getHeight();
   public abstract int getFormat();
   public abstract Plane[] getPlanes();
+  public abstract long getTimestamp();
   public abstract void close();
 }
 EOF
