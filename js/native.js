@@ -295,6 +295,58 @@
       .then(function () { return true; }).catch(function () { return false; });
   }
 
+  // ---------- Mesure de profondeur (ARCore) ----------
+
+  /* Sur une vue de dessus, la hauteur des aliments n'est pas visible : c'est la
+     principale inconnue géométrique, donc la principale source d'erreur sur une
+     portion. L'API Depth d'ARCore la mesure, et fournit au passage l'échelle
+     absolue — ce qui rend l'objet-repère inutile quand elle fonctionne.
+
+     Tout est facultatif et silencieux en cas d'échec : la valeur renvoyée dit
+     seulement si la mesure a abouti, et l'appelant garde le chemin photo normal.
+     Le résultat n'est mis en cache que pour « disponible », parce que ça ne
+     change pas pendant l'exécution ; la mesure, elle, est refaite à chaque fois. */
+  var depthAvailability = null;
+
+  function depthAvailable() {
+    if (!isApp || !Cap.DepthScan) return resolved({ supported: false, reason: 'WEB' });
+    if (depthAvailability) return resolved(depthAvailability);
+    return Cap.DepthScan.available()
+      .then(function (r) {
+        depthAvailability = r || { supported: false, reason: 'VIDE' };
+        return depthAvailability;
+      })
+      .catch(function (e) {
+        depthAvailability = { supported: false, reason: (e && e.message) || 'ERREUR' };
+        return depthAvailability;
+      });
+  }
+
+  function depthCapture() {
+    if (!isApp || !Cap.DepthScan) return resolved(null);
+    return Cap.DepthScan.capture()
+      .then(function (r) {
+        if (!r || r.cancelled) return null;
+        if (r.error) return { error: r.error };
+        if (!r.jpegBase64) return null;
+        return {
+          dataUrl: 'data:image/jpeg;base64,' + r.jpegBase64,
+          depth: {
+            ok: !!r.depthOk,
+            volumeCm3: r.volumeCm3 || 0,
+            areaCm2: r.areaCm2 || 0,
+            heightMaxCm: r.heightMaxCm || 0,
+            heightMeanCm: r.heightMeanCm || 0,
+            distanceCm: r.distanceCm || 0,
+            cmPerPixel: r.cmPerPixel || 0,
+            samples: r.samples || 0,
+            note: r.note || ''
+          }
+        };
+      })
+      .catch(function (e) { return { error: (e && e.message) || 'Mesure impossible.' }; });
+  }
+
   // ---------- Partage d'un fichier ----------
 
   /* Écrit le contenu dans le cache de l'app puis ouvre le sélecteur de partage
@@ -395,6 +447,7 @@
     httpJson: httpJson,
 
     camera: { capture: capture, pickMany: pickMany },
+    depth: { available: depthAvailable, capture: depthCapture },
     shareFile: shareFile,
     onLaunchAction: onLaunchAction,
     onResume: onResume,
