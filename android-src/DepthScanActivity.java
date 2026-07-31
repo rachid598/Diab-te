@@ -33,7 +33,6 @@ import androidx.core.content.ContextCompat;
 import com.google.ar.core.ArCoreApk;
 import com.google.ar.core.Config;
 import com.google.ar.core.Frame;
-import com.google.ar.core.Plane;
 import com.google.ar.core.Session;
 import com.google.ar.core.TrackingState;
 import com.google.ar.core.exceptions.CameraNotAvailableException;
@@ -41,25 +40,36 @@ import com.google.ar.core.exceptions.UnavailableException;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
-import java.util.Collection;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
 /**
- * Écran de visée : aperçu caméra ARCore, état de la mesure en direct, et un
- * bouton qui fige une image avec sa carte de profondeur.
+ * Écran de visée : aperçu caméra ARCore, mesure du relief EN DIRECT, et capture.
+ *
+ * La mesure tourne à chaque image et son résultat s'affiche immédiatement. C'est
+ * ce qui rend l'écran utilisable : on voit le volume apparaître et se stabiliser,
+ * on capture quand il est bon. La version précédente exigeait d'attendre qu'ARCore
+ * détecte un plan avant même d'autoriser la capture — une attente indéterminée
+ * sur une table unie, pour un plan qui pouvait de toute façon être le sol.
  *
  * L'interface est construite en code plutôt qu'en XML : le projet Android est
  * régénéré à chaque compilation par « cap add android », donc tout fichier de
- * ressources devrait être réinjecté par le workflow. Une activité autonome
- * réduit d'autant ce qu'il y a à recopier — et à oublier de recopier.
+ * ressources devrait être réinjecté par le workflow.
  */
 public class DepthScanActivity extends AppCompatActivity implements GLSurfaceView.Renderer {
 
     private static final int CAMERA_REQUEST = 4711;
     private static final int JPEG_QUALITY = 88;
+
+    /* La capture retient la MÉDIANE de plusieurs images consécutives. Une carte
+       de profondeur isolée est bruitée ; la médiane écarte l'image aberrante
+       sans rien coûter à l'utilisateur, qui appuie une seule fois. */
+    private static final int CAPTURE_FRAMES = 7;
 
     private GLSurfaceView surfaceView;
     private TextView status;
@@ -68,8 +78,11 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
     private Session session;
     private final CameraQuadRenderer background = new CameraQuadRenderer();
     private final AtomicBoolean captureRequested = new AtomicBoolean(false);
+    private final List<DepthMeasure.Result> burst = new ArrayList<>();
     private boolean sessionResumed = false;
+    private boolean capturing = false;
     private int sensorOrientation = 90;
+    private long lastLiveMeasure = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -106,7 +119,7 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
         status.setTextSize(15f);
         status.setGravity(Gravity.CENTER);
         status.setShadowLayer(6f, 0f, 2f, Color.BLACK);
-        status.setText("Vise l'assiette d'en haut, à environ 30 cm, et bouge très légèrement le téléphone.");
+        status.setText("Centre l'assiette et vise d'en haut, à environ 30 cm.");
         panel.addView(status);
 
         shoot = new Button(this);
@@ -120,6 +133,8 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
         shoot.setOnClickListener(v -> {
             shoot.setEnabled(false);
             shoot.setText("Mesure…");
+            synchronized (burst) { burst.clear(); }
+            capturing = true;
             captureRequested.set(true);
         });
         panel.addView(shoot);
@@ -167,7 +182,10 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
             return false;
         }
         config.setDepthMode(Config.DepthMode.AUTOMATIC);
-        config.setPlaneFindingMode(Config.PlaneFindingMode.HORIZONTAL);
+        /* Détection de plans désactivée : le plan d'appui est déduit de la carte
+           de profondeur (voir DepthMeasure). La laisser active ne ferait que
+           consommer du calcul pour un résultat qu'on n'utilise plus. */
+        config.setPlaneFindingMode(Config.PlaneFindingMode.DISABLED);
         config.setFocusMode(Config.FocusMode.AUTO);
         config.setUpdateMode(Config.UpdateMode.LATEST_CAMERA_IMAGE);
         session.configure(config);
@@ -240,71 +258,139 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
         }
         background.draw(frame);
 
-        boolean tracking = frame.getCamera().getTrackingState() == TrackingState.TRACKING;
-        Collection<Plane> planes = session.getAllTrackables(Plane.class);
-        int horizontal = 0;
-        for (Plane p : planes) {
-            if (p.getTrackingState() == TrackingState.TRACKING
-                    && p.getType() == Plane.Type.HORIZONTAL_UPWARD_FACING
-                    && p.getSubsumedBy() == null) horizontal++;
+        if (frame.getCamera().getTrackingState() != TrackingState.TRACKING) {
+            setStatus("Initialisation de la caméra…", false);
+            return;
         }
-        final boolean ready = tracking && horizontal > 0;
-        final String message = !tracking
-                ? "Initialisation… bouge doucement le téléphone."
-                : horizontal == 0
-                    ? "Cherche la table : incline légèrement le téléphone au-dessus du plateau."
-                    : "Table détectée. Vise l'assiette d'en haut, puis capture.";
-        runOnUiThread(() -> {
-            status.setText(message);
-            if (!captureRequested.get()) shoot.setEnabled(ready);
-        });
 
-        if (captureRequested.getAndSet(false)) {
-            doCapture(frame, planes);
+        if (capturing) {
+            collectBurst(frame);
+            return;
+        }
+
+        // Aperçu de la mesure, limité à ~4 fois par seconde : inutile de la
+        // recalculer 60 fois, et ça garde l'aperçu parfaitement fluide.
+        long now = System.currentTimeMillis();
+        if (now - lastLiveMeasure < 250) return;
+        lastLiveMeasure = now;
+
+        DepthMeasure.Result r = measureOnce(frame);
+        if (r == null) {
+            setStatus("Carte de profondeur en préparation… fais un petit mouvement latéral.", false);
+        } else if (r.ok) {
+            setStatus("Relief détecté : " + Math.round(r.volumeCm3) + " cm³, hauteur "
+                    + String.format("%.1f", r.heightMaxCm) + " cm.\nCapture quand le chiffre est stable.", true);
+        } else {
+            setStatus(r.note, false);
         }
     }
 
-    private void doCapture(Frame frame, Collection<Plane> planes) {
+    /** Mesure sur une image, ou null si la profondeur n'est pas encore là. */
+    private DepthMeasure.Result measureOnce(Frame frame) {
         Image depth = null;
+        try {
+            depth = frame.acquireDepthImage16Bits();
+            return DepthMeasure.measure(frame, depth, 640);
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (depth != null) depth.close();
+        }
+    }
+
+    /** Accumule quelques mesures, puis fige l'image et rend la main. */
+    private void collectBurst(Frame frame) {
+        DepthMeasure.Result r = measureOnce(frame);
+        int size;
+        synchronized (burst) {
+            if (r != null) burst.add(r);
+            size = burst.size();
+        }
+        setStatus("Mesure… " + size + "/" + CAPTURE_FRAMES, false);
+        if (size < CAPTURE_FRAMES) return;
+
+        capturing = false;
+        captureRequested.set(false);
+        finishCapture(frame);
+    }
+
+    private void finishCapture(Frame frame) {
         Image rgb = null;
         try {
             rgb = frame.acquireCameraImage();
             byte[] jpeg = toJpeg(rgb, sensorOrientation);
             if (jpeg == null) { failOnUi("Image caméra illisible."); return; }
-
             int width = decodedWidth(jpeg);
 
-            DepthMeasure.Result r;
-            try {
-                depth = frame.acquireDepthImage16Bits();
-                r = DepthMeasure.measure(frame, depth, planes, width);
-            } catch (Exception e) {
-                r = new DepthMeasure.Result();
-                r.note = "Carte de profondeur indisponible sur cette image.";
-            }
+            DepthMeasure.Result best = medianResult(width, frame);
 
             /* La photo est renvoyée même quand la profondeur échoue : elle reste
                parfaitement utilisable par le chemin normal, et jeter la prise de
                vue obligerait à tout recommencer pour rien. */
             Intent out = new Intent();
             out.putExtra("jpegBase64", Base64.encodeToString(jpeg, Base64.NO_WRAP));
-            out.putExtra("depthOk", r.ok);
-            out.putExtra("volumeCm3", r.volumeCm3);
-            out.putExtra("areaCm2", r.areaCm2);
-            out.putExtra("heightMaxCm", r.heightMaxCm);
-            out.putExtra("heightMeanCm", r.heightMeanCm);
-            out.putExtra("distanceCm", r.distanceCm);
-            out.putExtra("cmPerPixel", r.cmPerPixel);
-            out.putExtra("samples", r.samples);
-            out.putExtra("note", r.note);
+            out.putExtra("depthOk", best != null && best.ok);
+            out.putExtra("volumeCm3", best != null ? best.volumeCm3 : 0);
+            out.putExtra("areaCm2", best != null ? best.areaCm2 : 0);
+            out.putExtra("heightMaxCm", best != null ? best.heightMaxCm : 0);
+            out.putExtra("heightMeanCm", best != null ? best.heightMeanCm : 0);
+            out.putExtra("distanceCm", best != null ? best.distanceCm : 0);
+            out.putExtra("cmPerPixel", best != null ? best.cmPerPixel : 0);
+            out.putExtra("samples", best != null ? best.samples : 0);
+            out.putExtra("note", best != null ? best.note : "Aucune mesure de profondeur exploitable.");
             setResult(RESULT_OK, out);
             finish();
         } catch (Exception e) {
             failOnUi("Capture impossible : " + e.getMessage());
         } finally {
-            if (depth != null) depth.close();
             if (rgb != null) rgb.close();
         }
+    }
+
+    /**
+     * Mesure retenue : celle dont le volume est médian parmi les images réussies.
+     * On garde un objet complet plutôt que des moyennes champ par champ, pour que
+     * volume, hauteur et échelle restent cohérents entre eux — ils décrivent
+     * alors tous la même image, et non un mélange de plusieurs.
+     */
+    private DepthMeasure.Result medianResult(int photoWidthPx, Frame frame) {
+        List<DepthMeasure.Result> ok = new ArrayList<>();
+        DepthMeasure.Result lastFailure = null;
+        synchronized (burst) {
+            for (DepthMeasure.Result r : burst) {
+                if (r.ok) ok.add(r); else lastFailure = r;
+            }
+        }
+        if (ok.isEmpty()) return lastFailure;
+        Collections.sort(ok, (p, q) -> Double.compare(p.volumeCm3, q.volumeCm3));
+        DepthMeasure.Result chosen = ok.get(ok.size() / 2);
+
+        /* Les mesures d'aperçu ont été calculées avec une largeur de photo par
+           défaut : l'échelle est rapportée ici à la vraie largeur du JPEG. */
+        Image depth = null;
+        try {
+            depth = frame.acquireDepthImage16Bits();
+            DepthMeasure.Result exact = DepthMeasure.measure(frame, depth, photoWidthPx);
+            if (exact.ok) chosen.cmPerPixel = exact.cmPerPixel;
+        } catch (Exception ignored) {
+        } finally {
+            if (depth != null) depth.close();
+        }
+        return chosen;
+    }
+
+    /* Le bouton reste TOUJOURS actif dès que la caméra suit : l'écran ne doit
+       jamais être un cul-de-sac. Si le relief n'est pas mesurable, la capture
+       renvoie quand même la photo, qui suffit au chemin normal — le désactiver
+       obligerait à ressortir et à tout reprendre. */
+    private void setStatus(String message, boolean depthReady) {
+        runOnUiThread(() -> {
+            status.setText(message);
+            if (!capturing) {
+                shoot.setEnabled(true);
+                shoot.setText(depthReady ? "Capturer avec le relief" : "Capturer la photo seule");
+            }
+        });
     }
 
     private static int decodedWidth(byte[] jpeg) {
