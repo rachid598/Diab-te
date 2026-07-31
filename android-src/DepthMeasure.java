@@ -104,6 +104,22 @@ class DepthMeasure {
     private static final double MIN_AREA_CM2 = 30, MAX_AREA_CM2 = 1800;
     private static final double MIN_VOLUME_CM3 = 15, MAX_VOLUME_CM3 = 2500;
 
+    /** Profondeur brute au centre de la carte, en cm. Aucun ajustement, aucun
+        filtre : c'est la valeur telle qu'ARCore la donne, pour pouvoir la
+        confronter a un metre ruban. Sans ce point de comparaison, impossible de
+        distinguer une carte de profondeur fausse d'un calcul qui la deforme. */
+    static double rawCenterCm(Image depth) {
+        try {
+            Image.Plane p0 = depth.getPlanes()[0];
+            ByteBuffer raw = p0.getBuffer().order(ByteOrder.nativeOrder());
+            int x = depth.getWidth() / 2, y = depth.getHeight() / 2;
+            float z = depthAt(raw, p0.getRowStride(), x, y);
+            return z * 100;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
     static Result measure(Frame frame, Image depth, int photoWidthPx) {
         Result r = new Result();
 
@@ -128,10 +144,24 @@ class DepthMeasure {
             r.note = "Paramètres optiques indisponibles.";
             return r;
         }
-        float fx = focal[0] * dw / dim[0];
-        float fy = focal[1] * dh / dim[1];
-        float cx = principal[0] * dw / dim[0];
-        float cy = principal[1] * dh / dim[1];
+        /* La carte de profondeur et l'image de reference n'ont pas toujours le
+           meme rapport d'aspect : 160x90 (16:9) ici, contre une image CPU en 4:3.
+           La carte est alors un RECADRAGE vertical centre, pas une reduction.
+
+           Mettre chaque axe a l'echelle de sa propre dimension donnait donc
+           f = 108/81 pour une carte 160x90 : 108/160 = 0,675 d'un cote,
+           81/90 = 0,900 de l'autre. Or des pixels carres imposent l'egalite de
+           ces deux rapports. La geometrie verticale etait fausse d'un facteur
+           4/3, et toutes les surfaces avec elle.
+
+           On applique donc le facteur de la LARGEUR aux deux focales, et l'on
+           recentre le point principal vertical quand les cadrages different. */
+        float scale = (float) dw / dim[0];
+        float fx = focal[0] * scale;
+        float fy = focal[1] * scale;
+        float cx = principal[0] * scale;
+        boolean sameFraming = Math.abs((double) dim[0] / dim[1] - (double) dw / dh) < 0.02;
+        float cy = sameFraming ? principal[1] * scale : dh / 2f;
 
         int cx0 = (int) (dw * (1 - CENTER_FRACTION) / 2), cx1 = dw - cx0;
         int cy0 = (int) (dh * (1 - CENTER_FRACTION) / 2), cy1 = dh - cy0;
