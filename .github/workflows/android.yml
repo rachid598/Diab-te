@@ -17,6 +17,7 @@ on:
       - 'capacitor.config.json'
       - 'package.json'
       - 'scripts/**'
+      - 'signing/**'
       - 'android-src/**'
       - '.github/workflows/android.yml'
 
@@ -228,6 +229,64 @@ jobs:
           print('manifeste ARCore mis a jour')
           PY
           grep -n 'com.google.ar.core\|DepthScanActivity' "$MANIFEST"
+
+      # Android refuse une mise à jour signée d'une autre clé que l'application
+      # déjà installée (« le package est en conflit avec un package déjà
+      # présent »). Or le runner fabrique un debug.keystore NEUF à chaque
+      # exécution : chaque build partait donc avec une signature différente, et
+      # aucune mise à jour d'APK ne pouvait s'installer par-dessus la
+      # précédente — il fallait désinstaller, donc tout perdre.
+      # On impose ici une clé stable. Les secrets de dépôt sont prioritaires ;
+      # à défaut on prend celle committée dans signing/ (voir signing/README.md).
+      - name: Installer la clé de signature stable
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+        run: |
+          DEST=android/app/glucovision-signing.jks
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$DEST"
+            PASS="$KEYSTORE_PASS"
+            echo "Clé de signature issue des secrets du dépôt."
+          else
+            cp signing/glucovision-signing.jks "$DEST"
+            PASS=glucovision
+            echo "Clé de signature issue de signing/ (committée)."
+          fi
+          keytool -list -keystore "$DEST" -storepass "$PASS" | grep -i 'fingerprint\|empreinte' || true
+
+          python3 - "$PASS" <<'PY'
+          import re, sys
+          pwd = sys.argv[1]
+          path = 'android/app/build.gradle'
+          s = open(path, encoding='utf-8').read()
+          if 'glucovisionStable' in s:
+              print('deja configure'); sys.exit(0)
+          block = (
+              '    signingConfigs {\n'
+              '        glucovisionStable {\n'
+              '            storeFile file("glucovision-signing.jks")\n'
+              '            storePassword "%s"\n'
+              '            keyAlias "glucovision"\n'
+              '            keyPassword "%s"\n'
+              '        }\n'
+              '    }\n' % (pwd, pwd)
+          )
+          m = re.search(r'(android\s*\{\n)', s)
+          if not m:
+              sys.exit("bloc android { introuvable dans build.gradle")
+          s = s[:m.end(1)] + block + s[m.end(1):]
+
+          # Le build « debug » reste celui qu'on publie (installable sans compte
+          # développeur) : on lui substitue simplement notre clé.
+          m2 = re.search(r'(buildTypes\s*\{\s*\n)', s)
+          if not m2:
+              sys.exit('bloc buildTypes { introuvable dans build.gradle')
+          s = s[:m2.end(1)] + '        debug {\n            signingConfig signingConfigs.glucovisionStable\n        }\n' + s[m2.end(1):]
+          open(path, 'w', encoding='utf-8').write(s)
+          print('signingConfig applique')
+          PY
+          grep -n 'glucovisionStable' android/app/build.gradle
 
       - name: Compiler l'APK
         run: |
