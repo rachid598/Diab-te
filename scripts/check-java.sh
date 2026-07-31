@@ -63,3 +63,5 @@ javac -nowarn -d "$WORK/out" -sourcepath "$WORK/stubs" \
       $(find "$WORK/stubs" -name '*.java') android-src/DepthMeasure.java
 
 echo "DepthMeasure.java compile."
+
+python3 scripts/check-calls.py
