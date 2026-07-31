@@ -288,6 +288,12 @@ jobs:
           PY
           grep -n 'glucovisionStable' android/app/build.gradle
 
+      # Même vérification que scripts/check-java.sh, mais côté CI : elle échoue en
+      # deux secondes au lieu de deux minutes de Gradle, et le message d'erreur
+      # n'est pas noyé dans une trace de pile.
+      - name: Vérifier DepthMeasure.java
+        run: bash scripts/check-java.sh
+
       - name: Compiler l'APK
         run: |
           cd android
