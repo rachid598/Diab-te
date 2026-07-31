@@ -46,6 +46,13 @@ class DepthMeasure {
         int inRange;
         int onPlane;
         double planeRmsCm;      // planéité de la couronne : le juge du plan d'appui
+        String diag = "";       // résumé technique, affiché en cas de refus
+    }
+
+    private static String diag(Result r, int dw, int dh, float fx, float fy) {
+        return "carte " + dw + "×" + dh + " · f=" + Math.round(fx) + "/" + Math.round(fy) +
+               " · px " + r.depthPixels + " · plage " + r.inRange +
+               " · plan " + r.onPlane + " · écart " + String.format("%.1f", r.planeRmsCm) + " cm";
     }
 
     private static final float MIN_HEIGHT_M = 0.004f;
@@ -84,7 +91,14 @@ class DepthMeasure {
         ByteBuffer raw = p0.getBuffer().order(ByteOrder.nativeOrder());
         int rowStride = p0.getRowStride();
 
-        CameraIntrinsics intr = frame.getCamera().getTextureIntrinsics();
+        /* getImageIntrinsics et NON getTextureIntrinsics. Les premières décrivent
+           l'image CPU de la caméra, à laquelle la carte de profondeur est
+           alignée ; les secondes décrivent la texture GPU, typiquement en 16:9
+           quand l'image CPU et la profondeur sont en 4:3. Les utiliser donnait
+           une distance focale et un rapport d'aspect faux, donc des surfaces
+           gonflées d'un facteur voisin de 2,5 — d'où les 5118 cm² annoncés pour
+           une assiette, et le volume absurde qui en découlait. */
+        CameraIntrinsics intr = frame.getCamera().getImageIntrinsics();
         int[] dim = intr.getImageDimensions();
         float[] focal = intr.getFocalLength();
         float[] principal = intr.getPrincipalPoint();
@@ -126,6 +140,7 @@ class DepthMeasure {
             r.note = r.depthPixels == 0
                 ? "Aucune profondeur mesurée : éloigne-toi à 50-60 cm et fais un léger mouvement latéral."
                 : "Table peu visible autour de l'assiette (" + n + " points) : recule à 50-60 cm.";
+            r.diag = diag(r, dw, dh, fx, fy);
             return r;
         }
 
@@ -164,6 +179,7 @@ class DepthMeasure {
         if (used == 0 || r.planeRmsCm > MAX_PLANE_RMS_M * 100) {
             r.note = "Surface d'appui non plane (±" + String.format("%.1f", r.planeRmsCm) +
                      " cm) : pose l'assiette sur une table dégagée et recule un peu.";
+            r.diag = diag(r, dw, dh, fx, fy);
             return r;
         }
 
@@ -205,6 +221,7 @@ class DepthMeasure {
         if (count < MIN_SAMPLES) {
             r.samples = count;
             r.note = "Aucun relief au centre (" + count + " points) : centre l'assiette dans le cadre.";
+            r.diag = diag(r, dw, dh, fx, fy);
             return r;
         }
 
@@ -220,6 +237,7 @@ class DepthMeasure {
             r.samples = count;
             r.note = "Mesure invraisemblable (" + Math.round(volumeCm3) + " cm³ sur " +
                      Math.round(areaCm2) + " cm²) : recule à 50-60 cm et recadre sur l'assiette seule.";
+            r.diag = diag(r, dw, dh, fx, fy);
             return r;
         }
 
@@ -232,6 +250,7 @@ class DepthMeasure {
         r.distanceCm = median * 100;
         float fxPhoto = focal[0] * ((float) photoWidthPx / dim[0]);
         r.cmPerPixel = fxPhoto > 0 ? (median / fxPhoto) * 100 : 0;
+        r.diag = diag(r, dw, dh, fx, fy);
         if (median < BEST_DEPTH_MIN_M) {
             r.note = "Un peu près (" + Math.round(median * 100) + " cm) : à 50-60 cm la mesure est plus sûre.";
         }

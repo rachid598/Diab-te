@@ -368,6 +368,7 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
             out.putExtra("cmPerPixel", best != null ? best.cmPerPixel : 0);
             out.putExtra("samples", best != null ? best.samples : 0);
             out.putExtra("note", best != null ? best.note : "Aucune mesure de profondeur exploitable.");
+            out.putExtra("diag", best != null ? best.diag : "");
             setResult(RESULT_OK, out);
             finish();
         } catch (Exception e) {

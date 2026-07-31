@@ -47,6 +47,7 @@ cat > "$WORK/stubs/com/google/ar/core/Camera.java" <<'EOF'
 package com.google.ar.core;
 public abstract class Camera {
   public abstract CameraIntrinsics getTextureIntrinsics();
+  public abstract CameraIntrinsics getImageIntrinsics();
 }
 EOF
 

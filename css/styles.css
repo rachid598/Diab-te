@@ -969,3 +969,6 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 .depth-result.d-ok { border-color: #14b8a6; background: color-mix(in srgb, #14b8a6 10%, var(--surface-2)); }
 .depth-result.d-warn { border-color: #f59e0b; background: color-mix(in srgb, #f59e0b 12%, var(--surface-2)); }
 .depth-result .tiny { font-size: 12px; color: var(--muted); }
+/* Ligne de diagnostic du relief : lisible d'une capture d'écran, sans occuper
+   la place d'un message utile. */
+.depth-result .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; opacity: .8; }

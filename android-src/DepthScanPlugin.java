@@ -86,6 +86,7 @@ public class DepthScanPlugin extends Plugin {
         ret.put("cmPerPixel", data.getDoubleExtra("cmPerPixel", 0));
         ret.put("samples", data.getIntExtra("samples", 0));
         ret.put("note", data.getStringExtra("note"));
+        ret.put("diag", data.getStringExtra("diag"));
         call.resolve(ret);
     }
 }
