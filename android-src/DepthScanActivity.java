@@ -71,6 +71,11 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
        sans rien coûter à l'utilisateur, qui appuie une seule fois. */
     private static final int CAPTURE_FRAMES = 7;
 
+    /* Le relief n'est proposé qu'après STABLE_WINDOW mesures consécutives dont
+       les volumes ne s'écartent pas de plus de STABLE_TOLERANCE. */
+    private static final int STABLE_WINDOW = 4;
+    private static final double STABLE_TOLERANCE = 0.25;
+
     private GLSurfaceView surfaceView;
     private TextView status;
     private Button shoot;
@@ -79,6 +84,7 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
     private final CameraQuadRenderer background = new CameraQuadRenderer();
     private final AtomicBoolean captureRequested = new AtomicBoolean(false);
     private final List<DepthMeasure.Result> burst = new ArrayList<>();
+    private final List<Double> recent = new ArrayList<>();
     private boolean sessionResumed = false;
     private boolean capturing = false;
     private int sensorOrientation = 90;
@@ -119,7 +125,7 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
         status.setTextSize(15f);
         status.setGravity(Gravity.CENTER);
         status.setShadowLayer(6f, 0f, 2f, Color.BLACK);
-        status.setText("Centre l'assiette et vise d'en haut, à environ 30 cm.");
+        status.setText("Vise l'assiette d'en haut, à 50-60 cm.\nBouge doucement le téléphone.");
         panel.addView(status);
 
         shoot = new Button(this);
@@ -276,13 +282,37 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
 
         DepthMeasure.Result r = measureOnce(frame);
         if (r == null) {
+            recent.clear();
             setStatus("Carte de profondeur en préparation… fais un petit mouvement latéral.", false);
-        } else if (r.ok) {
-            setStatus("Relief détecté : " + Math.round(r.volumeCm3) + " cm³, hauteur "
-                    + String.format("%.1f", r.heightMaxCm) + " cm.\nCapture quand le chiffre est stable.", true);
-        } else {
-            setStatus(r.note, false);
+            return;
         }
+        if (!r.ok) {
+            recent.clear();
+            setStatus(r.note, false);
+            return;
+        }
+
+        recent.add(r.volumeCm3);
+        while (recent.size() > STABLE_WINDOW) recent.remove(0);
+
+        if (!stable()) {
+            setStatus("Mesure en cours : " + Math.round(r.volumeCm3) + " cm³ à "
+                    + Math.round(r.distanceCm) + " cm.\nTiens le téléphone immobile, le chiffre doit se stabiliser.", false);
+            return;
+        }
+        setStatus("✓ Relief stable : " + Math.round(r.volumeCm3) + " cm³, hauteur "
+                + String.format("%.1f", r.heightMaxCm) + " cm, à " + Math.round(r.distanceCm) + " cm.", true);
+    }
+
+    /* Le relief n'est proposé que si plusieurs mesures d'affilée se rejoignent.
+       C'est ce garde-fou qui manquait : des valeurs sautant de 1500 à 5500 cm³
+       étaient offertes à la capture comme si elles voulaient dire quelque chose,
+       alors que leur seule information est qu'il ne faut PAS les utiliser. */
+    private boolean stable() {
+        if (recent.size() < STABLE_WINDOW) return false;
+        double min = Double.MAX_VALUE, max = 0;
+        for (double v : recent) { min = Math.min(min, v); max = Math.max(max, v); }
+        return min > 0 && (max - min) / min <= STABLE_TOLERANCE;
     }
 
     /** Mesure sur une image, ou null si la profondeur n'est pas encore là. */

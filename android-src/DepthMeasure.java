@@ -13,20 +13,17 @@ import java.util.Arrays;
  * Transforme une carte de profondeur ARCore en mesures exploitables.
  *
  * Le plan d'appui est déduit de la carte de profondeur ELLE-MÊME, et non de la
- * détection de plans d'ARCore. C'est ce qui rend la mesure immédiate et fiable :
+ * détection de plans d'ARCore : sur une table unie celle-ci met un temps
+ * indéterminé à accrocher, et ce qu'elle accroche est souvent le SOL, ce qui
+ * décale toutes les hauteurs de la hauteur de la table. On ajuste donc un plan
+ * sur la COURONNE de l'image — l'anneau de table autour de l'assiette — puis on
+ * mesure le relief du centre par rapport à ce plan.
  *
- * - la détection de plans exige de promener le téléphone jusqu'à ce qu'ARCore
- *   accroche une surface, ce qui prend un temps indéterminé sur une table unie,
- *   sans texture à suivre ;
- * - et quand elle finit par accrocher quelque chose, rien ne garantit que c'est
- *   la table : le SOL est souvent détecté en premier. Toutes les hauteurs sont
- *   alors calculées par rapport à un plan situé 75 cm plus bas, et chaque point
- *   se retrouve rejeté comme « trop haut ». C'est exactement ce qui produisait
- *   un décompte de 0 point malgré une carte de profondeur valide.
- *
- * On ajuste donc un plan sur la COURONNE de l'image — l'anneau autour du centre,
- * qui montre la table à côté de l'assiette — puis on mesure le relief du centre
- * par rapport à ce plan. Aucune attente, et le plan est celui qu'on regarde.
+ * Ce fichier refuse plus qu'il n'accepte, et c'est délibéré. La documentation
+ * d'ARCore situe la plage précise entre 0,5 m et 5 m : plus près, la carte de
+ * profondeur devient franchement fausse sans jamais le signaler. Un volume
+ * absurde présenté comme une mesure serait pire que pas de mesure du tout, parce
+ * qu'il est ensuite transmis au modèle comme une donnée physique fiable.
  */
 class DepthMeasure {
 
@@ -38,34 +35,45 @@ class DepthMeasure {
         double heightMaxCm;
         double heightMeanCm;
         double distanceCm;
-        double cmPerPixel;      // pour l'image JPEG rendue, à la distance médiane
+        double cmPerPixel;
         int samples;
         String note = "";
 
-        /* Compteurs de diagnostic. Un simple « 0 point » ne dit pas si la carte
-           de profondeur était vide, si tout était hors de portée, ou si le plan
-           d'appui était faux — trois pannes différentes qui demandent trois
-           corrections différentes. */
-        int depthPixels;        // pixels de profondeur non nuls
-        int inRange;            // ... et à une distance plausible
-        int onPlane;            // ... utilisés pour ajuster le plan d'appui
+        /* Compteurs de diagnostic. « 0 point » ne dit pas si la carte était
+           vide, si tout était hors de portée, ou si le plan d'appui était faux —
+           trois pannes qui demandent trois corrections différentes. */
+        int depthPixels;
+        int inRange;
+        int onPlane;
+        double planeRmsCm;      // planéité de la couronne : le juge du plan d'appui
     }
 
     private static final float MIN_HEIGHT_M = 0.004f;
-    private static final float MAX_HEIGHT_M = 0.30f;
+    private static final float MAX_HEIGHT_M = 0.22f;
 
-    /* Un repas se photographie de près. Large, car mieux vaut mesurer un plat
-       tenu à 80 cm que refuser tout net. */
-    private static final float MAX_DEPTH_M = 2.0f;
-    private static final float MIN_DEPTH_M = 0.08f;
+    /* Plage utile documentée par ARCore : 0,5 à 5 m. En dessous de 35 cm la
+       carte est inexploitable, et c'est précisément là qu'on tenait le téléphone
+       en croyant bien faire. */
+    private static final float MIN_DEPTH_M = 0.35f;
+    private static final float MAX_DEPTH_M = 2.5f;
+    private static final float BEST_DEPTH_MIN_M = 0.45f;
 
-    private static final float CENTER_FRACTION = 0.55f;   // zone mesurée
-    private static final float RING_FRACTION = 0.92f;     // zone servant au plan d'appui
+    private static final float CENTER_FRACTION = 0.50f;
+    private static final float RING_FRACTION = 0.94f;
 
-    /* Seuil bas : une carte de profondeur est trouée, et exiger beaucoup de
-       points revenait à refuser des mesures parfaitement exploitables. */
     private static final int MIN_SAMPLES = 60;
-    private static final int MIN_PLANE_POINTS = 80;
+    private static final int MIN_PLANE_POINTS = 150;
+
+    /* Une table est plane. Si l'ajustement laisse plus de 1,2 cm d'écart-type,
+       c'est que la couronne ne montre pas une table : assiette débordante, objets
+       autour, ou carte de profondeur trop bruitée pour être exploitée. */
+    private static final double MAX_PLANE_RMS_M = 0.012;
+    private static final double OUTLIER_M = 0.02;
+
+    /* Bornes de vraisemblance d'un repas. Ce sont elles qui auraient arrêté les
+       « 5500 cm³ » avant qu'ils n'atteignent l'écran. */
+    private static final double MIN_AREA_CM2 = 30, MAX_AREA_CM2 = 1800;
+    private static final double MIN_VOLUME_CM3 = 15, MAX_VOLUME_CM3 = 2500;
 
     static Result measure(Frame frame, Image depth, int photoWidthPx) {
         Result r = new Result();
@@ -76,9 +84,6 @@ class DepthMeasure {
         ByteBuffer raw = p0.getBuffer().order(ByteOrder.nativeOrder());
         int rowStride = p0.getRowStride();
 
-        /* Les intrinsèques décrivent l'image caméra pleine résolution ; la carte
-           de profondeur est beaucoup plus petite. Sans cette mise à l'échelle,
-           la reprojection est fausse d'un facteur 5 à 10. */
         CameraIntrinsics intr = frame.getCamera().getTextureIntrinsics();
         int[] dim = intr.getImageDimensions();
         float[] focal = intr.getFocalLength();
@@ -97,45 +102,72 @@ class DepthMeasure {
         int rx0 = (int) (dw * (1 - RING_FRACTION) / 2), rx1 = dw - rx0;
         int ry0 = (int) (dh * (1 - RING_FRACTION) / 2), ry1 = dh - ry0;
 
-        /* Ajustement du plan d'appui : z = a·x + b·y + c, par moindres carrés sur
-           la couronne. Un plan incliné est parfaitement admis — c'est le cas dès
-           que le téléphone n'est pas rigoureusement à la verticale. */
-        double s11 = 0, s12 = 0, s13 = 0, s22 = 0, s23 = 0, s33 = 0, sz = 0, sxz = 0, syz = 0;
-        int planeCount = 0;
-
+        // ---- Couronne : les points qui serviront de table ----
+        int cap = (rx1 - rx0) * (ry1 - ry0);
+        double[] px = new double[cap], py = new double[cap], pz = new double[cap];
+        int n = 0;
         for (int y = ry0; y < ry1; y++) {
             for (int x = rx0; x < rx1; x++) {
-                if (x >= cx0 && x < cx1 && y >= cy0 && y < cy1) continue;   // centre = assiette
+                if (x >= cx0 && x < cx1 && y >= cy0 && y < cy1) continue;
                 float z = depthAt(raw, rowStride, x, y);
                 if (z <= 0) continue;
                 r.depthPixels++;
                 if (z < MIN_DEPTH_M || z > MAX_DEPTH_M) continue;
                 r.inRange++;
-                double px = (x - cx) * z / fx;
-                double py = (y - cy) * z / fy;
-                s11 += px * px; s12 += px * py; s13 += px;
-                s22 += py * py; s23 += py; s33 += 1;
-                sz += z; sxz += px * z; syz += py * z;
-                planeCount++;
+                px[n] = (x - cx) * z / fx;
+                py[n] = (y - cy) * z / fy;
+                pz[n] = z;
+                n++;
             }
         }
-        r.onPlane = planeCount;
+        r.onPlane = n;
 
-        if (planeCount < MIN_PLANE_POINTS) {
+        if (n < MIN_PLANE_POINTS) {
             r.note = r.depthPixels == 0
-                ? "La carte de profondeur est vide : recule un peu et fais un léger mouvement latéral."
-                : "Pas assez de table visible autour de l'assiette (" + planeCount + " points) : recule un peu.";
+                ? "Aucune profondeur mesurée : éloigne-toi à 50-60 cm et fais un léger mouvement latéral."
+                : "Table peu visible autour de l'assiette (" + n + " points) : recule à 50-60 cm.";
             return r;
         }
 
-        double[] plane = solve3(s11, s12, s13, s12, s22, s23, s13, s23, s33, sxz, syz, sz);
+        /* Ajustement en deux temps : un premier plan sur tous les points, puis un
+           second sur les seuls points qui en sont proches. Sans cette reprise, un
+           bord d'assiette ou un verre attrapé par la couronne bascule le plan
+           entier — et toutes les hauteurs avec lui. */
+        double[] plane = fit(px, py, pz, n, null);
         if (plane == null) {
-            r.note = "Plan d'appui indéterminé : recule un peu pour voir plus de table.";
+            r.note = "Plan d'appui indéterminé : recule pour voir plus de table.";
             return r;
         }
-        double a = plane[0], b = plane[1], c = plane[2];
-        double nrm = Math.sqrt(a * a + b * b + 1);
+        boolean[] keep = new boolean[n];
+        int kept = 0;
+        double nrm = Math.sqrt(plane[0] * plane[0] + plane[1] * plane[1] + 1);
+        for (int i = 0; i < n; i++) {
+            double d = Math.abs(plane[0] * px[i] + plane[1] * py[i] + plane[2] - pz[i]) / nrm;
+            keep[i] = d < OUTLIER_M;
+            if (keep[i]) kept++;
+        }
+        if (kept >= MIN_PLANE_POINTS) {
+            double[] refined = fit(px, py, pz, n, keep);
+            if (refined != null) plane = refined;
+        }
 
+        double a = plane[0], b = plane[1], c = plane[2];
+        nrm = Math.sqrt(a * a + b * b + 1);
+
+        double sq = 0; int used = 0;
+        for (int i = 0; i < n; i++) {
+            if (kept.length == n && !keep[i]) continue;
+            double d = (a * px[i] + b * py[i] + c - pz[i]) / nrm;
+            sq += d * d; used++;
+        }
+        r.planeRmsCm = used > 0 ? Math.sqrt(sq / used) * 100 : 999;
+        if (used == 0 || r.planeRmsCm > MAX_PLANE_RMS_M * 100) {
+            r.note = "Surface d'appui non plane (±" + String.format("%.1f", r.planeRmsCm) +
+                     " cm) : pose l'assiette sur une table dégagée et recule un peu.";
+            return r;
+        }
+
+        // ---- Centre : le relief au-dessus de ce plan ----
         double volume = 0, area = 0, heightSum = 0, maxHeight = 0;
         int count = 0;
         float[] depths = new float[(cx1 - cx0) * (cy1 - cy0)];
@@ -149,24 +181,18 @@ class DepthMeasure {
                 if (z < MIN_DEPTH_M || z > MAX_DEPTH_M) continue;
                 r.inRange++;
 
-                double px = (x - cx) * z / fx;
-                double py = (y - cy) * z / fy;
-                double zPlane = a * px + b * py + c;
-
-                /* Hauteur = distance perpendiculaire au plan. Un point PLUS PRÈS
-                   de l'objectif que la table est au-dessus d'elle : d'où la
-                   soustraction dans ce sens. */
-                double h = (zPlane - z) / nrm;
+                double qx = (x - cx) * z / fx;
+                double qy = (y - cy) * z / fy;
+                // Un point PLUS PRÈS de l'objectif que la table est au-dessus d'elle.
+                double h = (a * qx + b * qy + c - z) / nrm;
                 if (h < MIN_HEIGHT_M || h > MAX_HEIGHT_M) continue;
 
-                /* Surface couverte par ce pixel, ramenée au plan de la table :
-                   un plat vu de biais serait sinon sous-compté. */
                 double pixelArea = (z / fx) * (z / fy);
-                double len = Math.sqrt(px * px + py * py + z * z);
-                double cos = len > 0 ? Math.abs((-a * px - b * py + z) / (nrm * len)) : 1;
+                double len = Math.sqrt(qx * qx + qy * qy + z * z);
+                double cos = len > 0 ? Math.abs((-a * qx - b * qy + z) / (nrm * len)) : 1;
                 if (cos < 0.10) continue;
-                double flatArea = pixelArea / cos;
 
+                double flatArea = pixelArea / cos;
                 volume += h * flatArea;
                 area += flatArea;
                 heightSum += h;
@@ -178,21 +204,37 @@ class DepthMeasure {
 
         if (count < MIN_SAMPLES) {
             r.samples = count;
-            r.note = "Aucun relief détecté au centre (" + count + " points sur " + r.inRange +
-                     " mesurés) : centre bien l'assiette dans l'image.";
+            r.note = "Aucun relief au centre (" + count + " points) : centre l'assiette dans le cadre.";
             return r;
         }
 
         float median = median(depths, depthCount);
+        double volumeCm3 = volume * 1e6;
+        double areaCm2 = area * 1e4;
+
+        /* Dernier filtre : la vraisemblance. Une assiette de repas tient dans
+           quelques centaines de cm³ ; au-delà, ce n'est pas un plat copieux,
+           c'est un plan d'appui faux. */
+        if (areaCm2 < MIN_AREA_CM2 || areaCm2 > MAX_AREA_CM2 ||
+            volumeCm3 < MIN_VOLUME_CM3 || volumeCm3 > MAX_VOLUME_CM3) {
+            r.samples = count;
+            r.note = "Mesure invraisemblable (" + Math.round(volumeCm3) + " cm³ sur " +
+                     Math.round(areaCm2) + " cm²) : recule à 50-60 cm et recadre sur l'assiette seule.";
+            return r;
+        }
+
         r.ok = true;
         r.samples = count;
-        r.volumeCm3 = volume * 1e6;
-        r.areaCm2 = area * 1e4;
+        r.volumeCm3 = volumeCm3;
+        r.areaCm2 = areaCm2;
         r.heightMaxCm = maxHeight * 100;
         r.heightMeanCm = (heightSum / count) * 100;
         r.distanceCm = median * 100;
         float fxPhoto = focal[0] * ((float) photoWidthPx / dim[0]);
         r.cmPerPixel = fxPhoto > 0 ? (median / fxPhoto) * 100 : 0;
+        if (median < BEST_DEPTH_MIN_M) {
+            r.note = "Un peu près (" + Math.round(median * 100) + " cm) : à 50-60 cm la mesure est plus sûre.";
+        }
         return r;
     }
 
@@ -200,10 +242,8 @@ class DepthMeasure {
      * Profondeur en mètres, ou 0 si le pixel n'a pas de mesure.
      *
      * Aucun masquage de bits : contrairement au format DEPTH16 d'Android, où les
-     * trois bits de poids fort portent une confiance, l'image rendue par
-     * acquireDepthImage16Bits() d'ARCore contient la distance en millimètres sur
-     * les seize bits. Masquer sur treize bits plafonnerait la mesure à 8,19 m et
-     * corromprait toute valeur au-delà.
+     * trois bits de poids fort portent une confiance, l'image d'ARCore contient
+     * la distance en millimètres sur les seize bits.
      */
     private static float depthAt(ByteBuffer raw, int rowStride, int x, int y) {
         int offset = y * rowStride + x * 2;
@@ -212,7 +252,21 @@ class DepthMeasure {
         return mm <= 0 ? 0 : mm / 1000f;
     }
 
-    /** Résolution d'un système 3×3 symétrique par élimination de Gauss. */
+    /** Plan z = a·x + b·y + c par moindres carrés, éventuellement restreint. */
+    private static double[] fit(double[] px, double[] py, double[] pz, int n, boolean[] keep) {
+        double s11 = 0, s12 = 0, s13 = 0, s22 = 0, s23 = 0, s33 = 0, sz = 0, sxz = 0, syz = 0;
+        for (int i = 0; i < n; i++) {
+            if (keep != null && !keep[i]) continue;
+            double x = px[i], y = py[i], z = pz[i];
+            s11 += x * x; s12 += x * y; s13 += x;
+            s22 += y * y; s23 += y; s33 += 1;
+            sxz += x * z; syz += y * z; sz += z;
+        }
+        if (s33 < 3) return null;
+        return solve3(s11, s12, s13, s12, s22, s23, s13, s23, s33, sxz, syz, sz);
+    }
+
+    /** Résolution d'un système 3×3 par élimination de Gauss avec pivot partiel. */
     private static double[] solve3(double m11, double m12, double m13,
                                    double m21, double m22, double m23,
                                    double m31, double m32, double m33,
