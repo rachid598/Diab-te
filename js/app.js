@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '46'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '47'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -2519,7 +2519,14 @@
 
      Les points 2 et 3 doivent être déclenchés DANS le geste utilisateur, d'où
      l'absence de toute attente avant l'appel. */
+  /* Renseignés par saveTextFile pour que le message final puisse nommer
+     l'endroit réellement utilisé, ou l'erreur rencontrée. */
+  var lastSavePath = '';
+  var lastSaveError = '';
+
   function saveTextFile(name, content, mime, title) {
+    lastSavePath = '';
+    lastSaveError = '';
     function fallback() {
       var a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([content], { type: mime }));
@@ -2550,8 +2557,17 @@
     }
 
     if (Native.isApp) {
-      return Native.shareFile(name, content, title).then(function (ok) {
-        return ok ? 'partage' : fallback();
+      return Native.shareFile(name, content, title).then(function (r) {
+        if (r && r.ok) return r.cancelled ? 'annule' : 'partage';
+        /* La feuille de partage a échoué. Plutôt que de laisser le bouton sans
+           effet, on écrit le fichier dans un dossier visible et on dit lequel,
+           en gardant l'erreur d'origine pour qu'elle soit rapportable. */
+        lastSaveError = (r && r.error) || '';
+        return Native.saveToDocuments(name, content).then(function (saved) {
+          if (!saved) return fallback();
+          lastSavePath = saved.uri || '';
+          return 'documents';
+        });
       });
     }
 
@@ -2595,6 +2611,9 @@
         // message doit donc constater, pas donner une consigne déjà exécutée.
         var ou = mode === 'partage' ? 'Envoyée à la destination choisie.'
                : mode === 'enregistre' ? 'Enregistrée à l\'emplacement choisi.'
+               : mode === 'documents' ? 'Partage indisponible' +
+                   (lastSaveError ? ' (' + lastSaveError + ')' : '') +
+                   ' — fichier écrit ici : ' + lastSavePath
                : 'Téléchargée dans le dossier de téléchargements.';
         toast((payload.containsApiKeys
           ? '🔑 Sauvegarde AVEC tes clés API — ne la partage pas, ne l\'envoie pas par mail. '
@@ -3048,7 +3067,9 @@
 
       saveTextFile(name, r.html, 'text/html', title).then(function (mode) {
         if (mode === 'annule' || mode === 'partage') return;
-        toast(mode === 'enregistre' ? 'Synthèse enregistrée.' : 'Synthèse téléchargée.');
+        toast(mode === 'enregistre' ? 'Synthèse enregistrée.'
+            : mode === 'documents' ? 'Partage indisponible — synthèse écrite ici : ' + lastSavePath
+            : 'Synthèse téléchargée.');
       });
     });
   }
