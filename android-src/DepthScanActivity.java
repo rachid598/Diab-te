@@ -71,6 +71,9 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
        sans rien coûter à l'utilisateur, qui appuie une seule fois. */
     private static final int CAPTURE_FRAMES = 7;
 
+    /* Largeur de reference des mesures d'apercu ; l'echelle finale s'y ramene. */
+    private static final int PREVIEW_WIDTH_PX = 640;
+
     /* Le relief n'est proposé qu'après STABLE_WINDOW mesures consécutives dont
        les volumes ne s'écartent pas de plus de STABLE_TOLERANCE. */
     private static final int STABLE_WINDOW = 4;
@@ -356,7 +359,7 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
             } catch (Exception ignored) { /* sans confiance, on mesure quand même */ }
             depthIsFresh = depth.getTimestamp() == frame.getTimestamp();
             rawCenter = DepthMeasure.rawCenter(depth, confidence);
-            return DepthMeasure.measure(frame, depth, confidence, 640);
+            return DepthMeasure.measure(frame, depth, confidence, PREVIEW_WIDTH_PX);
         } catch (Exception e) {
             return null;
         } finally {
@@ -389,7 +392,7 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
             if (jpeg == null) { failOnUi("Image caméra illisible."); return; }
             int width = decodedWidth(jpeg);
 
-            DepthMeasure.Result best = medianResult(width, frame);
+            DepthMeasure.Result best = medianResult(width);
 
             /* La photo est renvoyée même quand la profondeur échoue : elle reste
                parfaitement utilisable par le chemin normal, et jeter la prise de
@@ -421,7 +424,7 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
      * volume, hauteur et échelle restent cohérents entre eux — ils décrivent
      * alors tous la même image, et non un mélange de plusieurs.
      */
-    private DepthMeasure.Result medianResult(int photoWidthPx, Frame frame) {
+    private DepthMeasure.Result medianResult(int photoWidthPx) {
         List<DepthMeasure.Result> ok = new ArrayList<>();
         DepthMeasure.Result lastFailure = null;
         synchronized (burst) {
@@ -433,16 +436,13 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
         Collections.sort(ok, (p, q) -> Double.compare(p.volumeCm3, q.volumeCm3));
         DepthMeasure.Result chosen = ok.get(ok.size() / 2);
 
-        /* Les mesures d'aperçu ont été calculées avec une largeur de photo par
-           défaut : l'échelle est rapportée ici à la vraie largeur du JPEG. */
-        Image depth = null;
-        try {
-            depth = frame.acquireDepthImage16Bits();
-            DepthMeasure.Result exact = DepthMeasure.measure(frame, depth, photoWidthPx);
-            if (exact.ok) chosen.cmPerPixel = exact.cmPerPixel;
-        } catch (Exception ignored) {
-        } finally {
-            if (depth != null) depth.close();
+        /* Les mesures d'aperçu ont été calculées pour une largeur de photo de
+           référence. L'échelle étant inversement proportionnelle au nombre de
+           pixels, une simple règle de trois la rapporte à la vraie largeur du
+           JPEG — refaire une mesure complète pour cela dupliquerait le calcul
+           sur une image différente de celle qui a été retenue. */
+        if (photoWidthPx > 0) {
+            chosen.cmPerPixel = chosen.cmPerPixel * PREVIEW_WIDTH_PX / photoWidthPx;
         }
         return chosen;
     }
