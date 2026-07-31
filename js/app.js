@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '45'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '46'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -2502,16 +2502,23 @@
 
   /* ---------- Écriture d'un fichier vers l'extérieur ----------
 
-     Trois chemins, du meilleur au pire, parce qu'aucun n'existe partout :
+     Quatre chemins, parce qu'aucun n'existe partout, et surtout parce que le
+     mobile et le bureau n'ont pas la même API pour la même intention :
 
-     1. APK → feuille de partage Android. C'est elle qui laisse choisir la
-        destination (Fichiers, Drive, mail…). Sans elle, l'ancre <a download>
-        d'une WebView écrit dans un dossier interne que le gestionnaire de
-        fichiers ne montre pas : le fichier existe, mais reste introuvable.
-     2. Navigateur avec showSaveFilePicker → vraie boîte « Enregistrer sous ».
-        Doit être appelé DANS le geste utilisateur, d'où l'absence d'await
-        avant l'appel.
-     3. Repli <a download> pour les navigateurs sans l'API. */
+     1. APK → feuille de partage Android (Fichiers, Drive, mail…). Sans elle,
+        l'ancre <a download> d'une WebView écrit dans un dossier interne que le
+        gestionnaire de fichiers ne montre pas : le fichier existe, mais reste
+        introuvable.
+     2. Bureau → showSaveFilePicker, vraie boîte « Enregistrer sous ». L'API
+        n'existe QUE sur les navigateurs de bureau : sur Chrome Android elle est
+        absente, ce qui faisait retomber la PWA du téléphone sur un
+        téléchargement silencieux — sans invite, exactement le symptôme d'origine.
+     3. Mobile → partage Web avec fichier. C'est l'équivalent mobile du point 2 :
+        la feuille de partage d'Android propose « Enregistrer dans Fichiers ».
+     4. Repli <a download>.
+
+     Les points 2 et 3 doivent être déclenchés DANS le geste utilisateur, d'où
+     l'absence de toute attente avant l'appel. */
   function saveTextFile(name, content, mime, title) {
     function fallback() {
       var a = document.createElement('a');
@@ -2522,6 +2529,24 @@
       document.body.removeChild(a);
       setTimeout(function () { URL.revokeObjectURL(a.href); }, 30000);
       return Promise.resolve('telecharge');
+    }
+
+    /* Partage Web : seulement si le navigateur accepte CE fichier. canShare()
+       sans argument répondrait oui pour du texte seul, et share() échouerait
+       ensuite sur la pièce jointe. */
+    function webShare() {
+      if (typeof File !== 'function' || !navigator.share || !navigator.canShare) return null;
+      var file;
+      try {
+        file = new File([content], name, { type: mime });
+      } catch (e) { return null; }
+      if (!navigator.canShare({ files: [file] })) return null;
+      return navigator.share({ files: [file], title: title || name })
+        .then(function () { return 'partage'; })
+        .catch(function (err) {
+          if (err && err.name === 'AbortError') return 'annule';
+          return fallback();
+        });
     }
 
     if (Native.isApp) {
@@ -2547,7 +2572,7 @@
         });
     }
 
-    return fallback();
+    return webShare() || fallback();
   }
 
   // ---------- Sauvegarde / restauration ----------
@@ -2566,7 +2591,9 @@
       saveTextFile(name, JSON.stringify(payload, null, 2), 'application/json',
                    'Sauvegarde GlucoVision').then(function (mode) {
         if (mode === 'annule') return;
-        var ou = mode === 'partage' ? 'Choisis où la ranger dans la feuille de partage.'
+        // Les trois chemins résolvent APRÈS le choix de l'utilisateur : le
+        // message doit donc constater, pas donner une consigne déjà exécutée.
+        var ou = mode === 'partage' ? 'Envoyée à la destination choisie.'
                : mode === 'enregistre' ? 'Enregistrée à l\'emplacement choisi.'
                : 'Téléchargée dans le dossier de téléchargements.';
         toast((payload.containsApiKeys
