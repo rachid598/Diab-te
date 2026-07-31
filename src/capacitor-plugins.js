@@ -6,7 +6,7 @@
    Ce fichier se charge aussi dans la PWA, sans danger : hors de l'APK,
    Capacitor.isNativePlatform() renvoie false et js/native.js n'appelle
    simplement aucun plugin. */
-import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { Capacitor, CapacitorHttp, registerPlugin } from '@capacitor/core';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Preferences } from '@capacitor/preferences';
@@ -16,8 +16,15 @@ import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import { Share } from '@capacitor/share';
 import { App } from '@capacitor/app';
 
+/* DepthScan est écrit dans le projet Android lui-même (android-src/), pas
+   distribué en paquet npm : il n'y a donc rien à importer, seulement un proxy à
+   déclarer. registerPlugin fonctionne aussi sur le web — l'appel échouerait à
+   l'exécution, mais js/native.js ne s'en sert que si isNativePlatform(). */
+const DepthScan = registerPlugin('DepthScan');
+
 window.Cap = {
   Capacitor: Capacitor,
+  DepthScan: DepthScan,
   CapacitorHttp: CapacitorHttp,
   Camera: Camera,
   CameraResultType: CameraResultType,

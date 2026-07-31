@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '44'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '45'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -15,6 +15,9 @@
   var currentHistoryPhotoStarted = false;
   var lastEstimateContext = null;
   var lastVerification = null;
+  /* Dernière mesure de relief réussie. Elle accompagne la photo prise par le
+     scanner ARCore et n'a de sens que pour elle : effacer les photos l'efface. */
+  var lastDepth = null;
   var estimateGeneration = 0;
 
   // ---------- Utilitaires d'affichage ----------
@@ -415,6 +418,57 @@
     });
   }
 
+  /* ---------- Mesure du relief (ARCore) ----------
+     Le bouton n'apparaît que si l'appareil sait le faire. Le montrer partout
+     pour l'expliquer ensuite ne servirait qu'à promettre ce qu'on ne peut pas
+     tenir. */
+  function initDepth() {
+    var btn = $('btn-depth');
+    if (!btn || !Native.isApp) return;
+
+    Native.depth.available().then(function (a) {
+      if (!a || !a.supported) return;
+      btn.hidden = false;
+      btn.addEventListener('click', function () {
+        if (images.length >= Camera.MAX_ANGLES) { toast('Maximum ' + Camera.MAX_ANGLES + ' vues.'); return; }
+        btn.disabled = true;
+        Native.depth.capture().then(function (r) {
+          btn.disabled = false;
+          if (!r) return;                                  // annulé
+          if (r.error) { toast('Relief : ' + r.error); return; }
+          lastDepth = r.depth && r.depth.ok ? r.depth : null;
+          renderDepthResult(r.depth);
+          addDataUrls([r.dataUrl]);
+        }).catch(function (e) {
+          btn.disabled = false;
+          toast('Relief indisponible : ' + ((e && e.message) || 'erreur'));
+        });
+      });
+    });
+  }
+
+  function renderDepthResult(d) {
+    var el = $('depth-result');
+    if (!el) return;
+    if (!d) { el.hidden = true; return; }
+    el.hidden = false;
+    if (!d.ok) {
+      el.className = 'depth-result d-warn';
+      el.innerHTML = '📐 <strong>Relief non mesuré</strong> — ' +
+        escapeHtml(d.note || 'la carte de profondeur n\'a rien donné.') +
+        '<br>La photo reste utilisable : l\'estimation se fera sans le volume.';
+      return;
+    }
+    el.className = 'depth-result d-ok';
+    el.innerHTML = '📐 <strong>Relief mesuré</strong> — volume au-dessus de la table ' +
+      '<strong>' + Math.round(d.volumeCm3) + ' cm³</strong>, hauteur max ' +
+      fr(Math.round(d.heightMaxCm * 10) / 10) + ' cm, sur ' + Math.round(d.areaCm2) + ' cm². ' +
+      'Échelle ' + fr(Math.round(d.cmPerPixel * 10000) / 10000) + ' cm/pixel à ' +
+      Math.round(d.distanceCm) + ' cm.' +
+      '<br><span class="tiny">Ce volume inclut l\'assiette et son rebord : c\'est un majorant, ' +
+      'transmis comme tel au modèle.</span>';
+  }
+
   function initPhotos() {
     initNativePhotoButtons();
     $('camera-input').addEventListener('change', function (e) {
@@ -430,7 +484,8 @@
       e.target.value = '';
     });
     $('clear-photos').addEventListener('click', function () {
-      images = []; renderThumbs(); updateEstimateBtn();
+      images = []; lastDepth = null; renderDepthResult(null);
+      renderThumbs(); updateEstimateBtn();
     });
     $('reference-object').addEventListener('change', function (e) {
       $('plate-diameter-wrap').hidden = e.target.value !== 'assiette';
@@ -469,7 +524,9 @@
       plateDiameterCm: $('plate-diameter').value ? parseFloat($('plate-diameter').value) : null,
       notes: $('user-notes').value,
       extras: extrasText(),       // dessert / boisson, absents de la photo
-      imageCount: sent.length     // 0 fait basculer l'estimateur en mode description
+      imageCount: sent.length,    // 0 fait basculer l'estimateur en mode description
+      // Mesure ARCore, si la photo vient du scanner de relief.
+      depth: (!textOnly && lastDepth) ? lastDepth : null
     };
     lastEstimateContext = Object.assign({}, ctx);
 
@@ -591,7 +648,8 @@
               plateDiameterCm: item.ctx.plateDiameterCm || null,
               notes: item.ctx.notes || '',
               extras: item.ctx.extras || '',
-              imageCount: item.ctx.imageCount || 0
+              imageCount: item.ctx.imageCount || 0,
+              depth: item.ctx.depth || null
             } : null,
             items: result.items.map(function (it) {
               return { name: it.name, carbsG: it.carbsG,
@@ -1522,7 +1580,10 @@
         plateDiameterCm: lastEstimateContext.plateDiameterCm || null,
         notes: lastEstimateContext.notes || '',
         extras: lastEstimateContext.extras || '',
-        imageCount: lastEstimateContext.imageCount || 0
+        imageCount: lastEstimateContext.imageCount || 0,
+        /* Conservé pour le banc d'essai : rejouer un repas mesuré au capteur
+           sans sa mesure comparerait deux choses différentes. */
+        depth: lastEstimateContext.depth || null
       } : null,
       /* On garde la portion et l'origine de chaque aliment : c'est ce qui rend
          le détail de l'historique consultable des semaines plus tard. Ce sont
@@ -3200,6 +3261,7 @@
     initSafetyBanner();
     initTabs();
     initPhotos();
+    initDepth();
     initModeSwitch();
     initExtras();
     initEstimate();

@@ -17,6 +17,7 @@ on:
       - 'capacitor.config.json'
       - 'package.json'
       - 'scripts/**'
+      - 'android-src/**'
       - '.github/workflows/android.yml'
 
 # Nécessaire pour publier l'APK et le bundle de mise à jour dans des releases.
@@ -183,6 +184,50 @@ jobs:
           print('raccourcis declares')
           PY
           grep -n 'android.app.shortcuts' "$MANIFEST"
+
+      # Mesure de profondeur ARCore. Le projet Android étant régénéré à chaque
+      # build par « cap add android », les sources natives vivent dans
+      # android-src/ et sont recopiées ici. MainActivity est remplacé : un plugin
+      # déclaré dans le projet de l'app n'est pas découvert automatiquement, il
+      # faut l'enregistrer avant super.onCreate().
+      - name: Injecter le plugin de profondeur (ARCore)
+        run: |
+          PKG=android/app/src/main/java/io/github/rachid598/glucovision
+          test -d "$PKG" || { echo "::error::Paquet Java introuvable : $PKG"; find android/app/src/main/java -type d; exit 1; }
+          cp android-src/*.java "$PKG"/
+          ls -1 "$PKG"
+
+          GRADLE=android/app/build.gradle
+          if ! grep -q 'com.google.ar:core' "$GRADLE"; then
+            perl -0pi -e 's{(dependencies \{)}{$1\n    implementation "com.google.ar:core:1.54.0"}' "$GRADLE"
+          fi
+          grep -n 'com.google.ar:core' "$GRADLE"
+
+          # « optional » et non « required » : l'APK doit rester installable et
+          # utilisable sur un appareil sans ARCore, la mesure n'étant qu'un plus.
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          python3 - "$MANIFEST" <<'PY'
+          import re, sys
+          path = sys.argv[1]
+          s = open(path, encoding='utf-8').read()
+          if 'com.google.ar.core' not in s:
+              entry = ('\n        <meta-data android:name="com.google.ar.core" android:value="optional" />\n')
+              m = re.search(r'(<application\b[^>]*>)', s)
+              if not m:
+                  sys.exit('balise <application> introuvable')
+              s = s[:m.end(1)] + entry + s[m.end(1):]
+          if 'DepthScanActivity' not in s:
+              act = ('\n        <activity\n'
+                     '            android:name=".DepthScanActivity"\n'
+                     '            android:exported="false"\n'
+                     '            android:screenOrientation="portrait"\n'
+                     '            android:configChanges="orientation|screenSize|keyboardHidden" />\n')
+              m = re.search(r'(</application>)', s)
+              s = s[:m.start(1)] + act + s[m.start(1):]
+          open(path, 'w', encoding='utf-8').write(s)
+          print('manifeste ARCore mis a jour')
+          PY
+          grep -n 'com.google.ar.core\|DepthScanActivity' "$MANIFEST"
 
       - name: Compiler l'APK
         run: |

@@ -146,7 +146,14 @@
     if (!ctx.imageCount) return buildTextPrompt(ctx);
 
     var lines = ['Analyse ce repas et estime les glucides selon la méthode.'];
-    if (ctx.referenceObject && ctx.referenceObject !== 'none') {
+    /* Une mesure au capteur rend le bloc « objet-repère » caduc : garder les
+       deux ferait cohabiter une échelle mesurée et une consigne de l'estimer,
+       et surtout laisserait la consigne « baisse la confiance » contredire une
+       mesure physique. */
+    var measured = !!(ctx.depth && ctx.depth.ok);
+    if (measured) {
+      // rien ici : le bloc de mesure ci-dessous porte l'échelle et la hauteur
+    } else if (ctx.referenceObject && ctx.referenceObject !== 'none') {
       var ref = ctx.referenceObject;
       if (ctx.plateDiameterCm) {
         ref = 'assiette de ' + ctx.plateDiameterCm + ' cm de diamètre';
@@ -164,9 +171,36 @@
     } else {
       lines.push('Aucun objet-repère : estime l\'échelle via l\'assiette/les couverts et baisse la confiance.');
     }
+    /* Mesure ARCore : de la géométrie, pas une estimation. On la place APRÈS le
+       bloc repère parce qu'elle le remplace quand elle existe — et on dit
+       explicitement ce qu'elle ne couvre pas, sinon le modèle prendrait le
+       volume total pour celui des seuls aliments et gonflerait les portions. */
+    var d = ctx.depth;
+    if (d && d.ok) {
+      lines.push('');
+      lines.push('MESURE PHYSIQUE PAR CAPTEUR DE PROFONDEUR (fiable, ce ne sont pas des estimations) :');
+      lines.push('- échelle réelle : ' + d.cmPerPixel.toFixed(4) + ' cm par pixel de cette image ;');
+      lines.push('- volume total au-dessus du plan de la table : ' + Math.round(d.volumeCm3) + ' cm³ ;');
+      lines.push('- surface occupée : ' + Math.round(d.areaCm2) + ' cm² ;');
+      lines.push('- hauteur maximale : ' + d.heightMaxCm.toFixed(1) + ' cm, hauteur moyenne : ' +
+                 d.heightMeanCm.toFixed(1) + ' cm.');
+      lines.push('Sers-t\'en ainsi :');
+      lines.push('- l\'échelle REMPLACE toute estimation de taille : mesure les aliments dessus ;');
+      lines.push('- la hauteur est MESURÉE, donc la 3ᵉ dimension n\'est plus une inconnue :');
+      lines.push('  ne gonfle pas la fourchette pour elle (voir B et E).');
+      lines.push('⚠️ Ce volume est un MAJORANT du volume des aliments : le capteur mesure tout');
+      lines.push('le relief au-dessus de la table, donc l\'assiette et son rebord y sont inclus.');
+      lines.push('Déduis-en l\'épaisseur du contenant avant de répartir le volume entre les');
+      lines.push('aliments, et dis dans "assumptions" ce que tu as retiré pour l\'assiette.');
+      lines.push('⚠️ Le capteur ne voit que les surfaces visibles : ce qui est noyé sous une');
+      lines.push('sauce ou caché sous un autre aliment n\'est PAS dans ce volume.');
+    } else if (d && d.note) {
+      lines.push('Une mesure de profondeur a été tentée sans succès (' + d.note + ') :');
+      lines.push('rien à en tirer, procède normalement.');
+    }
     if (ctx.imageCount > 1) {
       lines.push('Il y a ' + ctx.imageCount + ' angles du MÊME repas : croise-les pour le volume (hauteur incluse).');
-    } else {
+    } else if (!measured) {
       lines.push('Une seule vue : tu ne vois pas directement la hauteur/épaisseur — estime-la et');
       lines.push('signale-la comme seule inconnue géométrique (une photo de côté la lèverait).');
     }
