@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '49'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '50'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -456,7 +456,9 @@
       el.className = 'depth-result d-warn';
       el.innerHTML = '📐 <strong>Relief non mesuré</strong> — ' +
         escapeHtml(d.note || 'la carte de profondeur n\'a rien donné.') +
-        '<br>La photo reste utilisable : l\'estimation se fera sans le volume.';
+        '<br>La photo reste utilisable : l\'estimation se fera sans le volume.' +
+        '<br><span class="tiny">ARCore n\'est précis qu\'à partir de 50 cm : trop près, ' +
+        'la mesure est fausse plutôt qu\'absente.</span>';
       return;
     }
     el.className = 'depth-result d-ok';
