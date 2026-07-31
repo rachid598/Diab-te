@@ -90,6 +90,7 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
     private boolean capturing = false;
     private int sensorOrientation = 90;
     private long lastLiveMeasure = 0;
+    private double rawCenterCm = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -299,7 +300,8 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
         DepthMeasure.Result r = measureOnce(frame);
         if (r == null) {
             recent.clear();
-            setStatus("Carte de profondeur en préparation… fais un petit mouvement latéral.", false);
+            setStatus("Carte de profondeur en préparation… fais un petit mouvement latéral.",
+                      false, "aucune carte");
             return;
         }
         if (!r.ok) {
@@ -339,6 +341,7 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
         Image depth = null;
         try {
             depth = frame.acquireDepthImage16Bits();
+            rawCenterCm = DepthMeasure.rawCenterCm(depth);
             return DepthMeasure.measure(frame, depth, 640);
         } catch (Exception e) {
             return null;
@@ -440,7 +443,9 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
     private void setStatus(String message, boolean depthReady, String diagLine) {
         runOnUiThread(() -> {
             status.setText(message);
-            if (diagLine != null) debug.setText(diagLine);
+            if (diagLine != null) {
+                debug.setText("centre brut " + Math.round(rawCenterCm) + " cm  |  " + diagLine);
+            }
             if (!capturing) {
                 shoot.setEnabled(true);
                 shoot.setText(depthReady ? "Capturer avec le relief" : "Capturer la photo seule");
