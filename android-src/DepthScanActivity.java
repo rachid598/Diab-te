@@ -90,7 +90,8 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
     private boolean capturing = false;
     private int sensorOrientation = 90;
     private long lastLiveMeasure = 0;
-    private double rawCenterCm = 0;
+    private String rawCenter = "-";
+    private boolean depthIsFresh = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -127,7 +128,8 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
         status.setTextSize(15f);
         status.setGravity(Gravity.CENTER);
         status.setShadowLayer(6f, 0f, 2f, Color.BLACK);
-        status.setText("Tiens le téléphone À PLAT au-dessus de l'assiette,\nécran horizontal, à 50-60 cm.");
+        status.setText("Tiens le téléphone À PLAT au-dessus de l'assiette, à 50-60 cm,\n"
+                + "et BALAYE lentement : la profondeur se construit par le mouvement.");
         panel.addView(status);
 
         /* Nombres bruts affichés en permanence, y compris quand la mesure
@@ -300,8 +302,8 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
         DepthMeasure.Result r = measureOnce(frame);
         if (r == null) {
             recent.clear();
-            setStatus("Carte de profondeur en préparation… fais un petit mouvement latéral.",
-                      false, "aucune carte");
+            setStatus("Profondeur en préparation… balaye lentement le téléphone de gauche à droite.",
+                      false, "aucune carte brute");
             return;
         }
         if (!r.ok) {
@@ -315,7 +317,7 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
 
         if (!stable()) {
             setStatus("Mesure en cours : " + Math.round(r.volumeCm3) + " cm³ à "
-                    + Math.round(r.distanceCm) + " cm.\nTiens le téléphone immobile, le chiffre doit se stabiliser.",
+                    + Math.round(r.distanceCm) + " cm.\nContinue à balayer doucement, le chiffre va se stabiliser.",
                     false, r.diag);
             return;
         }
@@ -337,15 +339,28 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
     }
 
     /** Mesure sur une image, ou null si la profondeur n'est pas encore là. */
+    /* Profondeur BRUTE et non lissée, accompagnée de sa carte de confiance.
+
+       Le mode lissé (acquireDepthImage16Bits) remplit chaque pixel, y compris
+       là où rien n'a été mesuré : il interpole. Sur une table unie, sans grain à
+       suivre, il produisait donc une valeur plausible et fausse — 173 cm pour
+       52 cm réels — sans jamais signaler qu'elle était inventée. Le mode brut
+       laisse ces pixels vides et fournit, pixel par pixel, une confiance de 0 à
+       255 : on ne garde que ce qui a réellement été vu. */
     private DepthMeasure.Result measureOnce(Frame frame) {
-        Image depth = null;
+        Image depth = null, confidence = null;
         try {
-            depth = frame.acquireDepthImage16Bits();
-            rawCenterCm = DepthMeasure.rawCenterCm(depth);
-            return DepthMeasure.measure(frame, depth, 640);
+            depth = frame.acquireRawDepthImage16Bits();
+            try {
+                confidence = frame.acquireRawDepthConfidenceImage();
+            } catch (Exception ignored) { /* sans confiance, on mesure quand même */ }
+            depthIsFresh = depth.getTimestamp() == frame.getTimestamp();
+            rawCenter = DepthMeasure.rawCenter(depth, confidence);
+            return DepthMeasure.measure(frame, depth, confidence, 640);
         } catch (Exception e) {
             return null;
         } finally {
+            if (confidence != null) confidence.close();
             if (depth != null) depth.close();
         }
     }
@@ -444,7 +459,8 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
         runOnUiThread(() -> {
             status.setText(message);
             if (diagLine != null) {
-                debug.setText("centre brut " + Math.round(rawCenterCm) + " cm  |  " + diagLine);
+                debug.setText("centre " + rawCenter + (depthIsFresh ? "" : " [carte ancienne]")
+                        + "  |  " + diagLine);
             }
             if (!capturing) {
                 shoot.setEnabled(true);

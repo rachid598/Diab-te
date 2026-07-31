@@ -44,6 +44,7 @@ class DepthMeasure {
            trois pannes qui demandent trois corrections différentes. */
         int depthPixels;
         int inRange;
+        int confident;   // pixels dont la profondeur est REELLEMENT mesuree
         int onPlane;
         double planeRmsCm;      // planéité de la couronne : le juge du plan d'appui
         double tiltDeg;         // inclinaison du téléphone par rapport à la table
@@ -60,7 +61,7 @@ class DepthMeasure {
         double fovCm = fx > 0 ? r.distanceCm * dw / fx : 0;
         return "carte " + dw + "x" + dh + " f=" + Math.round(fx) + "/" + Math.round(fy) +
                " dist " + Math.round(r.distanceCm) + "cm champ " + Math.round(fovCm) + "cm" +
-               " px " + r.depthPixels + " plan " + r.onPlane +
+               " px " + r.depthPixels + " sur " + r.confident + " fiables plan " + r.onPlane +
                " ecart " + String.format("%.1f", r.planeRmsCm) + "cm" +
                " incl " + Math.round(r.tiltDeg) + "deg";
     }
@@ -77,6 +78,13 @@ class DepthMeasure {
 
     private static final float CENTER_FRACTION = 0.50f;
     private static final float RING_FRACTION = 0.94f;
+
+    /* Seuil de confiance, sur 255. La documentation d'ARCore est explicite :
+       « les surfaces texturees donnent une confiance elevee, tandis que les
+       regions non texturees enregistrent typiquement une confiance de zero ».
+       Une table en bois clair et unie en fait partie — et c'est precisement la
+       que le mode lisse inventait 173 cm pour 52 cm reels. */
+    private static final int MIN_CONFIDENCE = 100;
 
     private static final int MIN_SAMPLES = 60;
     private static final int MIN_PLANE_POINTS = 150;
@@ -108,19 +116,24 @@ class DepthMeasure {
         filtre : c'est la valeur telle qu'ARCore la donne, pour pouvoir la
         confronter a un metre ruban. Sans ce point de comparaison, impossible de
         distinguer une carte de profondeur fausse d'un calcul qui la deforme. */
-    static double rawCenterCm(Image depth) {
+    static String rawCenter(Image depth, Image confidence) {
         try {
             Image.Plane p0 = depth.getPlanes()[0];
             ByteBuffer raw = p0.getBuffer().order(ByteOrder.nativeOrder());
             int x = depth.getWidth() / 2, y = depth.getHeight() / 2;
             float z = depthAt(raw, p0.getRowStride(), x, y);
-            return z * 100;
+            int c = 255;
+            if (confidence != null) {
+                Image.Plane c0 = confidence.getPlanes()[0];
+                c = confidenceAt(c0.getBuffer().order(ByteOrder.nativeOrder()), c0.getRowStride(), x, y);
+            }
+            return Math.round(z * 100) + " cm (conf " + c + "/255)";
         } catch (Exception e) {
-            return 0;
+            return "-";
         }
     }
 
-    static Result measure(Frame frame, Image depth, int photoWidthPx) {
+    static Result measure(Frame frame, Image depth, Image confidence, int photoWidthPx) {
         Result r = new Result();
 
         int dw = depth.getWidth();
@@ -128,6 +141,18 @@ class DepthMeasure {
         Image.Plane p0 = depth.getPlanes()[0];
         ByteBuffer raw = p0.getBuffer().order(ByteOrder.nativeOrder());
         int rowStride = p0.getRowStride();
+
+        /* Carte de confiance, alignee pixel a pixel sur la profondeur brute.
+           Sans elle, rien ne distingue une distance mesuree d'une distance
+           inventee : c'est tout le probleme du mode lisse, qui remplit les
+           surfaces sans texture par interpolation et ne le signale nulle part. */
+        ByteBuffer conf = null;
+        int confStride = 0;
+        if (confidence != null) {
+            Image.Plane c0 = confidence.getPlanes()[0];
+            conf = c0.getBuffer().order(ByteOrder.nativeOrder());
+            confStride = c0.getRowStride();
+        }
 
         /* getImageIntrinsics et NON getTextureIntrinsics. Les premières décrivent
            l'image CPU de la caméra, à laquelle la carte de profondeur est
@@ -178,6 +203,8 @@ class DepthMeasure {
                 float z = depthAt(raw, rowStride, x, y);
                 if (z <= 0) continue;
                 r.depthPixels++;
+                if (confidenceAt(conf, confStride, x, y) < MIN_CONFIDENCE) continue;
+                r.confident++;
                 if (z < MIN_DEPTH_M || z > MAX_DEPTH_M) continue;
                 r.inRange++;
                 px[n] = (x - cx) * z / fx;
@@ -194,9 +221,11 @@ class DepthMeasure {
         }
 
         if (n < MIN_PLANE_POINTS) {
-            r.note = r.depthPixels == 0
-                ? "Aucune profondeur mesurée : éloigne-toi à 50-60 cm et fais un léger mouvement latéral."
-                : "Table peu visible autour de l'assiette (" + n + " points) : recule à 50-60 cm.";
+            r.note = r.confident == 0
+                ? "Surface sans relief visible : ARCore ne mesure que ce qui a du grain. "
+                  + "Balaye lentement le téléphone au-dessus, ou pose un torchon à motifs sous l'assiette."
+                : "Pas assez de points fiables autour de l'assiette (" + n + ") : "
+                  + "balaye lentement de gauche à droite.";
             r.diag = diag(r, dw, dh, fx, fy);
             return r;
         }
@@ -262,6 +291,8 @@ class DepthMeasure {
                 float z = depthAt(raw, rowStride, x, y);
                 if (z <= 0) continue;
                 r.depthPixels++;
+                if (confidenceAt(conf, confStride, x, y) < MIN_CONFIDENCE) continue;
+                r.confident++;
                 if (z < MIN_DEPTH_M || z > MAX_DEPTH_M) continue;
                 r.inRange++;
 
@@ -332,6 +363,14 @@ class DepthMeasure {
      * trois bits de poids fort portent une confiance, l'image d'ARCore contient
      * la distance en millimètres sur les seize bits.
      */
+    /** Confiance du pixel, 0 a 255. Sans carte fournie, on accepte tout. */
+    private static int confidenceAt(ByteBuffer conf, int rowStride, int x, int y) {
+        if (conf == null) return 255;
+        int offset = y * rowStride + x;
+        if (offset < 0 || offset >= conf.limit()) return 0;
+        return conf.get(offset) & 0xFF;
+    }
+
     private static float depthAt(ByteBuffer raw, int rowStride, int x, int y) {
         int offset = y * rowStride + x * 2;
         if (offset < 0 || offset + 1 >= raw.limit()) return 0;
