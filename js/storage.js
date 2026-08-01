@@ -161,7 +161,15 @@
        l'intervalle de confiance à 95 % du gain contient encore zéro, et ce
        réglage déplace le nombre que l'utilisateur tape dans sa pompe : c'est
        à lui de l'activer, pas à une mise à jour de le décider. */
-    mergeVerification: false
+    mergeVerification: false,
+
+    /* Outils expérimentaux — aujourd'hui la seule mesure de relief ARCore.
+       Éteints par défaut : la mesure n'a jamais été validée contre un objet de
+       volume connu, elle n'entre pas dans le calcul des glucides, et chaque
+       itération dessus impose de réinstaller l'APK. Elle reste accessible pour
+       qui veut la mettre au point, mais elle n'encombre plus l'écran de celui
+       qui veut simplement estimer un repas. */
+    experimentalTools: false
   };
 
   /* Clés API relues du Keystore au démarrage (APK). On les garde en mémoire
