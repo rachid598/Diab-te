@@ -3,7 +3,16 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '59'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '60'; // à garder synchro avec la version du service worker
+
+  /* Build natif MINIMAL exigé par ce bundle web.
+     Le contenu web se met à jour par OTA, le code Java non : un APK ancien
+     pouvait donc charger un bundle récent, afficher « Version 59 » et exécuter
+     l'ancien natif. Toute version qui a besoin d'un plugin ou d'un comportement
+     natif nouveau doit relever ce nombre au numéro de build qui l'apporte.
+     Il est publié dans le manifeste OTA et vérifié avant toute application. */
+  var MIN_NATIVE_BUILD = 57;   // profondeur brute + carte de confiance (v57)
+  var nativeBuild = null;      // build réellement en cours d'exécution, sur APK
   var settings = Storage.getSettings();
 
   // État courant
@@ -1045,14 +1054,45 @@
     var parts = partsFrom(total);
     var nutrition = glycemicHtml(r) + giHtml(r) + macrosHtml(r);
 
+    var bloque = (r.blocking && r.blocking.length) ? r.blocking : null;
+
     var html = '';
+    if (bloque) {
+      /* Résultat retiré, pas seulement signalé. Une incohérence de ce niveau
+         veut dire que le nombre ne représente rien : l'afficher en gros avec un
+         avertissement à côté reviendrait à parier sur le fait qu'il sera lu. */
+      html += '<div class="card blocked-box">';
+      html += '<h2>⛔ Estimation inutilisable</h2>';
+      html += '<p>Le résultat est incohérent, le chiffre n\'est donc pas affiché :</p><ul>';
+      html += bloque.map(function (b) { return '<li>' + escapeHtml(b) + '</li>'; }).join('');
+      html += '</ul>';
+      html += '<p class="hint">Relance l\'estimation, ou corrige les aliments ci-dessous : ' +
+              'le total se recalcule et l\'estimation redevient utilisable.</p>';
+      html += '</div>';
+      html += '<div id="verify-box" class="verify-box" hidden></div>';
+      html += seenHtml(r);
+      html += '<div class="card"><h2>Détail par aliment</h2>';
+      html += '<p class="hint">Corrige une portion pour débloquer le total.</p>';
+      html += '<div id="items-list"></div></div>';
+      el.innerHTML = html;
+      renderItems();
+      updateResultSaveState();
+      if (!keepPosition) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
     html += '<div class="result-hero">';
     html += '  <div class="hero-carbs">' + total + ' <small>g</small></div>';
     html += '  <div class="hero-parts">' + fr(parts) + ' <small>parts de glucides</small></div>';
     html += rangeBarHtml(r.rangeLowG, total, r.rangeHighG);
     html += '  <div class="confidence conf-' + r.overallConfidence + '">' + CONF_LABEL[r.overallConfidence] + '</div>';
-    html += '  <div class="pump-hint">💉 À saisir dans ta pompe : <strong>' + total +
-            ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>). Ta pompe calcule le bolus.</div>';
+    /* Formulation volontairement non impérative. « À saisir dans ta pompe »
+       transformait une estimation en instruction, alors que la fourchette
+       mesurée sur le banc s'étend de 0,62 à 1,66 fois le chiffre affiché. */
+    html += '  <div class="pump-hint">💉 <strong>Estimation à vérifier</strong> avant de saisir : <strong>' +
+            total + ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>).<br>' +
+            'Relis le détail ci-dessous, corrige si besoin, puis saisis le chiffre que TU retiens. ' +
+            'Ta pompe calcule le bolus.</div>';
     if (typeof r.mergedTotalCarbsG === 'number') {
       html += '  <div class="merged-hint">⚖️ Moyenne de deux modèles (' + r.totalCarbsG +
               ' g et ' + r.verifyTotalCarbsG + ' g). Le détail ci-dessous reste celui du modèle principal.</div>';
@@ -1605,6 +1645,10 @@
       // c'est donc lui que la calibration doit comparer aux glucides réels.
       totalCarbsG: shownTotal(lastResult),
       parts: partsFrom(shownTotal(lastResult)),
+      /* Un brouillon incohérent reste enregistré — rien ne doit se perdre — mais
+         il est marqué, pour qu'on ne le retrouve pas des semaines plus tard sans
+         savoir que son total avait été refusé à l'écran. */
+      blocked: !!(lastResult.blocking && lastResult.blocking.length),
       mergedFrom: typeof lastResult.mergedTotalCarbsG === 'number'
         ? [lastResult.totalCarbsG, lastResult.verifyTotalCarbsG] : null,
       partSizeG: settings.partSizeG,
@@ -1650,6 +1694,7 @@
   function updateResultSaveState() {
     var status = $('result-save-status');
     var btn = $('confirm-result');
+    // En cas de blocage, l'encadré de résultat n'existe pas : rien à mettre à jour.
     if (!status || !btn) return;
     status.classList.toggle('confirmed', currentHistoryConfirmed);
     status.innerHTML = '<span class="autosave-dot"></span><span>' +
@@ -1697,6 +1742,13 @@
 
   function confirmCurrentResult() {
     if (!lastResult) return;
+    /* Un repas incohérent ne doit pas entrer dans l'historique : il y servirait
+       ensuite de référence à la calibration personnelle, et un total faux s'y
+       propagerait bien après avoir été oublié. */
+    if (lastResult.blocking && lastResult.blocking.length) {
+      toast('Corrige d\'abord l\'incohérence signalée : ce total ne peut pas être confirmé.');
+      return;
+    }
     autoSaveCurrentResult();
     if (currentHistoryConfirmed) return;
     currentHistoryConfirmed = true;
@@ -2088,7 +2140,7 @@
       '<div class="result-hero">' +
       '  <div class="hero-carbs">' + total + ' <small>g</small></div>' +
       '  <div class="hero-parts">' + fr(parts) + ' <small>parts de glucides</small></div>' +
-      '  <div class="pump-hint">💉 À saisir dans ta pompe : <strong>' + total + ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>).</div>' +
+      '  <div class="pump-hint">💉 <strong>Total calculé</strong> : <strong>' + total + ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>). Vérifie avant de saisir.</div>' +
       giHtml({ gi: giInfo }) +
       '  <div class="btn-row" style="margin-top:12px">' +
       '    <button id="save-manual" class="btn btn-primary">💾 Enregistrer</button>' +
@@ -3237,6 +3289,24 @@
     if (!Native.isApp) return;
     var run = function () {
       Native.update.check(OTA_MANIFEST, APP_VERSION).then(function (info) {
+        /* Un bundle qui exige un natif plus récent que l'APK installé ne doit
+           pas s'appliquer : il afficherait sa version tout en s'exécutant sur
+           un Java qui ne sait pas la servir. */
+        if (info && info.minNativeBuild && nativeBuild != null &&
+            nativeBuild < parseInt(info.minNativeBuild, 10)) {
+          var el = $('native-outdated');
+          if (el) {
+            el.hidden = false;
+            el.innerHTML = '⚠️ <strong>Mise à jour bloquée</strong> — la version ' +
+              (info.appVersion || '') + ' exige l\'APK ' + info.minNativeBuild +
+              ', tu as le ' + nativeBuild + '. ' +
+              '<a href="https://github.com/rachid598/Diab-te/releases/download/apk-latest/glucovision.apk">' +
+              'Réinstalle l\'APK</a> pour l\'obtenir.';
+          }
+          return null;
+        }
+        return info;
+      }).then(function (info) {
         if (!info) return null;
         return Native.update.download(info);
       }).then(function (bundle) {
@@ -3414,10 +3484,38 @@
 
   function showVersion() {
     var el = $('app-version');
-    if (el) {
-      el.textContent = 'Version ' + APP_VERSION + ' · GlucoVision' +
-        (Native.isApp ? ' · application Android' : '');
+    if (!el) return;
+    var txt = 'Version ' + APP_VERSION + ' · GlucoVision';
+    if (Native.isApp) {
+      txt += ' · APK ' + (nativeBuild == null ? '…' : nativeBuild);
+      if (nativeBuild != null && nativeBuild < MIN_NATIVE_BUILD) {
+        txt += ' (trop ancien, min. ' + MIN_NATIVE_BUILD + ')';
+      }
     }
+    el.textContent = txt;
+  }
+
+  /* Vérifie que le natif en cours d'exécution est au niveau exigé par ce bundle.
+     Sans ce contrôle, un APK ancien chargeait un bundle récent, affichait sa
+     version, et échouait silencieusement sur les capacités qu'il n'a pas. */
+  function checkNativeFloor() {
+    if (!Native.isApp || !Native.appBuild) return;
+    Native.appBuild().then(function (build) {
+      nativeBuild = build;
+      showVersion();
+      if (build == null || build >= MIN_NATIVE_BUILD) return;
+      var el = $('native-outdated');
+      if (!el) return;
+      el.hidden = false;
+      el.innerHTML = '⚠️ <strong>Application Android trop ancienne</strong> — build ' + build +
+        ', minimum requis ' + MIN_NATIVE_BUILD + '. Le contenu web s\'est mis à jour, ' +
+        'mais le code natif non : certaines fonctions sont indisponibles. ' +
+        '<a href="https://github.com/rachid598/Diab-te/releases/download/apk-latest/glucovision.apk">' +
+        'Réinstalle l\'APK</a>.';
+      // Une capacité native absente ne doit pas être proposée.
+      var btn = $('btn-depth');
+      if (btn) btn.hidden = true;
+    });
   }
 
   // ---------- Init ----------
@@ -3425,6 +3523,7 @@
     // Relu APRÈS l'hydratation : sur l'APK les clés API viennent du Keystore.
     settings = Storage.getSettings();
     showVersion();
+    checkNativeFloor();
     initInstall();
     initSafetyBanner();
     initTabs();

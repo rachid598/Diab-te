@@ -295,6 +295,27 @@
       .then(function () { return true; }).catch(function () { return false; });
   }
 
+  // ---------- Identité de la couche native ----------
+
+  /* Le bundle web se met à jour tout seul, le code natif non. Rien n'empêchait
+     donc un APK ancien de charger un bundle plus récent, d'afficher sa version,
+     et d'exécuter malgré tout l'ancien Java — y compris pour un plugin que ce
+     bundle croit disponible. On lit donc le numéro de build réel de l'APK, seul
+     moyen pour le web de savoir sur quoi il tourne. */
+  var nativeBuild = null;
+
+  function appBuild() {
+    if (!isApp || !Cap.App || typeof Cap.App.getInfo !== 'function') return resolved(null);
+    if (nativeBuild != null) return resolved(nativeBuild);
+    return Cap.App.getInfo()
+      .then(function (info) {
+        var n = parseInt((info && info.build) || '', 10);
+        nativeBuild = isFinite(n) ? n : 0;
+        return nativeBuild;
+      })
+      .catch(function () { nativeBuild = 0; return 0; });
+  }
+
   // ---------- Mesure de profondeur (ARCore) ----------
 
   /* Sur une vue de dessus, la hauteur des aliments n'est pas visible : c'est la
@@ -477,6 +498,7 @@
     depth: { available: depthAvailable, capture: depthCapture },
     shareFile: shareFile,
     saveToDocuments: saveToDocuments,
+    appBuild: appBuild,
     onLaunchAction: onLaunchAction,
     onResume: onResume,
     photos: {
