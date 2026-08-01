@@ -990,3 +990,19 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
   display: block;
 }
 .native-outdated a { color: inherit; font-weight: 700; }
+
+/* Confirmation de l'aliment glucidique dominant. Mis en avant parce que c'est
+   le seul endroit du parcours où une seconde d'attention peut valoir 30 g. */
+.dominant-box {
+  margin-bottom: 12px; padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--info) 45%, var(--border));
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--info) 9%, var(--surface));
+}
+.dominant-head { font-weight: 800; margin-bottom: 6px; }
+.dominant-box p { margin: 0 0 8px; font-size: 14px; }
+.dominant-box .tiny { font-size: 12px; color: var(--muted); }
+.dominant-box.dominant-done {
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
+  background: color-mix(in srgb, var(--ok) 9%, var(--surface));
+}

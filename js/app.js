@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '60'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '61'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -439,6 +439,7 @@
     var btn = $('btn-depth');
     if (!btn || !Native.isApp) return;
 
+    if (!settings.experimentalTools) return;   // éteint par défaut
     Native.depth.available().then(function (a) {
       if (!a || !a.supported) return;
       btn.hidden = false;
@@ -1109,6 +1110,7 @@
     html += '</div>';
 
     html += '<div id="verify-box" class="verify-box" hidden></div>';
+    html += dominantHtml(r);
     html += biasHintHtml(r.totalCarbsG, r.items);
     html += warningsHtml(r);
     html += similarMealHtml(r);
@@ -1140,6 +1142,7 @@
     el.innerHTML = html;
     el.hidden = false;
     renderItems();
+    initDominant();
     $('confirm-result').addEventListener('click', confirmCurrentResult);
     $('save-meal').addEventListener('click', function () { promptSaveMeal(lastResult.items); });
     initRerun();
@@ -1358,6 +1361,66 @@
         });
       }
     });
+  }
+
+  /* ---------- Confirmation de l'aliment glucidique dominant ----------
+
+     Le pire échec du banc d'essai n'était pas une erreur de quantité mais
+     d'IDENTIFICATION : des flocons d'avoine pris pour du fromage blanc, 47 g de
+     glucides réels contre 14 estimés, 33 g d'écart médian sur les quatorze
+     modèles testés. Sous des fruits rouges, un porridge et un yaourt se
+     ressemblent, et leur densité glucidique n'a rien à voir.
+
+     Aucun changement de modèle ne corrige cela — les quatorze se sont trompés
+     de la même façon. Un humain, lui, le voit en une seconde : il sait ce qu'il
+     a dans son assiette. Encore faut-il lui poser la question, et la poser sur
+     l'aliment qui compte plutôt que sur la liste entière.
+
+     D'où cet encadré : il isole l'aliment qui porte la majorité des glucides et
+     demande confirmation de sa NATURE. C'est le seul point du parcours où une
+     seconde d'attention peut valoir 30 g. */
+  function dominantHtml(r) {
+    var items = (r.items || []).filter(function (it) { return it.carbsG > 0; });
+    if (!items.length || !(r.totalCarbsG > 0)) return '';
+
+    var top = items.reduce(function (a, b) { return b.carbsG > a.carbsG ? b : a; });
+    var part = top.carbsG / r.totalCarbsG;
+    // En dessous de la moitié du total, se tromper dessus ne déplace pas la dose.
+    if (part < 0.5) return '';
+
+    return '<div class="dominant-box">' +
+      '<div class="dominant-head">🔎 À vérifier en priorité</div>' +
+      '<p><strong>' + escapeHtml(top.name) + '</strong> porte ' +
+      Math.round(part * 100) + ' % des glucides de ce repas (' + top.carbsG + ' g). ' +
+      'Est-ce bien ça ?</p>' +
+      '<p class="tiny">Se tromper d\'aliment coûte bien plus qu\'une portion mal jaugée : ' +
+      'des flocons d\'avoine pris pour du fromage blanc, c\'est 33 g d\'écart.</p>' +
+      '<div class="btn-row">' +
+      '<button id="dominant-ok" class="btn btn-secondary">✓ Oui, c\'est bien ça</button>' +
+      '<button id="dominant-no" class="btn btn-ghost">✗ Non, corriger</button>' +
+      '</div></div>';
+  }
+
+  function initDominant() {
+    var ok = $('dominant-ok');
+    var no = $('dominant-no');
+    if (ok) {
+      ok.addEventListener('click', function () {
+        var box = ok.closest('.dominant-box');
+        if (box) box.classList.add('dominant-done');
+        ok.textContent = '✓ Confirmé';
+        ok.disabled = true;
+      });
+    }
+    if (no) {
+      no.addEventListener('click', function () {
+        /* « Corriger » doit aboutir à un champ, pas à un message : on envoie
+           directement sur la liste éditable. */
+        var list = $('items-list');
+        if (list) list.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        toast('Corrige le nom ou la quantité dans le détail ci-dessous.');
+      });
+    }
   }
 
   /* ---------- « Tu as déjà mangé ça » ----------
@@ -2956,6 +3019,7 @@
     populateVerifyModelSelect(vp, models[vp] || Storage.DEFAULT_MODELS[vp] || '');
     $('set-verify-threshold').value = String(settings.verifyThresholdPct || 20);
     $('set-merge').checked = !!settings.mergeVerification;
+    $('set-experimental').checked = !!settings.experimentalTools;
     $('set-partsize').value = settings.partSizeG;
     $('set-round-half').checked = settings.roundHalf;
     updateVerificationSettingsForm();
@@ -3010,6 +3074,7 @@
     settings.verifyProvider = verifyProvider;
     settings.verifyThresholdPct = parseInt($('set-verify-threshold').value, 10) || 20;
     settings.mergeVerification = verificationMode === 'auto' && $('set-merge').checked;
+    settings.experimentalTools = $('set-experimental').checked;
     settings.models = settings.models || {};
     settings.models[provider] = getModelFrom('set-model', 'set-model-custom', provider);
     settings.compareProvider = verificationMode === 'ask' ? verifyProvider : '';
