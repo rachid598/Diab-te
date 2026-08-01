@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '58'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '59'; // à garder synchro avec la version du service worker
   var settings = Storage.getSettings();
 
   // État courant
@@ -15,9 +15,10 @@
   var currentHistoryPhotoStarted = false;
   var lastEstimateContext = null;
   var lastVerification = null;
-  /* Dernière mesure de relief réussie. Elle accompagne la photo prise par le
-     scanner ARCore et n'a de sens que pour elle : effacer les photos l'efface. */
-  var lastDepth = null;
+  /* Mesure de relief affichée dans le volet photo. Ce n'est qu'un reflet de la
+     dernière capture : la donnée qui compte voyage AVEC son image, dans
+     images[].depth. */
+  var lastDepthShown = null;
   var estimateGeneration = 0;
 
   // ---------- Utilitaires d'affichage ----------
@@ -378,11 +379,14 @@
   /* Ajoute des images déjà encodées (venant de l'appareil photo natif).
      Elles ne repassent pas par un canvas si elles sont déjà à la bonne taille :
      c'est ce qui évite la seconde compression et fait la qualité supérieure. */
-  function addDataUrls(urls) {
+  function addDataUrls(urls, depth) {
     var room = Camera.MAX_ANGLES - images.length;
     if (room <= 0) { toast('Maximum ' + Camera.MAX_ANGLES + ' vues.'); return; }
     Camera.processDataUrls(urls.slice(0, room)).then(function (out) {
-      out.results.forEach(function (r) { if (images.length < Camera.MAX_ANGLES) images.push(r); });
+      out.results.forEach(function (r) {
+        if (depth) r.depth = depth;
+        if (images.length < Camera.MAX_ANGLES) images.push(r);
+      });
       renderThumbs();
       updateEstimateBtn();
       if (out.errors.length) toast(out.errors.length + ' photo(s) ignorée(s).');
@@ -436,9 +440,12 @@
           btn.disabled = false;
           if (!r) return;                                  // annulé
           if (r.error) { toast('Relief : ' + r.error); return; }
-          lastDepth = r.depth && r.depth.ok ? r.depth : null;
+          /* La mesure est attachée à SON image, et non gardée dans une variable
+             globale. Sinon retirer la vignette du scan laissait la profondeur en
+             place, ajouter d'autres photos la conservait, et le relief d'un
+             repas pouvait repartir avec une image qui n'était pas la sienne. */
           renderDepthResult(r.depth);
-          addDataUrls([r.dataUrl]);
+          addDataUrls([r.dataUrl], r.depth && r.depth.ok ? r.depth : null);
         }).catch(function (e) {
           btn.disabled = false;
           toast('Relief indisponible : ' + ((e && e.message) || 'erreur'));
@@ -447,7 +454,21 @@
     });
   }
 
+  /* Mesure portée par les images réellement transmises. S'il y en a plusieurs,
+     aucune ne fait autorité : on n'en retient aucune plutôt que d'en choisir
+     une au hasard. */
+  function depthOfSent(sent) {
+    var found = null;
+    for (var i = 0; i < sent.length; i++) {
+      if (!sent[i].depth) continue;
+      if (found) return null;
+      found = sent[i].depth;
+    }
+    return found;
+  }
+
   function renderDepthResult(d) {
+    lastDepthShown = d;
     var el = $('depth-result');
     if (!el) return;
     if (!d) { el.hidden = true; return; }
@@ -462,8 +483,12 @@
         (d.diag ? '<br><span class="tiny mono">' + escapeHtml(d.diag) + '</span>' : '');
       return;
     }
-    el.className = 'depth-result d-ok';
-    el.innerHTML = '📐 <strong>Relief mesuré</strong> — volume au-dessus de la table ' +
+    el.className = 'depth-result d-warn';
+    el.innerHTML = '🧪 <strong>Relief mesuré — EXPÉRIMENTAL, non utilisé dans le calcul</strong>' +
+      '<br><span class="tiny">Le volume est intégré sur les seuls pixels fiables, sans combler ' +
+      'les trous : il varie avec la texture et l\'éclairage. Tant qu\'il n\'a pas été vérifié ' +
+      'contre des objets de volume connu, il n\'est pas transmis au modèle.</span><br>' +
+      'Volume au-dessus de la table ' +
       '<strong>' + Math.round(d.volumeCm3) + ' cm³</strong>, hauteur max ' +
       fr(Math.round(d.heightMaxCm * 10) / 10) + ' cm, sur ' + Math.round(d.areaCm2) + ' cm². ' +
       'Échelle ' + fr(Math.round(d.cmPerPixel * 10000) / 10000) + ' cm/pixel à ' +
@@ -487,7 +512,7 @@
       e.target.value = '';
     });
     $('clear-photos').addEventListener('click', function () {
-      images = []; lastDepth = null; renderDepthResult(null);
+      images = []; lastDepthShown = null; renderDepthResult(null);
       renderThumbs(); updateEstimateBtn();
     });
     $('reference-object').addEventListener('change', function (e) {
@@ -528,8 +553,10 @@
       notes: $('user-notes').value,
       extras: extrasText(),       // dessert / boisson, absents de la photo
       imageCount: sent.length,    // 0 fait basculer l'estimateur en mode description
-      // Mesure ARCore, si la photo vient du scanner de relief.
-      depth: (!textOnly && lastDepth) ? lastDepth : null
+      /* Mesure ARCore de l'image transmise, s'il y en a une. Elle n'est plus
+         utilisée par l'estimateur tant qu'elle n'est pas validée (voir
+         estimator.js), mais elle reste enregistrée avec le repas. */
+      depth: textOnly ? null : depthOfSent(sent)
     };
     lastEstimateContext = Object.assign({}, ctx);
 
@@ -1245,6 +1272,7 @@
   function attachVerification(promise, generation) {
     if (!promise) return;
     var verifiedResult = lastResult;
+    var verifiedTotal = lastResult ? lastResult.totalCarbsG : 0;
     var verifiedDate = currentHistoryDate;
     lastVerification = { loading: true };
     renderVerificationState();
@@ -1257,7 +1285,14 @@
          faiblement corrélées. On re-rend TOUTE la page plutôt que la seule
          encadré de vérification, sinon le héros garderait l'ancien nombre —
          et c'est le nombre saisi dans la pompe. */
-      if (settings.mergeVerification && v.ok && v.total > 0 && lastResult.totalCarbsG > 0) {
+      /* La garde ci-dessus compare l'identité de lastResult, mais corriger une
+         portion mute cet objet SUR PLACE : une correction faite pendant que la
+         vérification tournait ne serait donc pas détectée, et la fusion
+         écraserait la valeur corrigée. On compare aussi le total, et on
+         s'abstient dès que le repas a été confirmé. */
+      var touched = lastResult.totalCarbsG !== verifiedTotal || currentHistoryConfirmed;
+      if (settings.mergeVerification && v.ok && v.total > 0 && lastResult.totalCarbsG > 0
+          && !touched) {
         lastResult.mergedTotalCarbsG = Math.round((lastResult.totalCarbsG + v.total) / 2);
         lastResult.verifyTotalCarbsG = v.total;
         lastResult.rangeLowG = Math.min(lastResult.rangeLowG, v.total);
