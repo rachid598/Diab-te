@@ -672,6 +672,7 @@
 
     return {
       items: items,
+      blocking: blocking(items, total, low, high),
       totalCarbsG: total,
       totalProteinG: totalProtein,
       totalFatG: totalFat,
@@ -761,6 +762,46 @@
       out.push('Total de ' + total + ' g pour un repas : c\'est très au-delà d\'une ' +
         'portion habituelle, vérifie les quantités.');
     }
+    return out;
+  }
+
+  /* Incohérences BLOQUANTES, par opposition aux alertes qui se contentent
+     d'avertir. Ce sont celles qui rendent le résultat inutilisable : pas
+     « surveille ce chiffre », mais « ce chiffre ne veut rien dire ».
+
+     La distinction compte parce que l'écran affiche ensuite un nombre de
+     grammes destiné à être saisi dans une pompe. Un avertissement se lit ou ne
+     se lit pas ; un blocage retire le nombre. */
+  function blocking(items, total, low, high) {
+    var out = [];
+
+    if (!items.length) {
+      out.push('Le modèle n\'a identifié aucun aliment.');
+    }
+    if (!(total > 0)) {
+      out.push('Total de glucides nul ou absent.');
+    }
+    if (low > high) {
+      out.push('Fourchette inversée : ' + Math.round(low) + ' g à ' + Math.round(high) + ' g.');
+    }
+
+    /* Le modèle se contredit lui-même : le total annoncé ne correspond pas à la
+       somme de ses propres aliments. On ne peut pas trancher lequel est faux. */
+    var somme = items.reduce(function (s, it) { return s + (it.carbsG || 0); }, 0);
+    if (total > 0 && somme > 0 && Math.abs(somme - total) > Math.max(5, total * 0.2)) {
+      out.push('Le total annoncé (' + total + ' g) ne correspond pas à la somme des ' +
+               'aliments listés (' + Math.round(somme) + ' g).');
+    }
+
+    items.forEach(function (it) {
+      if (it.estimatedMassG > 0 && it.carbsG > it.estimatedMassG * 1.02) {
+        out.push('« ' + it.name + ' » contient plus de glucides que son poids total.');
+      }
+      var d = it.carbDensityPer100g;
+      if (d != null && d > 100) {
+        out.push('« ' + it.name + ' » : densité de ' + Math.round(d) + ' g pour 100 g.');
+      }
+    });
     return out;
   }
 

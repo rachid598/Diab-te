@@ -972,3 +972,21 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 /* Ligne de diagnostic du relief : lisible d'une capture d'écran, sans occuper
    la place d'un message utile. */
 .depth-result .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; opacity: .8; }
+
+/* Résultat retiré pour incohérence bloquante. Le rouge n'est pas décoratif :
+   c'est le seul cas où l'app refuse de montrer un nombre de glucides. */
+.blocked-box {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+}
+.blocked-box h2 { color: var(--danger); }
+.blocked-box ul { margin: 8px 0; padding-left: 20px; }
+.blocked-box li { margin-bottom: 4px; }
+
+/* APK en retard sur le bundle web : ni refermable, ni décoratif. */
+.native-outdated {
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface));
+  border-bottom: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+  display: block;
+}
+.native-outdated a { color: inherit; font-weight: 700; }

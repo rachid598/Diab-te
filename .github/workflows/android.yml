@@ -321,10 +321,16 @@ jobs:
         run: |
           # index.html doit être à la RACINE de l'archive.
           (cd www && zip -qr ../dist/www.zip .)
+          # MIN_NATIVE_BUILD est déclaré dans js/app.js : le bundle publie ainsi
+          # lui-même le build natif dont il a besoin, et l'app refuse de
+          # l'appliquer sur un APK plus ancien.
+          MIN_NATIVE=$(grep -oP "MIN_NATIVE_BUILD = \K[0-9]+" js/app.js)
+          test -n "$MIN_NATIVE" || { echo "MIN_NATIVE_BUILD introuvable dans js/app.js"; exit 1; }
           cat > dist/latest.json <<EOF
           {
             "appVersion": "$APP_VERSION",
             "version": "$BUNDLE_VERSION",
+            "minNativeBuild": $MIN_NATIVE,
             "url": "https://github.com/$REPO/releases/download/ota-latest/www.zip"
           }
           EOF
