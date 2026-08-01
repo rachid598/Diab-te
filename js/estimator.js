@@ -54,8 +54,11 @@
     "   - Donne UN meilleur point d'estimation (pas un chiffre gonflé « par sécurité »).",
     "   - rangeLowG/rangeHighG ne couvrent QUE les facteurs non résolus : densité interne",
     "     (mie du pain), hauteur non vue en photo unique, présence/quantité de sucre caché.",
-    "   - Repère fiable + repas simple + un seul aliment glucidique dominant bien mesuré",
-    "     ⇒ fourchette serrée (typiquement ±10–15 %) et overallConfidence 'high'.",
+    "   - overallConfidence 'high' UNIQUEMENT pour un repas simple, un seul aliment",
+    "     glucidique dominant, nettement visible et de densité connue. Mesuré sur",
+    "     368 estimations, l'écart réel/estimé va de 0,62 à 1,66 dans 80 % des cas :",
+    "     une confiance 'high' n'est donc justifiée que rarement, et l'application",
+    "     calcule elle-même la fourchette à partir de ces écarts observés.",
     "   - Ne baisse la confiance d'un aliment que si un vrai facteur non résolu le domine.",
     "   - Dans 'notes' : nomme LE facteur qui pèse le plus et l'action concrète pour l'affiner",
     "     (ex. « confirme si baguette entière ou demie »), pas des généralités.",
@@ -146,24 +149,21 @@
     if (!ctx.imageCount) return buildTextPrompt(ctx);
 
     var lines = ['Analyse ce repas et estime les glucides selon la méthode.'];
-    /* Une mesure au capteur rend le bloc « objet-repère » caduc : garder les
-       deux ferait cohabiter une échelle mesurée et une consigne de l'estimer,
-       et surtout laisserait la consigne « baisse la confiance » contredire une
-       mesure physique. */
-    var measured = !!(ctx.depth && ctx.depth.ok);
-    if (measured) {
-      // rien ici : le bloc de mesure ci-dessous porte l'échelle et la hauteur
-    } else if (ctx.referenceObject && ctx.referenceObject !== 'none') {
+    if (ctx.referenceObject && ctx.referenceObject !== 'none') {
       var ref = ctx.referenceObject;
       if (ctx.plateDiameterCm) {
         ref = 'assiette de ' + ctx.plateDiameterCm + ' cm de diamètre';
       }
       lines.push('OBJET-REPÈRE présent, de dimension connue : ' + ref + '.');
       lines.push('Calibre l\'échelle à partir de ce repère, MESURE chaque aliment en cm, et');
-      lines.push('reporte les mesures dans "assumptions". Comme la taille est mesurée, la');
-      lines.push('fourchette ne doit couvrir que la densité/hauteur/sucre caché, pas la taille.');
+      lines.push('reporte les mesures dans "assumptions".');
       lines.push('Donne dans "referenceUsed" la longueur en pixels de l\'arête que tu as');
       lines.push('mesurée ET l\'échelle qui en découle, sinon mets "referenceFound": false.');
+      /* Aucune consigne de resserrement. Un test du banc a envoyé 24 photos SANS
+         objet-repère en affirmant qu'il y en avait un : les modèles ont répondu
+         24 fois sur 24 « referenceFound: true », en fabriquant au passage une
+         mesure en pixels. Autoriser ce booléen à resserrer la fourchette revient
+         donc à resserrer sur une déclaration invérifiable. */
       if (!ctx.plateDiameterCm) {
         lines.push('Si ce repère a une épaisseur connue et repose à plat, sers-t\'en aussi');
         lines.push('comme règle VERTICALE pour juger la hauteur de ce qu\'il y a dans l\'assiette.');
@@ -171,36 +171,23 @@
     } else {
       lines.push('Aucun objet-repère : estime l\'échelle via l\'assiette/les couverts et baisse la confiance.');
     }
-    /* Mesure ARCore : de la géométrie, pas une estimation. On la place APRÈS le
-       bloc repère parce qu'elle le remplace quand elle existe — et on dit
-       explicitement ce qu'elle ne couvre pas, sinon le modèle prendrait le
-       volume total pour celui des seuls aliments et gonflerait les portions. */
-    var d = ctx.depth;
-    if (d && d.ok) {
-      lines.push('');
-      lines.push('MESURE PHYSIQUE PAR CAPTEUR DE PROFONDEUR (fiable, ce ne sont pas des estimations) :');
-      lines.push('- échelle réelle : ' + d.cmPerPixel.toFixed(4) + ' cm par pixel de cette image ;');
-      lines.push('- volume total au-dessus du plan de la table : ' + Math.round(d.volumeCm3) + ' cm³ ;');
-      lines.push('- surface occupée : ' + Math.round(d.areaCm2) + ' cm² ;');
-      lines.push('- hauteur maximale : ' + d.heightMaxCm.toFixed(1) + ' cm, hauteur moyenne : ' +
-                 d.heightMeanCm.toFixed(1) + ' cm.');
-      lines.push('Sers-t\'en ainsi :');
-      lines.push('- l\'échelle REMPLACE toute estimation de taille : mesure les aliments dessus ;');
-      lines.push('- la hauteur est MESURÉE, donc la 3ᵉ dimension n\'est plus une inconnue :');
-      lines.push('  ne gonfle pas la fourchette pour elle (voir B et E).');
-      lines.push('⚠️ Ce volume est un MAJORANT du volume des aliments : le capteur mesure tout');
-      lines.push('le relief au-dessus de la table, donc l\'assiette et son rebord y sont inclus.');
-      lines.push('Déduis-en l\'épaisseur du contenant avant de répartir le volume entre les');
-      lines.push('aliments, et dis dans "assumptions" ce que tu as retiré pour l\'assiette.');
-      lines.push('⚠️ Le capteur ne voit que les surfaces visibles : ce qui est noyé sous une');
-      lines.push('sauce ou caché sous un autre aliment n\'est PAS dans ce volume.');
-    } else if (d && d.note) {
-      lines.push('Une mesure de profondeur a été tentée sans succès (' + d.note + ') :');
-      lines.push('rien à en tirer, procède normalement.');
-    }
+    /* Le relief mesuré n'est PLUS transmis au modèle.
+
+       Il l'était comme une « mesure physique fiable », avec consigne de ne pas
+       élargir la fourchette pour la hauteur. Or rien de tout cela n'est établi :
+       le volume est intégré sur les seuls pixels de confiance suffisante, sans
+       reconstruire les trous, si bien qu'il varie mécaniquement avec la texture,
+       la lumière et le taux de couverture. Une couverture de 930 pixels sur
+       10 000 ne décrit pas un volume.
+
+       Tant que la chaîne n'a pas été validée contre des objets de volume connu,
+       la mesure reste affichée à l'écran — elle sert à la mettre au point — mais
+       elle n'entre pas dans le calcul des glucides. Présenter un chiffre non
+       validé comme une donnée physique à un modèle qui produit une dose est
+       exactement l'erreur à ne pas commettre. */
     if (ctx.imageCount > 1) {
       lines.push('Il y a ' + ctx.imageCount + ' angles du MÊME repas : croise-les pour le volume (hauteur incluse).');
-    } else if (!measured) {
+    } else {
       lines.push('Une seule vue : tu ne vois pas directement la hauteur/épaisseur — estime-la et');
       lines.push('signale-la comme seule inconnue géométrique (une photo de côté la lèverait).');
     }
@@ -866,11 +853,33 @@
       var total = items.reduce(function (s, it) { return s + (it.carbsG || 0); }, 0);
       result.totalCarbsG = Math.round(total);
 
+      /* Fourchette CALIBRÉE sur les 368 estimations du banc d'essai, et non plus
+         sur un coefficient choisi à la main.
+
+         Les anciens coefficients (±12 / 22 / 35 % selon la confiance annoncée
+         par le modèle) ne contenaient la vraie valeur que dans 25 %, 46 % et
+         65 % des cas — là où une fourchette est censée la contenir presque
+         toujours. Elle affichait donc une précision qui n'existait pas, au
+         moment précis où l'utilisateur va saisir une dose.
+
+         Les bornes ci-dessous sont les quantiles empiriques du rapport
+         réel/estimé : q10 = 0,62 et q90 = 1,66, soit une couverture de 80 %.
+         Elles sont ASYMÉTRIQUES parce que l'erreur l'est — sous-estimer est
+         plus fréquent et plus ample que surestimer.
+
+         Deux réserves, qui vont en sens inverse et qu'il ne faut pas confondre :
+         le banc tourne SANS objet-repère, donc ces bornes sont pessimistes pour
+         un repas photographié avec la pompe dans le cadre ; mais elles viennent
+         d'une cuisine de cantine américaine, donc leur transposition à un repas
+         français n'est pas garantie. Voir BENCHMARK.md. */
       var conf = result.overallConfidence;
-      var spread = conf === 'high' ? 0.12 : conf === 'medium' ? 0.22 : 0.35;
-      if (result.fromText) spread = Math.max(spread, conf === 'high' ? 0.14 : 0.28);
-      result.rangeLowG = Math.max(0, Math.round(total * (1 - spread)));
-      result.rangeHighG = Math.round(total * (1 + spread));
+      var band = conf === 'high' ? [0.70, 1.45]
+               : conf === 'low'  ? [0.55, 1.90]
+                                 : [0.62, 1.66];
+      // Sans photo, aucune portion n'a été vue : l'incertitude ne peut qu'être pire.
+      if (result.fromText) band = [band[0] * 0.9, band[1] * 1.15];
+      result.rangeLowG = Math.max(0, Math.round(total * band[0]));
+      result.rangeHighG = Math.round(total * band[1]);
 
       result.totalProteinG = sumOf(items, 'proteinG');
       result.totalFatG = sumOf(items, 'fatG');

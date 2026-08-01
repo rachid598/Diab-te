@@ -413,7 +413,10 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
         DepthMeasure.Result r = measureOnce(frame);
         int size;
         synchronized (burst) {
-            if (r != null) burst.add(r);
+            /* Même exigence de fraîcheur qu'à l'aperçu. Sans elle, la capture
+               pouvait retenir sept fois la MÊME carte de profondeur réémise, et
+               annoncer une médiane de sept mesures là où il n'y en avait qu'une. */
+            if (r != null && depthIsFresh) burst.add(r);
             size = burst.size();
         }
         setStatus("Mesure… " + size + "/" + CAPTURE_FRAMES, false);
