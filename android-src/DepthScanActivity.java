@@ -79,6 +79,9 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
     private static final int STABLE_WINDOW = 4;
     private static final double STABLE_TOLERANCE = 0.25;
 
+    /* Déplacement exigé avant d'accorder du crédit à l'échelle d'ARCore. */
+    private static final double MIN_TRAVEL_M = 0.15;
+
     private GLSurfaceView surfaceView;
     private TextView status;
     private TextView debug;
@@ -95,6 +98,14 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
     private long lastLiveMeasure = 0;
     private String rawCenter = "-";
     private boolean depthIsFresh = false;
+
+    /* Distance réellement parcourue par le téléphone depuis l'ouverture de
+       l'écran. ARCore tire son échelle métrique de l'odométrie visuo-inertielle,
+       qui ne converge qu'après une translation franche : sans elle, les
+       distances sont fausses d'un facteur — et ce facteur varie d'une session à
+       l'autre, ce qu'aucune erreur de géométrie ne pourrait produire. */
+    private float[] lastPose = null;
+    private double travelledM = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -291,6 +302,26 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
             return;
         }
 
+        /* Cumul du déplacement : c'est lui qui donne son échelle à ARCore. */
+        float[] pos = frame.getCamera().getPose().getTranslation();
+        if (lastPose != null) {
+            double dx = pos[0] - lastPose[0], dy = pos[1] - lastPose[1], dz = pos[2] - lastPose[2];
+            double step = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            // Le bruit de suivi ajouterait des millimètres à l'infini si on ne
+            // filtrait pas les micro-déplacements.
+            if (step > 0.004) travelledM += step;
+        }
+        lastPose = pos;
+
+        if (travelledM < MIN_TRAVEL_M) {
+            recent.clear();
+            setStatus("Calibration en cours : déplace le téléphone de 20 cm environ,\n"
+                    + "lentement, au-dessus de l'assiette.",
+                    false, "déplacement " + Math.round(travelledM * 100) + " / "
+                            + Math.round(MIN_TRAVEL_M * 100) + " cm");
+            return;
+        }
+
         if (capturing) {
             collectBurst(frame);
             return;
@@ -303,6 +334,15 @@ public class DepthScanActivity extends AppCompatActivity implements GLSurfaceVie
         lastLiveMeasure = now;
 
         DepthMeasure.Result r = measureOnce(frame);
+        if (r != null && !depthIsFresh) {
+            /* Carte de profondeur plus ancienne que l'image : la mesurer
+               reviendrait à décrire une scène qui n'est plus celle qu'on vise.
+               Le guide d'ARCore compare d'ailleurs les horodatages avant tout
+               traitement. On attend simplement la suivante. */
+            setStatus("Profondeur en cours d'actualisation… continue à balayer.",
+                      false, "carte non renouvelée");
+            return;
+        }
         if (r == null) {
             recent.clear();
             setStatus("Profondeur en préparation… balaye lentement le téléphone de gauche à droite.",
