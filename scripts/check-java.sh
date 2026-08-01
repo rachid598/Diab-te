@@ -49,6 +49,14 @@ package com.google.ar.core;
 public abstract class Camera {
   public abstract CameraIntrinsics getTextureIntrinsics();
   public abstract CameraIntrinsics getImageIntrinsics();
+  public abstract Pose getPose();
+}
+EOF
+
+cat > "$WORK/stubs/com/google/ar/core/Pose.java" <<'EOF'
+package com.google.ar.core;
+public abstract class Pose {
+  public abstract float[] getTranslation();
 }
 EOF
 
@@ -56,6 +64,7 @@ cat > "$WORK/stubs/com/google/ar/core/Frame.java" <<'EOF'
 package com.google.ar.core;
 public abstract class Frame {
   public abstract Camera getCamera();
+  public abstract long getTimestamp();
 }
 EOF
 
