@@ -34,6 +34,21 @@ fi
 echo "→ Injection de la mesure LiDAR"
 cp ios-src/*.swift "$APP"/
 
+# Poser les fichiers dans le dossier ne suffit pas : Xcode ne compile que ce qui
+# est référencé dans App.xcodeproj. Non référencés, ils sont ignorés EN SILENCE —
+# la construction réussit, l'app se lance, et le plugin DepthScan n'existe
+# simplement pas côté JS. Aucun message nulle part pour le dire.
+if ! grep -q "DepthMeasure.swift" ios/App/App.xcodeproj/project.pbxproj 2>/dev/null; then
+  echo
+  echo "  À VÉRIFIER — Depth*.swift n'est pas listé dans App.xcodeproj."
+  echo "  Ouvre Xcode : si les trois fichiers n'apparaissent pas sous App > App,"
+  echo "  fais File > Add Files to \"App\"…, sélectionne-les dans $APP,"
+  echo "  et coche « Add to targets: App ». Une seule fois."
+  echo "  (Fausse alerte possible : les versions récentes de Xcode peuvent inclure"
+  echo "   un dossier entier sans le détailler dans le fichier projet.)"
+  echo
+fi
+
 # Les autorisations. Sans ces clés, iOS TUE l'application au moment précis où
 # elle demande la caméra — sans message, sans journal côté web. C'est le genre
 # de panne qu'on met une heure à diagnostiquer parce qu'elle ne ressemble pas à
