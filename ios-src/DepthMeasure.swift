@@ -50,11 +50,32 @@ enum DepthMeasure {
         var tiltDeg: Double = 0
         var levelDeg: Double = 0    // écart du plan d'appui à l'horizontale réelle
         var fillRatio: Double = 0   // part de la zone centrale comptée comme relief
+        var reliefMinMm: Double = 0 // seuil au-dessus duquel un pixel compte
         var diag = ""
     }
 
     private static let minHeightM: Double = 0.004
     private static let maxHeightM: Double = 0.22
+
+    /* Le seuil de 4 mm ci-dessus est un PLANCHER, pas le seuil réel. Un pixel ne
+       compte comme du relief que s'il dépasse le plan d'appui de plus que le
+       bruit de ce plan — et ce bruit varie d'un facteur six selon la surface :
+       1 à 2 mm sur un bureau en bois massif bien éclairé, 6 mm sur une table
+       ronde vernie prise en biais.
+
+       Avec un seuil fixe à 4 mm, le second cas comptait la moitié de la table
+       nue comme du relief : le bruit franchit 4 mm une fois sur deux quand
+       l'écart-type vaut 6 mm. Conséquences observées le même jour, sur la même
+       brique : le garde-fou de remplissage se déclenchait à 77-79 % alors que
+       l'objet n'occupait qu'un tiers du cadre — il détectait du bruit, pas un
+       plan faux — et la seule mesure qui passait annonçait 572 cm³ pour 1100.
+
+       À 2,5 écarts-types, moins de 1 % du bruit passe. Le prix est réel et
+       assumé : sur une surface qui ajuste mal, un objet de moins de 1,5 cm
+       d'épaisseur devient invisible. C'est préférable à un objet inventé —
+       et si le plan est bruité à 6 mm, une crêpe de 1 cm n'était de toute
+       façon pas mesurable, elle était seulement affichée. */
+    private static let reliefNoiseFactor: Double = 2.5
 
     /* Plage du LiDAR : environ 0,25 à 5 m. On reste plus permissif qu'ARCore
        (qui exigeait 35 cm) parce que le capteur, lui, mesure vraiment de près —
@@ -130,6 +151,7 @@ enum DepthMeasure {
             + " incl \(Int(r.tiltDeg.rounded()))deg"
             + " horiz \(Int(r.levelDeg.rounded()))deg"
             + " rempl \(Int((r.fillRatio * 100).rounded()))%"
+            + " seuil \(Int(r.reliefMinMm.rounded()))mm"
     }
 
     /** Profondeur brute au centre de la carte, en cm. Aucun ajustement, aucun
@@ -350,6 +372,12 @@ enum DepthMeasure {
         var depths = [Double]()
         depths.reserveCapacity((cx1 - cx0) * (cy1 - cy0))
 
+        // Seuil de relief adossé au bruit réel de l'ajustement, pas à une
+        // constante. Voir reliefNoiseFactor : c'est ce qui distingue un objet
+        // d'une table que le capteur voit mal.
+        let hMin = max(minHeightM, reliefNoiseFactor * r.planeRmsCm / 100)
+        r.reliefMinMm = hMin * 1000
+
         for y in cy0..<cy1 {
             for x in cx0..<cx1 {
                 let z = depthAt(x, y)
@@ -364,7 +392,7 @@ enum DepthMeasure {
                 let qy = (Double(y) - cy) * z / fy
                 // Un point PLUS PRÈS de l'objectif que la table est au-dessus d'elle.
                 let h = (a * qx + b * qy + c - z) / nrm
-                if h < minHeightM || h > maxHeightM { continue }
+                if h < hMin || h > maxHeightM { continue }
 
                 let pixelArea = (z / fx) * (z / fy)
                 let len = (qx * qx + qy * qy + z * z).squareRoot()
@@ -384,8 +412,14 @@ enum DepthMeasure {
         r.fillRatio = Double(count) / Double((cx1 - cx0) * (cy1 - cy0))
         if r.fillRatio > maxFillRatio {
             r.samples = count
+            /* Volontairement, ce message ne dit plus « recule ». Le plan d'appui
+               est ajusté sur le bandeau EXTÉRIEUR au cadre : reculer y fait
+               entrer le bord de la table, puis le sol, ce qui aggrave
+               exactement ce qu'on essaie de corriger. Sur une table ronde de
+               60 cm, à 40 cm de distance, le bandeau déborde déjà. */
             r.note = "Presque toute la zone est vue comme du relief (\(Int((r.fillRatio * 100).rounded())) %) :"
-                + " le plan d'appui est faux. Recule pour voir de la table nue tout autour du plat."
+                + " le plan d'appui est faux. Il faut de la table nue dans le bandeau entre les deux cadres —"
+                + " ni bord de table, ni objet posé à côté."
             r.diag = diag(r, dw, dh, fx, fy)
             return r
         }
