@@ -49,6 +49,23 @@ if ! grep -q "DepthMeasure.swift" ios/App/App.xcodeproj/project.pbxproj 2>/dev/n
   echo
 fi
 
+# Le contrôleur de vue du storyboard doit être NOTRE sous-classe, celle qui
+# enregistre DepthScanPlugin. Capacitor ne découvre pas les plugins écrits dans
+# la cible de l'app : sans cet enregistrement, le proxy JS existe, l'appel part,
+# et le pont répond « not implemented on ios » sans que rien n'ait échoué.
+STORY="$APP/Base.lproj/Main.storyboard"
+if [ -f "$STORY" ] && ! grep -q "GVBridgeViewController" "$STORY"; then
+  echo "→ Branchement du contrôleur de vue"
+  /usr/bin/sed -i '' \
+    's|customClass="CAPBridgeViewController" customModule="Capacitor"|customClass="GVBridgeViewController" customModule="App" customModuleProvider="target"|' \
+    "$STORY"
+  if ! grep -q "GVBridgeViewController" "$STORY"; then
+    echo "  ERREUR : impossible de patcher $STORY." >&2
+    echo "  Ouvre-le dans Xcode, sélectionne le View Controller, et mets" >&2
+    echo "  « GVBridgeViewController » dans l'inspecteur d'identité (Class)." >&2
+  fi
+fi
+
 # Les autorisations. Sans ces clés, iOS TUE l'application au moment précis où
 # elle demande la caméra — sans message, sans journal côté web. C'est le genre
 # de panne qu'on met une heure à diagnostiquer parce qu'elle ne ressemble pas à

@@ -9,6 +9,7 @@ Portage de la mesure de volume vers ARKit. Le projet `ios/` n'est pas versionné
 | `DepthMeasure.swift` | La physique : plan d'appui, intégration du relief, garde-fous |
 | `DepthScanViewController.swift` | Écran de visée, mesure en direct, rafale de capture |
 | `DepthScanPlugin.swift` | Pont Capacitor, exposé au JS sous le nom `DepthScan` |
+| `GVBridgeViewController.swift` | Enregistre le plugin auprès du pont (indispensable) |
 
 Le nom `DepthScan` et les champs renvoyés sont identiques à ceux du plugin
 Android. `js/native.js` n'a donc rien à changer : il ne sait pas sur quelle
@@ -67,8 +68,14 @@ npx cap open ios
 ```
 
 Dans Xcode, une seule fois : cible **App** → *Signing & Capabilities* →
-« Automatically manage signing » → choisir son équipe. Puis sélectionner
-l'iPhone branché et appuyer sur ▶.
+« Automatically manage signing » → choisir son équipe. Puis *File → Add Files
+to "App"…*, ajouter les `.swift` de `ios/App/App/` en cochant « Add to targets:
+App ». Enfin sélectionner l'iPhone branché et appuyer sur ▶.
+
+**Le piège** : Capacitor ne découvre pas les plugins écrits dans la cible de
+l'app. Sans `GVBridgeViewController`, tout compile, l'app se lance, et le pont
+répond « DepthScan plugin is not implemented on ios » — sans qu'aucune étape
+n'ait échoué. Le script branche ce contrôleur dans Main.storyboard.
 
 Ensuite, à chaque modification : `bash scripts/ios-sync.sh` puis ▶.
 
