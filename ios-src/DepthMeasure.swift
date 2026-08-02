@@ -51,6 +51,7 @@ enum DepthMeasure {
         var levelDeg: Double = 0    // écart du plan d'appui à l'horizontale réelle
         var fillRatio: Double = 0   // part de la zone centrale comptée comme relief
         var reliefMinMm: Double = 0 // seuil au-dessus duquel un pixel compte
+        var edgeRatio: Double = 0   // part du pourtour du cadre occupée par du relief
         var diag = ""
     }
 
@@ -150,6 +151,10 @@ enum DepthMeasure {
        pas un plat immense, c'est le plan d'appui qui est faux. */
     private static let maxFillRatio: Double = 0.75
 
+    /* Part du pourtour du cadre qu'on tolère occupée par du relief avant de
+       conclure que l'objet est coupé. Voir le rejet correspondant. */
+    private static let maxEdgeRatio: Double = 0.04
+
     /* Bornes de vraisemblance d'un repas. Ce sont elles qui auraient arrêté les
        « 5500 cm³ » d'ARCore avant qu'ils n'atteignent l'écran. */
     private static let minAreaCm2: Double = 30
@@ -173,6 +178,7 @@ enum DepthMeasure {
             + " horiz \(Int(r.levelDeg.rounded()))deg"
             + " rempl \(Int((r.fillRatio * 100).rounded()))%"
             + " seuil \(Int(r.reliefMinMm.rounded()))mm"
+            + " bord \(Int((r.edgeRatio * 100).rounded()))%"
     }
 
     /** Profondeur brute au centre de la carte, en cm. Aucun ajustement, aucun
@@ -390,6 +396,7 @@ enum DepthMeasure {
 
         // ---- Centre : le relief au-dessus de ce plan ----
         var volume = 0.0, area = 0.0, heightSum = 0.0, maxHeight = 0.0
+        var edgePixels = 0
         var depths = [Double]()
         depths.reserveCapacity((cx1 - cx0) * (cy1 - cy0))
 
@@ -426,7 +433,30 @@ enum DepthMeasure {
                 heightSum += h
                 if h > maxHeight { maxHeight = h }
                 depths.append(z)
+                if x == cx0 || x == cx1 - 1 || y == cy0 || y == cy1 - 1 { edgePixels += 1 }
             }
+        }
+
+        /* L'objet doit tenir ENTIÈREMENT dans le cadre. S'il le traverse, on
+           intègre un objet tronqué et rien ne le dit : le volume et la surface
+           sont ceux de la portion visible, avec la même apparence de sérieux.
+
+           Constaté sur six prises du même bol à la même distance : les trois où
+           il débordait donnaient 184 à 211 cm² de surface, les trois où il
+           tenait dans le cadre 157 à 169 cm² — 27 % d'écart sur un objet qui
+           n'avait pas bougé, uniquement selon qu'il touchait le bord ou non.
+
+           On compte les pixels de relief posés sur le pourtour de la zone
+           intégrée. Quelques-uns sont du bruit ; au-delà de 4 % du périmètre,
+           c'est un objet coupé. */
+        let perimeter = max(1, 2 * ((cx1 - cx0) + (cy1 - cy0)) - 4)
+        r.edgeRatio = Double(edgePixels) / Double(perimeter)
+        if r.edgeRatio > maxEdgeRatio {
+            r.samples = depths.count
+            r.note = "L'objet dépasse du cadre : recule un peu ou recentre-le."
+                + " Ce qui sort du cadre n'est pas mesuré, et le volume serait faux sans le dire."
+            r.diag = diag(r, dw, dh, fx, fy)
+            return r
         }
 
         let count = depths.count
