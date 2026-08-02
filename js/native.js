@@ -366,6 +366,10 @@
             heightMaxCm: r.heightMaxCm || 0,
             heightMeanCm: r.heightMeanCm || 0,
             distanceCm: r.distanceCm || 0,
+            /* L'échelle est indépendante du volume : elle ne demande qu'une
+               distance. Elle peut donc être valable alors que ok vaut false. */
+            scaleOk: !!r.scaleOk,
+            fieldWidthCm: r.fieldWidthCm || 0,
             cmPerPixel: r.cmPerPixel || 0,
             samples: r.samples || 0,
             note: r.note || '',

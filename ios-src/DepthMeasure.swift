@@ -36,6 +36,20 @@ enum DepthMeasure {
         var heightMeanCm: Double = 0
         var distanceCm: Double = 0
         var cmPerPixel: Double = 0
+
+        /* Largeur réelle, en cm, couverte par la photo transmise, à la distance
+           mesurée. C'est la seule grandeur d'échelle qui survive à tout : elle
+           ne dépend ni de la résolution du JPEG, ni d'un redimensionnement
+           ultérieur, ni du seuillage du relief. Un modèle de vision qui la
+           connaît n'a plus à deviner la taille de l'assiette — il lui reste à
+           reconnaître l'aliment, ce qu'il sait faire.
+
+           `cmPerPixel` en découle et n'a de sens que pour une image de largeur
+           `photoWidthPx` ; `fieldWidthCm` en est indépendant. Préférer
+           celui-ci partout où c'est possible. */
+        var fieldWidthCm: Double = 0
+        var scaleOk = false     // une distance fiable a été obtenue
+
         var samples = 0
         var note = ""
 
@@ -179,6 +193,10 @@ enum DepthMeasure {
             + " rempl \(Int((r.fillRatio * 100).rounded()))%"
             + " seuil \(Int(r.reliefMinMm.rounded()))mm"
             + " bord \(Int((r.edgeRatio * 100).rounded()))%"
+            // « champ » est la largeur du capteur en paysage ; « photo » celle de
+            // l'image livrée, pivotée en portrait. Les deux diffèrent de 4/3, et
+            // c'est exactement la confusion qui faussait l'échelle de 33 %.
+            + " photo \(Int(r.fieldWidthCm.rounded()))cm"
     }
 
     /** Profondeur brute au centre de la carte, en cm. Aucun ajustement, aucun
@@ -310,7 +328,10 @@ enum DepthMeasure {
         }
         let n = pz.count
         r.onPlane = n
-        if n > 0 { r.distanceCm = median(pz) * 100 }
+        if n > 0 {
+            r.distanceCm = median(pz) * 100
+            setScale(&r, median(pz), intr, res, photoWidthPx)
+        }
 
         if n < minPlanePoints {
             r.note = r.confident == 0
@@ -512,8 +533,9 @@ enum DepthMeasure {
         r.heightMaxCm = maxHeight * 100
         r.heightMeanCm = (heightSum / Double(count)) * 100
         r.distanceCm = med * 100
-        let fxPhoto = Double(intr[0][0]) * (Double(photoWidthPx) / Double(res.width))
-        r.cmPerPixel = fxPhoto > 0 ? (med / fxPhoto) * 100 : 0
+        // Échelle recalée sur la distance de l'objet plutôt que sur celle de la
+        // table : c'est le plan de l'aliment qu'on veut mesurer, pas le support.
+        setScale(&r, med, intr, res, photoWidthPx)
         r.diag = diag(r, dw, dh, fx, fy)
         /* Avis, pas rejet : la mesure reste affichée. L'ancien texte conseillait
            « 40-50 cm », ce que les mesures ont démenti — c'est justement la zone
@@ -524,6 +546,31 @@ enum DepthMeasure {
             r.note = "Un peu loin (\(Int((med * 100).rounded())) cm) : entre 30 et 33 cm la mesure est plus sûre."
         }
         return r
+    }
+
+    /**
+     Renseigne l'échelle de la photo transmise, à la distance `depthM`.
+
+     Attention à l'axe. `imageResolution` et les intrinsèques sont donnés en
+     PAYSAGE : `res.width` est le grand côté et `intr[0][0]` la focale qui lui
+     correspond. Or la photo livrée au JavaScript est pivotée en portrait — voir
+     `jpegData`, qui applique `.oriented(.right)` — donc sa largeur épouse le
+     PETIT côté du capteur, celui que gouverne `intr[1][1]` et `res.height`.
+
+     Le calcul précédent croisait les deux : il divisait la largeur du JPEG par
+     la focale du grand côté. Sur un capteur 1920×1440 cela surestimait l'échelle
+     d'un facteur 4/3, soit 33 %. Tant que le chiffre n'était qu'affiché, la
+     faute passait inaperçue ; transmise à l'estimateur, elle aurait fait
+     grossir chaque portion d'un tiers, et donc chaque dose de glucides.
+     */
+    private static func setScale(_ r: inout Result, _ depthM: Double,
+                                 _ intr: simd_float3x3, _ res: CGSize, _ photoWidthPx: Int) {
+        let fPortrait = Double(intr[1][1])          // focale du côté qui devient la largeur
+        let sensorPx = Double(res.height)           // ce même côté, en pixels capteur
+        guard fPortrait > 0, sensorPx > 0, photoWidthPx > 0, depthM > 0 else { return }
+        r.fieldWidthCm = depthM * (sensorPx / fPortrait) * 100
+        r.cmPerPixel = r.fieldWidthCm / Double(photoWidthPx)
+        r.scaleOk = true
     }
 
     // MARK: - Algèbre

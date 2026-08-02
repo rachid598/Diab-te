@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '63'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '64'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -472,7 +472,13 @@
              place, ajouter d'autres photos la conservait, et le relief d'un
              repas pouvait repartir avec une image qui n'était pas la sienne. */
           renderDepthResult(r.depth);
-          addDataUrls([r.dataUrl], r.depth && r.depth.ok ? r.depth : null);
+          /* On attache la mesure dès que l'ÉCHELLE est valable, sans exiger que
+             le volume le soit. C'est le cas courant en usage réel : une assiette
+             remplit le cadre, ce qui fait échouer l'intégration du relief, alors
+             que la distance — donc la taille apparente — reste parfaitement
+             mesurée. C'est l'échelle qui part au modèle, pas le volume. */
+          var d = r.depth;
+          addDataUrls([r.dataUrl], d && (d.ok || d.scaleOk) ? d : null);
         }).catch(function (e) {
           btn.disabled = false;
           toast('Relief indisponible : ' + ((e && e.message) || 'erreur'));
@@ -500,28 +506,37 @@
     if (!el) return;
     if (!d) { el.hidden = true; return; }
     el.hidden = false;
-    if (!d.ok) {
-      el.className = 'depth-result d-warn';
-      el.innerHTML = '📐 <strong>Relief non mesuré</strong> — ' +
-        escapeHtml(d.note || 'la carte de profondeur n\'a rien donné.') +
-        '<br>La photo reste utilisable : l\'estimation se fera sans le volume.' +
-        '<br><span class="tiny">ARCore n\'est précis qu\'à partir de 50 cm : trop près, ' +
-        'la mesure est fausse plutôt qu\'absente.</span>' +
-        (d.diag ? '<br><span class="tiny mono">' + escapeHtml(d.diag) + '</span>' : '');
+    /* Deux blocs distincts, parce que ce sont deux mesures distinctes :
+       l'échelle part au modèle, le volume non. Les confondre à l'écran ferait
+       croire que le volume compte dans la dose. */
+    var diag = d.diag ? '<br><span class="tiny mono">' + escapeHtml(d.diag) + '</span>' : '';
+
+    if (d.scaleOk && d.fieldWidthCm > 0) {
+      var html = '📏 <strong>Échelle mesurée — ' + Math.round(d.fieldWidthCm) +
+        ' cm de large sur la photo</strong>' +
+        '<br><span class="tiny">Transmise au modèle : il n\'a plus à deviner la taille de ' +
+        'l\'assiette. Mesurée à ' + Math.round(d.distanceCm) + ' cm, soit ' +
+        fr(Math.round(d.cmPerPixel * 10000) / 10000) + ' cm par pixel.</span>';
+      if (d.ok) {
+        html += '<br>🧪 <span class="tiny"><strong>Volume ' + Math.round(d.volumeCm3) +
+          ' cm³</strong> (assiette comprise), hauteur max ' +
+          fr(Math.round(d.heightMaxCm * 10) / 10) + ' cm sur ' + Math.round(d.areaCm2) +
+          ' cm². Affiché seulement : le volume n\'entre pas dans le calcul des glucides. ' +
+          'Il est juste à 2 % sur un objet mat et plein, mais ne voit qu\'un tiers ' +
+          'd\'un contenu liquide, sans que rien ne le signale.</span>';
+      } else if (d.note) {
+        html += '<br><span class="tiny">Volume non mesuré (' + escapeHtml(d.note) +
+          '). Sans effet sur l\'estimation, qui n\'utilise que l\'échelle.</span>';
+      }
+      el.className = 'depth-result d-ok';
+      el.innerHTML = html + diag;
       return;
     }
+
     el.className = 'depth-result d-warn';
-    el.innerHTML = '🧪 <strong>Relief mesuré — EXPÉRIMENTAL, non utilisé dans le calcul</strong>' +
-      '<br><span class="tiny">Le volume est intégré sur les seuls pixels fiables, sans combler ' +
-      'les trous : il varie avec la texture et l\'éclairage. Tant qu\'il n\'a pas été vérifié ' +
-      'contre des objets de volume connu, il n\'est pas transmis au modèle.</span><br>' +
-      'Volume au-dessus de la table ' +
-      '<strong>' + Math.round(d.volumeCm3) + ' cm³</strong>, hauteur max ' +
-      fr(Math.round(d.heightMaxCm * 10) / 10) + ' cm, sur ' + Math.round(d.areaCm2) + ' cm². ' +
-      'Échelle ' + fr(Math.round(d.cmPerPixel * 10000) / 10000) + ' cm/pixel à ' +
-      Math.round(d.distanceCm) + ' cm.' +
-      '<br><span class="tiny">Ce volume inclut l\'assiette et son rebord : c\'est un majorant, ' +
-      'transmis comme tel au modèle.</span>';
+    el.innerHTML = '📐 <strong>Rien de mesuré</strong> — ' +
+      escapeHtml(d.note || 'la carte de profondeur n\'a rien donné.') +
+      '<br>La photo reste utilisable : l\'estimation se fera sans échelle.' + diag;
   }
 
   function initPhotos() {
@@ -580,9 +595,10 @@
       notes: $('user-notes').value,
       extras: extrasText(),       // dessert / boisson, absents de la photo
       imageCount: sent.length,    // 0 fait basculer l'estimateur en mode description
-      /* Mesure ARCore de l'image transmise, s'il y en a une. Elle n'est plus
-         utilisée par l'estimateur tant qu'elle n'est pas validée (voir
-         estimator.js), mais elle reste enregistrée avec le repas. */
+      /* Mesure de l'image transmise, s'il y en a une. L'estimateur n'en retient
+         que l'ÉCHELLE — validée, et c'est le seul chiffre qui l'est ; le volume
+         reste enregistré avec le repas mais n'entre pas dans le calcul (voir
+         estimator.js et ios-src/README.md). */
       depth: textOnly ? null : depthOfSent(sent)
     };
     lastEstimateContext = Object.assign({}, ctx);
