@@ -29,9 +29,12 @@ final class DepthScanViewController: UIViewController, ARSCNViewDelegate {
     private let shutter = UIButton(type: .custom)
     private let closeButton = UIButton(type: .system)
     private let reticle = UIView()
+    private let ringFrame = UIView()
 
     private var reticleW: NSLayoutConstraint!
     private var reticleH: NSLayoutConstraint!
+    private var ringW: NSLayoutConstraint!
+    private var ringH: NSLayoutConstraint!
     private var reticleSized = false
 
     private var timer: Timer?
@@ -107,6 +110,24 @@ final class DepthScanViewController: UIViewController, ARSCNViewDelegate {
         reticle.isUserInteractionEnabled = false
         view.addSubview(reticle)
 
+        /* Le cadre extérieur matérialise la COURONNE : la zone sur laquelle le
+           plan d'appui est ajusté (jusqu'à 94 % de la carte de profondeur, tout
+           ce qui est hors du cadre intérieur).
+
+           Sans lui, la contrainte la plus déterminante de la mesure était
+           invisible. On visait l'objet dans le cadre vert en croyant bien faire,
+           pendant que le plan d'appui se calculait sur un bord de table, un sol
+           et un ordinateur portable — et le message d'erreur conseillait de
+           reculer, ce qui y faisait entrer encore plus de choses. La règle est
+           simple une fois qu'on la voit : entre les deux cadres, de la table
+           nue, rien d'autre. */
+        ringFrame.translatesAutoresizingMaskIntoConstraints = false
+        ringFrame.layer.borderColor = UIColor.white.withAlphaComponent(0.35).cgColor
+        ringFrame.layer.borderWidth = 1
+        ringFrame.layer.cornerRadius = 16
+        ringFrame.isUserInteractionEnabled = false
+        view.addSubview(ringFrame)
+
         readout.translatesAutoresizingMaskIntoConstraints = false
         readout.numberOfLines = 0
         readout.textAlignment = .center
@@ -123,7 +144,13 @@ final class DepthScanViewController: UIViewController, ARSCNViewDelegate {
         hint.textAlignment = .center
         hint.textColor = UIColor.white.withAlphaComponent(0.9)
         hint.font = .systemFont(ofSize: 13)
-        hint.text = "Tiens le téléphone à plat au-dessus de l'assiette, à 40-50 cm. Pas besoin de bouger."
+        /* La distance annoncée est passée de « 40-50 cm » à « 30-35 cm » sur
+           mesures : sur une brique de 1100 cm³, l'erreur vaut −0,3 % en moyenne
+           entre 29 et 33 cm, puis +7 % à 36 cm et +22 % à 37 cm — la surface
+           mesurée double entre 32 et 37 cm pour un objet qui n'a pas bougé.
+           La consigne du bandeau, elle, est la contrainte réelle : c'est là que
+           le plan d'appui est calculé. */
+        hint.text = "Téléphone à plat, à 30-35 cm. Entre les deux cadres, de la table nue — pas de bord, pas d'objet."
         view.addSubview(hint)
 
         shutter.translatesAutoresizingMaskIntoConstraints = false
@@ -149,6 +176,9 @@ final class DepthScanViewController: UIViewController, ARSCNViewDelegate {
             reticle.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             reticle.centerYAnchor.constraint(equalTo: view.centerYAnchor),
 
+            ringFrame.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            ringFrame.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+
             readout.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
             readout.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             readout.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
@@ -168,7 +198,9 @@ final class DepthScanViewController: UIViewController, ARSCNViewDelegate {
 
         reticleW = reticle.widthAnchor.constraint(equalToConstant: 200)
         reticleH = reticle.heightAnchor.constraint(equalToConstant: 200)
-        NSLayoutConstraint.activate([reticleW, reticleH])
+        ringW = ringFrame.widthAnchor.constraint(equalToConstant: 300)
+        ringH = ringFrame.heightAnchor.constraint(equalToConstant: 300)
+        NSLayoutConstraint.activate([reticleW, reticleH, ringW, ringH])
     }
 
     /**
@@ -195,8 +227,11 @@ final class DepthScanViewController: UIViewController, ARSCNViewDelegate {
         let bounds = view.bounds.size
         guard bounds.width > 0, bounds.height > 0 else { return }
         let scale = max(bounds.width / imageW, bounds.height / imageH)
-        reticleW.constant = imageW * scale * 0.5
-        reticleH.constant = imageH * scale * 0.5
+        // 0,50 et 0,94 : exactement centerFraction et ringFraction de DepthMeasure.
+        reticleW.constant = imageW * scale * 0.50
+        reticleH.constant = imageH * scale * 0.50
+        ringW.constant = imageW * scale * 0.94
+        ringH.constant = imageH * scale * 0.94
         reticleSized = true
     }
 

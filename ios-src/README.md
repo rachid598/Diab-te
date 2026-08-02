@@ -61,6 +61,49 @@ supposer.
 Un seul objet ne fait pas une validation. Il en faut cinq, de tailles
 différentes, avant de brancher quoi que ce soit sur l'estimateur.
 
+## Ce que la campagne de mesures a appris
+
+Dix prises de la même brique, sur un bureau en bois, ont donné :
+
+| Distance | Volume | Écart |
+|---|---|---|
+| 29-33 cm (6 prises) | 923 à 1119 cm³ | **−0,3 % en moyenne**, dispersion 4,7 % |
+| 34-36 cm (3 prises) | 1127 à 1182 cm³ | +2,5 % à +7,5 % |
+| 37 cm (1 prise) | 1343 cm³ | +22 % |
+
+La surface mesurée **double entre 32 et 37 cm** pour un objet immobile. La
+distance n'est donc pas un conseil, c'est un paramètre : au-delà de 35 cm la
+mesure dérive systématiquement vers le haut. La consigne affichée a été ramenée
+de « 40-50 cm » à « 30-35 cm ».
+
+Le bon volume vient d'une **compensation** : surface +15 %, hauteur moyenne
+−14 %. Aucun des deux termes n'est juste isolément. La hauteur moyenne mesurée
+reste bloquée à 4,97 cm pour une brique de 6,0 cm, quelle que soit la prise —
+c'est l'arrondi des arêtes par une carte de 256×192, et il faudra le
+re-quantifier sur des formes sans angle.
+
+### Deux contraintes invisibles, corrigées après coup
+
+**Le plan d'appui n'est pas ajusté là où on vise.** Il l'est sur la couronne :
+tout ce qui est hors du cadre intérieur, jusqu'à 94 % de la carte. Sur une
+table ronde à 40 cm, cette couronne déborde sur le bord de table puis sur le
+sol — et le message d'erreur conseillait alors de *reculer*, ce qui y faisait
+entrer davantage. Un second cadre l'affiche désormais, et le message a été
+réécrit.
+
+À noter : l'aperçu est en remplissage, donc **environ 6 cm de couronne de
+chaque côté sortent de l'écran** à 31 cm de distance. Les bords haut et bas du
+cadre extérieur sont visibles, les bords latéraux non — c'est la géométrie, pas
+un défaut d'affichage.
+
+**Le seuil de relief doit suivre le bruit du plan.** Fixé à 4 mm alors que
+l'ajustement laissait 6 mm d'écart-type sur une table vernie, il comptait la
+moitié de la table nue comme du relief : taux de remplissage bloqué à 74-79 %
+quel que soit le cadrage, garde-fou qui se déclenchait sur du bruit, et
+572 cm³ annoncés pour 1100 quand une mesure passait. Le seuil vaut désormais
+2,5 écarts-types du plan, avec 4 mm comme plancher. Il est affiché dans le
+diagnostic (`seuil Xmm`).
+
 ## Ce qui change par rapport à ARCore
 
 - **Aucune consigne de mouvement.** Immobile fonctionne. La version Android
