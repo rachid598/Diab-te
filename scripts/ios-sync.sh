@@ -34,6 +34,29 @@ fi
 echo "→ Injection de la mesure LiDAR"
 cp ios-src/*.swift "$APP"/
 
+# Puis TOUTES les autres copies présentes dans ios/. Quand on ajoute les
+# fichiers au projet via « File > Add Files to "App"… » en laissant cochée
+# l'option « Copy items if needed », Xcode les dépose dans le dossier du groupe
+# racine — ios/App/ — et non dans ios/App/App/. Le projet référence alors cette
+# copie-là, celle que le cp ci-dessus ne touche pas.
+#
+# La panne qui en découle est la pire de toutes : le script annonce
+# « Injection », la construction réussit, l'app se lance, et elle exécute
+# l'ancien code. Rien n'échoue, donc rien ne le signale. Un nettoyage complet du
+# cache n'y change rien : il recompile à fond le mauvais fichier. Ça a coûté
+# trois cycles de compilation avant qu'un find ne montre les deux chemins.
+#
+# On ne supprime pas la copie parallèle : le projet la référence, l'effacer
+# casserait la construction. On la garde alignée.
+for src in ios-src/*.swift; do
+  base=$(basename "$src")
+  while IFS= read -r dup; do
+    [ "$dup" = "$APP/$base" ] && continue
+    echo "  ↳ copie parallèle alignée : $dup"
+    cp "$src" "$dup"
+  done < <(find ios -name "$base" -type f)
+done
+
 # Poser les fichiers dans le dossier ne suffit pas : Xcode ne compile que ce qui
 # est référencé dans App.xcodeproj. Non référencés, ils sont ignorés EN SILENCE —
 # la construction réussit, l'app se lance, et le plugin DepthScan n'existe
