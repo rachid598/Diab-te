@@ -232,3 +232,41 @@ Tant que ce point n'est pas tranché, aucun volume n'est transmis au modèle :
 une mesure fausse présentée comme une donnée physique est pire que pas de
 mesure du tout, parce qu'elle sert ensuite à calculer des glucides. Et le cas
 du bol montre qu'elle peut être fausse en ayant l'air parfaite.
+
+## Ce qui EST branché : l'échelle
+
+Le volume butait de toute façon sur un obstacle que la validation ne pouvait
+pas lever : il mesure **le contenant plus la nourriture**. Devant un vrai
+repas, on ne peut pas soustraire l'assiette — le protocole vide/plein est un
+étalonnage de laboratoire, pas un usage.
+
+L'échelle n'a pas ce problème. `fieldWidthCm` est la largeur réelle, en cm,
+couverte par la photo transmise. Elle ne vient que de la distance et des
+intrinsèques : ni seuillage, ni hypothèse de forme, ni dépendance au contenu ou
+au récipient. C'est ce que ce capteur mesure le mieux, et c'est exactement
+l'information qui manque à un modèle de vision — sur une photo, une coupelle
+cadrée serré et une assiette de 28 cm se ressemblent.
+
+Deux conséquences dans le code :
+
+- **L'échelle survit au refus du volume.** Support non horizontal, zone trop
+  remplie, objet coupé par le cadre : ces rejets invalident une intégration de
+  relief, pas une distance. Et c'est le cas courant en usage réel, où le repas
+  remplit le cadre.
+- **Elle ne resserre pas la fourchette d'erreur.** Elle est juste, mais elle ne
+  dit rien de la hauteur — l'inconnue d'une vue de dessus — ni de la densité de
+  l'aliment. Resserrer afficherait une précision que la mesure ne porte pas.
+
+### Le piège de l'orientation
+
+`imageResolution` et les intrinsèques sont donnés en **paysage** : `res.width`
+est le grand côté, `intr[0][0]` sa focale. La photo livrée au JavaScript est
+pivotée en portrait (`.oriented(.right)`), donc sa largeur épouse le **petit**
+côté, gouverné par `intr[1][1]` et `res.height`.
+
+Le calcul d'origine croisait les deux et surestimait l'échelle d'un facteur
+4/3, soit **33 %**. Tant que le chiffre n'était qu'affiché sous la photo, la
+faute est passée inaperçue pendant toute la campagne ; transmise à
+l'estimateur, elle aurait grossi chaque portion d'un tiers. Le diagnostic
+affiche désormais `champ` (paysage, capteur) et `photo` (portrait, image
+livrée) côte à côte — ils diffèrent de 4/3, et c'est normal.

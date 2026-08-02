@@ -318,6 +318,23 @@ final class DepthScanViewController: UIViewController, ARSCNViewDelegate {
                 ? last!.note
                 : "Mesure instable (\(results.count) images valables sur 9) : recadre sur l'assiette seule et réessaie."
             payload["diag"] = last?.diag ?? ""
+            /* L'ÉCHELLE SURVIT AU REFUS DU VOLUME. Elle ne demande qu'une
+               distance et les intrinsèques ; ni plan d'appui, ni seuillage du
+               relief, ni objet entièrement dans le cadre. Les rejets qui
+               invalident un volume — support non horizontal, zone trop remplie,
+               objet coupé — ne disent rien contre elle.
+
+               C'est même le cas le plus fréquent en usage réel : un repas dans
+               une assiette remplit le cadre et fait souvent échouer le volume,
+               alors que sa taille apparente reste parfaitement calibrable. */
+            if let s = last, s.scaleOk {
+                payload["scaleOk"] = true
+                payload["fieldWidthCm"] = s.fieldWidthCm
+                payload["cmPerPixel"] = s.cmPerPixel
+                payload["distanceCm"] = s.distanceCm
+            } else {
+                payload["scaleOk"] = false
+            }
             finish(payload: payload)
             return
         }
@@ -339,6 +356,8 @@ final class DepthScanViewController: UIViewController, ARSCNViewDelegate {
         payload["heightMeanCm"] = chosen.heightMeanCm
         payload["distanceCm"] = chosen.distanceCm
         payload["cmPerPixel"] = chosen.cmPerPixel
+        payload["fieldWidthCm"] = chosen.fieldWidthCm
+        payload["scaleOk"] = chosen.scaleOk
         payload["samples"] = chosen.samples
         payload["note"] = spread > 0.25
             ? "Mesure dispersée (±\(Int((spread * 50).rounded())) %) : à prendre avec réserve."
