@@ -1,0 +1,315 @@
+import ARKit
+import SceneKit
+import UIKit
+
+/**
+ Écran de visée LiDAR : aperçu caméra, mesure en direct, capture.
+
+ Deux différences de fond avec l'écran ARCore qu'il remplace.
+
+ D'abord, aucune consigne de mouvement. ARCore triangulait la profondeur à
+ partir du déplacement du téléphone : il fallait balayer, on l'a d'ailleurs dit
+ à l'envers pendant plusieurs versions (« tiens le téléphone immobile »). Le
+ LiDAR mesure un temps de vol, image par image. Immobile marche.
+
+ Ensuite, la capture prend une RAFALE et retient la médiane. Une mesure isolée
+ peut tomber sur une image bruitée ; sur neuf mesures en une seconde et demie,
+ la médiane est stable et le désaccord entre elles renseigne sur la confiance
+ qu'on peut lui accorder. C'est aussi ce qui permet d'afficher un écart, donc
+ de savoir quand se méfier.
+ */
+final class DepthScanViewController: UIViewController, ARSCNViewDelegate {
+
+    /// Rendu au JS : le dictionnaire est passé tel quel à `call.resolve`.
+    var onDone: (([String: Any]) -> Void)?
+
+    private let sceneView = ARSCNView()
+    private let readout = UILabel()
+    private let hint = UILabel()
+    private let shutter = UIButton(type: .custom)
+    private let closeButton = UIButton(type: .system)
+    private let reticle = UIView()
+
+    private var timer: Timer?
+    private var lastResult: DepthMeasure.Result?
+    private var capturing = false
+    private var finished = false
+
+    /// Largeur maximale du JPEG renvoyé. Au-delà, le base64 traversant le pont
+    /// Capacitor devient inutilement lourd sans rien apporter au modèle.
+    private let maxPhotoWidth: CGFloat = 1440
+
+    // MARK: - Cycle de vie
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        buildUI()
+        sceneView.delegate = self
+        sceneView.automaticallyUpdatesLighting = true
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        UIApplication.shared.isIdleTimerDisabled = true
+
+        guard ARWorldTrackingConfiguration.isSupported else {
+            finish(error: "ARKit n'est pas disponible sur cet appareil.")
+            return
+        }
+        let config = ARWorldTrackingConfiguration()
+        /* Pas de détection de plans : sur une table unie elle met un temps
+           indéterminé à accrocher, et ce qu'elle accroche est souvent le SOL,
+           ce qui décale toutes les hauteurs de la hauteur de la table. Le plan
+           d'appui est déduit de la carte de profondeur elle-même. */
+        config.planeDetection = []
+        if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+            config.frameSemantics.insert(.sceneDepth)
+        } else {
+            finish(error: "Cet iPhone n'a pas de LiDAR : la mesure de volume n'est pas disponible.")
+            return
+        }
+        sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
+
+        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            self?.tick()
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        UIApplication.shared.isIdleTimerDisabled = false
+        timer?.invalidate()
+        timer = nil
+        sceneView.session.pause()
+    }
+
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
+    override var prefersStatusBarHidden: Bool { true }
+
+    // MARK: - Interface
+
+    private func buildUI() {
+        sceneView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(sceneView)
+
+        /* Le cadre matérialise la zone centrale effectivement intégrée (50 % de
+           la carte de profondeur). Sans lui, l'utilisateur cadre au jugé et se
+           voit refuser la mesure sans comprendre ce qui débordait. */
+        reticle.translatesAutoresizingMaskIntoConstraints = false
+        reticle.layer.borderColor = UIColor.white.withAlphaComponent(0.85).cgColor
+        reticle.layer.borderWidth = 2
+        reticle.layer.cornerRadius = 12
+        reticle.isUserInteractionEnabled = false
+        view.addSubview(reticle)
+
+        readout.translatesAutoresizingMaskIntoConstraints = false
+        readout.numberOfLines = 0
+        readout.textAlignment = .center
+        readout.textColor = .white
+        readout.font = .monospacedDigitSystemFont(ofSize: 15, weight: .medium)
+        readout.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        readout.layer.cornerRadius = 10
+        readout.layer.masksToBounds = true
+        readout.text = "Initialisation…"
+        view.addSubview(readout)
+
+        hint.translatesAutoresizingMaskIntoConstraints = false
+        hint.numberOfLines = 0
+        hint.textAlignment = .center
+        hint.textColor = UIColor.white.withAlphaComponent(0.9)
+        hint.font = .systemFont(ofSize: 13)
+        hint.text = "Tiens le téléphone à plat au-dessus de l'assiette, à 40-50 cm. Pas besoin de bouger."
+        view.addSubview(hint)
+
+        shutter.translatesAutoresizingMaskIntoConstraints = false
+        shutter.backgroundColor = .white
+        shutter.layer.cornerRadius = 36
+        shutter.layer.borderWidth = 4
+        shutter.layer.borderColor = UIColor.black.withAlphaComponent(0.25).cgColor
+        shutter.addTarget(self, action: #selector(capture), for: .touchUpInside)
+        view.addSubview(shutter)
+
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.setTitle("Annuler", for: .normal)
+        closeButton.setTitleColor(.white, for: .normal)
+        closeButton.addTarget(self, action: #selector(cancel), for: .touchUpInside)
+        view.addSubview(closeButton)
+
+        NSLayoutConstraint.activate([
+            sceneView.topAnchor.constraint(equalTo: view.topAnchor),
+            sceneView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            sceneView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            sceneView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+
+            reticle.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            reticle.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            reticle.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.5),
+            reticle.heightAnchor.constraint(equalTo: reticle.widthAnchor),
+
+            readout.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            readout.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            readout.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+
+            hint.bottomAnchor.constraint(equalTo: shutter.topAnchor, constant: -18),
+            hint.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            hint.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+
+            shutter.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            shutter.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -28),
+            shutter.widthAnchor.constraint(equalToConstant: 72),
+            shutter.heightAnchor.constraint(equalToConstant: 72),
+
+            closeButton.centerYAnchor.constraint(equalTo: shutter.centerYAnchor),
+            closeButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24)
+        ])
+    }
+
+    // MARK: - Mesure en direct
+
+    private func tick() {
+        guard !capturing, let frame = sceneView.session.currentFrame else { return }
+        let r = DepthMeasure.measure(frame: frame, photoWidthPx: Int(maxPhotoWidth))
+        lastResult = r
+        render(r, frame: frame)
+    }
+
+    private func render(_ r: DepthMeasure.Result, frame: ARFrame) {
+        let raw = frame.sceneDepth.map { DepthMeasure.rawCenter($0) } ?? "-"
+        if r.ok {
+            reticle.layer.borderColor = UIColor.systemGreen.cgColor
+            readout.text = String(format: "%.0f cm³  ·  %.0f cm²  ·  h %.1f cm\n%.0f cm de l'objet  ·  %d points",
+                                  r.volumeCm3, r.areaCm2, r.heightMaxCm, r.distanceCm, r.samples)
+        } else {
+            reticle.layer.borderColor = UIColor.white.withAlphaComponent(0.85).cgColor
+            readout.text = (r.note.isEmpty ? "Mesure en cours…" : r.note)
+        }
+        /* Ligne de diagnostic permanente. Sur Android, chaque refus obligeait à
+           deviner laquelle des trois causes possibles s'appliquait ; la voir en
+           permanence a fait gagner plusieurs allers-retours. */
+        hint.text = "centre brut \(raw)  ·  \(r.diag)"
+    }
+
+    // MARK: - Capture
+
+    @objc private func capture() {
+        guard !capturing, !finished else { return }
+        capturing = true
+        shutter.isEnabled = false
+        shutter.alpha = 0.4
+        readout.text = "Mesure…"
+
+        /* Rafale : neuf mesures étalées sur ~1,5 s, médiane des volumes retenus.
+           Une image isolée peut être bruitée ; la médiane ne l'est pas, et
+           l'écart entre les mesures dit s'il faut se méfier du résultat. */
+        var results: [DepthMeasure.Result] = []
+        var shots = 0
+        let burst = Timer.scheduledTimer(withTimeInterval: 0.17, repeats: true) { [weak self] t in
+            guard let self = self else { t.invalidate(); return }
+            shots += 1
+            if let frame = self.sceneView.session.currentFrame {
+                let r = DepthMeasure.measure(frame: frame, photoWidthPx: Int(self.maxPhotoWidth))
+                if r.ok { results.append(r) }
+            }
+            if shots >= 9 {
+                t.invalidate()
+                self.finishCapture(results)
+            }
+        }
+        RunLoop.main.add(burst, forMode: .common)
+    }
+
+    private func finishCapture(_ results: [DepthMeasure.Result]) {
+        guard let frame = sceneView.session.currentFrame else {
+            capturing = false
+            shutter.isEnabled = true
+            shutter.alpha = 1
+            return
+        }
+
+        guard let jpeg = jpegData(from: frame) else {
+            finish(error: "Impossible de lire l'image de la caméra.")
+            return
+        }
+
+        var payload: [String: Any] = [
+            "cancelled": false,
+            "jpegBase64": jpeg.base64EncodedString()
+        ]
+
+        /* Moins de cinq mesures valables sur neuf : on renvoie quand même la
+           photo, mais SANS volume. Une photo sans mesure reste exploitable par
+           le modèle ; une mesure tirée de deux images n'est pas une mesure. */
+        if results.count < 5 {
+            let last = lastResult
+            payload["depthOk"] = false
+            payload["note"] = last?.note.isEmpty == false
+                ? last!.note
+                : "Mesure instable (\(results.count) images valables sur 9) : recadre sur l'assiette seule et réessaie."
+            payload["diag"] = last?.diag ?? ""
+            finish(payload: payload)
+            return
+        }
+
+        let volumes = results.map { $0.volumeCm3 }
+        let med = DepthMeasure.median(volumes)
+        // Le résultat retenu est celui dont le volume est le plus proche de la
+        // médiane : tous ses champs restent alors cohérents entre eux.
+        let chosen = results.min { abs($0.volumeCm3 - med) < abs($1.volumeCm3 - med) } ?? results[0]
+
+        let lo = volumes.min() ?? med
+        let hi = volumes.max() ?? med
+        let spread = med > 0 ? (hi - lo) / med : 0
+
+        payload["depthOk"] = true
+        payload["volumeCm3"] = chosen.volumeCm3
+        payload["areaCm2"] = chosen.areaCm2
+        payload["heightMaxCm"] = chosen.heightMaxCm
+        payload["heightMeanCm"] = chosen.heightMeanCm
+        payload["distanceCm"] = chosen.distanceCm
+        payload["cmPerPixel"] = chosen.cmPerPixel
+        payload["samples"] = chosen.samples
+        payload["note"] = spread > 0.25
+            ? "Mesure dispersée (±\(Int((spread * 50).rounded())) %) : à prendre avec réserve."
+            : chosen.note
+        payload["diag"] = chosen.diag
+            + " rafale \(results.count)/9 med \(Int(med.rounded()))cm3"
+            + " min \(Int(lo.rounded())) max \(Int(hi.rounded()))"
+        finish(payload: payload)
+    }
+
+    /// Image caméra en JPEG portrait, redimensionnée.
+    private func jpegData(from frame: ARFrame) -> Data? {
+        let ci = CIImage(cvPixelBuffer: frame.capturedImage).oriented(.right)
+        let context = CIContext()
+        guard let cg = context.createCGImage(ci, from: ci.extent) else { return nil }
+        var image = UIImage(cgImage: cg)
+        if image.size.width > maxPhotoWidth {
+            let ratio = maxPhotoWidth / image.size.width
+            let target = CGSize(width: maxPhotoWidth, height: image.size.height * ratio)
+            let renderer = UIGraphicsImageRenderer(size: target)
+            image = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: target)) }
+        }
+        return image.jpegData(compressionQuality: 0.85)
+    }
+
+    // MARK: - Sortie
+
+    @objc private func cancel() {
+        finish(payload: ["cancelled": true])
+    }
+
+    private func finish(error: String) {
+        finish(payload: ["cancelled": false, "error": error])
+    }
+
+    private func finish(payload: [String: Any]) {
+        guard !finished else { return }
+        finished = true
+        timer?.invalidate()
+        timer = nil
+        let done = onDone
+        onDone = nil
+        dismiss(animated: true) { done?(payload) }
+    }
+}
