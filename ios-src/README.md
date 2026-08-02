@@ -90,12 +90,29 @@ npx cap open ios
 Dans Xcode, une seule fois : cible **App** → *Signing & Capabilities* →
 « Automatically manage signing » → choisir son équipe. Puis *File → Add Files
 to "App"…*, ajouter les `.swift` de `ios/App/App/` en cochant « Add to targets:
-App ». Enfin sélectionner l'iPhone branché et appuyer sur ▶.
+App » et en **décochant « Copy items if needed »**. Enfin sélectionner l'iPhone
+branché et appuyer sur ▶.
 
-**Le piège** : Capacitor ne découvre pas les plugins écrits dans la cible de
-l'app. Sans `GVBridgeViewController`, tout compile, l'app se lance, et le pont
-répond « DepthScan plugin is not implemented on ios » — sans qu'aucune étape
-n'ait échoué. Le script branche ce contrôleur dans Main.storyboard.
+### Deux pièges, tous deux silencieux
+
+**Capacitor ne découvre pas les plugins écrits dans la cible de l'app.** Sans
+`GVBridgeViewController`, tout compile, l'app se lance, et le pont répond
+« DepthScan plugin is not implemented on ios » — sans qu'aucune étape n'ait
+échoué. Le script branche ce contrôleur dans Main.storyboard.
+
+**« Copy items if needed » duplique les fichiers.** Xcode en dépose une copie
+dans `ios/App/`, pas dans `ios/App/App/`, et c'est cette copie-là que le projet
+compile ensuite. Le script écrit dans `ios/App/App/` : il annonce
+« Injection », la construction réussit, et l'app exécute l'ancien code
+indéfiniment. Un *Clean Build Folder* n'y change rien — il recompile à fond le
+mauvais fichier. Trois cycles perdus avant qu'un `find` ne montre les deux
+chemins. Le script aligne désormais toutes les copies qu'il trouve sous `ios/`,
+mais si un jour une mesure refuse obstinément de changer de comportement,
+commencer par :
+
+```
+find ios -name "DepthMeasure.swift"
+```
 
 Ensuite, à chaque modification : `bash scripts/ios-sync.sh` puis ▶.
 
