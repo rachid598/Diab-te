@@ -30,6 +30,10 @@ final class DepthScanViewController: UIViewController, ARSCNViewDelegate {
     private let closeButton = UIButton(type: .system)
     private let reticle = UIView()
 
+    private var reticleW: NSLayoutConstraint!
+    private var reticleH: NSLayoutConstraint!
+    private var reticleSized = false
+
     private var timer: Timer?
     private var lastResult: DepthMeasure.Result?
     private var capturing = false
@@ -94,8 +98,8 @@ final class DepthScanViewController: UIViewController, ARSCNViewDelegate {
         view.addSubview(sceneView)
 
         /* Le cadre matérialise la zone centrale effectivement intégrée (50 % de
-           la carte de profondeur). Sans lui, l'utilisateur cadre au jugé et se
-           voit refuser la mesure sans comprendre ce qui débordait. */
+           la carte de profondeur). Ses dimensions sont calculées à la première
+           image, pas fixées ici : voir sizeReticle. */
         reticle.translatesAutoresizingMaskIntoConstraints = false
         reticle.layer.borderColor = UIColor.white.withAlphaComponent(0.85).cgColor
         reticle.layer.borderWidth = 2
@@ -144,8 +148,6 @@ final class DepthScanViewController: UIViewController, ARSCNViewDelegate {
 
             reticle.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             reticle.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            reticle.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.5),
-            reticle.heightAnchor.constraint(equalTo: reticle.widthAnchor),
 
             readout.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
             readout.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
@@ -163,12 +165,46 @@ final class DepthScanViewController: UIViewController, ARSCNViewDelegate {
             closeButton.centerYAnchor.constraint(equalTo: shutter.centerYAnchor),
             closeButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24)
         ])
+
+        reticleW = reticle.widthAnchor.constraint(equalToConstant: 200)
+        reticleH = reticle.heightAnchor.constraint(equalToConstant: 200)
+        NSLayoutConstraint.activate([reticleW, reticleH])
+    }
+
+    /**
+     Met le cadre à la taille de la zone RÉELLEMENT intégrée.
+
+     Le cadre valait auparavant la moitié de la largeur de l'écran, ce qui était
+     faux dans les deux dimensions. La carte de profondeur est en 4:3 ; l'écran
+     est bien plus allongé ; ARKit affiche l'aperçu en « remplissage », donc il
+     rogne l'image sur les côtés et l'agrandit. Un carré de 50 % de la largeur
+     d'écran ne recouvrait ainsi qu'une fraction de la zone mesurée — environ
+     0,6 fois en largeur et 0,45 fois en hauteur.
+
+     Conséquence concrète : on croyait exclure le bord de table, le clavier et le
+     canapé alors qu'ils étaient dans la mesure, et la couronne servant de plan
+     d'appui n'était pas une table. Impossible à deviner en regardant l'écran,
+     puisque l'écran affirmait le contraire.
+     */
+    private func sizeReticle(_ frame: ARFrame) {
+        guard !reticleSized else { return }
+        let res = frame.camera.imageResolution
+        guard res.width > 0, res.height > 0 else { return }
+        // En portrait l'image est pivotée : sa largeur vient de la hauteur du capteur.
+        let imageW = res.height, imageH = res.width
+        let bounds = view.bounds.size
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let scale = max(bounds.width / imageW, bounds.height / imageH)
+        reticleW.constant = imageW * scale * 0.5
+        reticleH.constant = imageH * scale * 0.5
+        reticleSized = true
     }
 
     // MARK: - Mesure en direct
 
     private func tick() {
         guard !capturing, let frame = sceneView.session.currentFrame else { return }
+        sizeReticle(frame)
         let r = DepthMeasure.measure(frame: frame, photoWidthPx: Int(maxPhotoWidth))
         lastResult = r
         render(r, frame: frame)

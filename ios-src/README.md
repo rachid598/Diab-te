@@ -41,6 +41,26 @@ systématique, pas du bruit. Il peut venir du LiDAR comme du placement des point
 dans l'app Measure — on ne sait pas encore, et **aucune correction constante n'a
 été appliquée** tant que ce n'est pas tranché sur des volumes connus.
 
+## Première mesure de volume par ce code
+
+Brique couchée à plat sur une table dégagée, à 30 cm, inclinaison 16° :
+
+| | Réel | Mesuré | Écart |
+|---|---|---|---|
+| Surface au sol | 183 cm² | 186 cm² | **+1,6 %** |
+| Hauteur moyenne | 6,0 cm | 5,0 cm | −17 % |
+| Volume | 1100 cm³ | 923 cm³ | **−16 %** |
+
+La surface à 1,6 % près valide l'échelle absolue et les intrinsèques — c'est
+exactement ce qu'ARCore n'a jamais atteint. Tout le déficit porte sur la
+hauteur, et l'explication la plus probable est l'arrondi des arêtes vives par
+un capteur de 256×192 : une brique n'est faite que d'arêtes. Sur des aliments,
+sans angle franc, ce biais devrait être moindre — **à vérifier**, pas à
+supposer.
+
+Un seul objet ne fait pas une validation. Il en faut cinq, de tailles
+différentes, avant de brancher quoi que ce soit sur l'estimateur.
+
 ## Ce qui change par rapport à ARCore
 
 - **Aucune consigne de mouvement.** Immobile fonctionne. La version Android
