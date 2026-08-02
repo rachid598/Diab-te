@@ -20,6 +20,13 @@
      comportement actuel de la PWA. */
   var isApp = !!(C && typeof C.isNativePlatform === 'function' && C.isNativePlatform());
 
+  /* « android », « ios » ou « web ». Les deux plateformes natives n'ont pas le
+     même cycle de vie : sur Android le contenu web se met à jour tout seul par
+     OTA pendant que le code natif reste celui de l'APK installé, alors que sur
+     iOS tout est reconstruit ensemble à chaque compilation. Des garde-fous
+     écrits pour le premier cas n'ont aucun sens dans le second. */
+  var platform = (C && typeof C.getPlatform === 'function') ? C.getPlatform() : 'web';
+
   var PHOTO_DIR = 'photos';
   var NOTIF_CHANNEL = 'glucovision-controle';
   var photoBase = null;      // URL affichable du dossier photos (calculée une fois)
@@ -491,6 +498,7 @@
 
   window.Native = {
     isApp: isApp,
+    platform: platform,
     ready: ready,
     httpJson: httpJson,
 
