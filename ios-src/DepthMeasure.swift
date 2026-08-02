@@ -83,7 +83,28 @@ enum DepthMeasure {
        à la caméra et au LiDAR, et l'alignement des deux se dégrade. */
     private static let minDepthM: Double = 0.15
     private static let maxDepthM: Double = 2.0
-    private static let bestDepthMinM: Double = 0.25
+    private static let bestDepthMinM: Double = 0.27
+
+    /* Borne HAUTE de la bande utile, établie sur mesures et non sur intuition.
+       Dix prises de la même brique de 1100 cm³, immobile, sur le même bureau :
+
+           29-33 cm  →  −0,3 % en moyenne, dispersion 4,7 %
+           34 cm     →  +2,5 %
+           35 cm     →  +6,5 %
+           36 cm     →  +7,5 %
+           37 cm     →  +22 %
+
+       La surface mesurée double entre 32 et 37 cm pour un objet qui n'a pas
+       bougé : à 256×192, un pixel couvre 1,8 mm à 32 cm et 2,7 mm à 48 cm, et
+       le flou de bord grandit avec lui. Au-delà de 36 cm la mesure est refusée
+       plutôt qu'affichée : on n'a aucune raison de croire un nombre dont on
+       sait qu'il dérive de 20 %.
+
+       Limite assumée : le cadre ne couvre alors que 23 × 17 cm environ, ce qui
+       exclut les grandes assiettes plates. C'est une contrainte à documenter,
+       pas à contourner en autorisant une distance invalide. */
+    private static let bestDepthMaxM: Double = 0.34
+    private static let maxUsefulDepthM: Double = 0.36
 
     private static let centerFraction = 0.50
     private static let ringFraction = 0.94
@@ -431,6 +452,14 @@ enum DepthMeasure {
         }
 
         let med = median(depths)
+        if med > maxUsefulDepthM {
+            r.samples = count
+            r.distanceCm = med * 100
+            r.note = "Trop loin (\(Int((med * 100).rounded())) cm) : au-delà de 36 cm la mesure gonfle —"
+                + " +22 % à 37 cm sur un objet de référence. Rapproche-toi à 30-33 cm."
+            r.diag = diag(r, dw, dh, fx, fy)
+            return r
+        }
         let volumeCm3 = volume * 1e6
         let areaCm2 = area * 1e4
 
@@ -456,8 +485,13 @@ enum DepthMeasure {
         let fxPhoto = Double(intr[0][0]) * (Double(photoWidthPx) / Double(res.width))
         r.cmPerPixel = fxPhoto > 0 ? (med / fxPhoto) * 100 : 0
         r.diag = diag(r, dw, dh, fx, fy)
+        /* Avis, pas rejet : la mesure reste affichée. L'ancien texte conseillait
+           « 40-50 cm », ce que les mesures ont démenti — c'est justement la zone
+           où l'erreur passe de −0,3 % à +22 %. */
         if med < bestDepthMinM {
-            r.note = "Un peu près (\(Int((med * 100).rounded())) cm) : à 40-50 cm la mesure est plus sûre."
+            r.note = "Un peu près (\(Int((med * 100).rounded())) cm) : entre 30 et 33 cm la mesure est plus sûre."
+        } else if med > bestDepthMaxM {
+            r.note = "Un peu loin (\(Int((med * 100).rounded())) cm) : entre 30 et 33 cm la mesure est plus sûre."
         }
         return r
     }
