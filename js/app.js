@@ -444,7 +444,7 @@
   function initDepth() {
     var btn = $('btn-depth');
     var why = $('depth-why');
-    function say(t) { if (why) why.textContent = 'Relief : ' + t; }
+    function say(t) { if (why) why.textContent = 'Photo mesurée : ' + t; }
 
     if (!btn) { say('bouton absent de la page.'); return; }
     if (!Native.isApp) { say('PWA — la mesure exige l\'application native.'); return; }
@@ -466,7 +466,7 @@
         Native.depth.capture().then(function (r) {
           btn.disabled = false;
           if (!r) return;                                  // annulé
-          if (r.error) { toast('Relief : ' + r.error); return; }
+          if (r.error) { toast('Photo mesurée : ' + r.error); return; }
           /* La mesure est attachée à SON image, et non gardée dans une variable
              globale. Sinon retirer la vignette du scan laissait la profondeur en
              place, ajouter d'autres photos la conservait, et le relief d'un
@@ -481,7 +481,7 @@
           addDataUrls([r.dataUrl], d && (d.ok || d.scaleOk) ? d : null);
         }).catch(function (e) {
           btn.disabled = false;
-          toast('Relief indisponible : ' + ((e && e.message) || 'erreur'));
+          toast('Photo mesurée indisponible : ' + ((e && e.message) || 'erreur'));
         });
       });
     });
