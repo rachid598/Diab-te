@@ -16,10 +16,13 @@ import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import { Share } from '@capacitor/share';
 import { App } from '@capacitor/app';
 
-/* DepthScan est écrit dans le projet Android lui-même (android-src/), pas
-   distribué en paquet npm : il n'y a donc rien à importer, seulement un proxy à
-   déclarer. registerPlugin fonctionne aussi sur le web — l'appel échouerait à
-   l'exécution, mais js/native.js ne s'en sert que si isNativePlatform(). */
+/* DepthScan est écrit dans les projets natifs eux-mêmes — android-src/ pour
+   ARCore, ios-src/ pour ARKit — et non distribué en paquet npm : il n'y a donc
+   rien à importer, seulement un proxy à déclarer. Les deux implémentations
+   exposent le même nom et les mêmes champs, ce qui permet au web d'ignorer sur
+   quelle plateforme il tourne. registerPlugin fonctionne aussi sur le web —
+   l'appel échouerait à l'exécution, mais js/native.js ne s'en sert que si
+   isNativePlatform(). */
 const DepthScan = registerPlugin('DepthScan');
 
 window.Cap = {

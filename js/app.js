@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '61'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '62'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -3552,8 +3552,10 @@
     if (!el) return;
     var txt = 'Version ' + APP_VERSION + ' · GlucoVision';
     if (Native.isApp) {
-      txt += ' · APK ' + (nativeBuild == null ? '…' : nativeBuild);
-      if (nativeBuild != null && nativeBuild < MIN_NATIVE_BUILD) {
+      var android = !Native.platform || Native.platform === 'android';
+      txt += (android ? ' · APK ' : ' · iOS build ') +
+             (nativeBuild == null ? '…' : nativeBuild);
+      if (android && nativeBuild != null && nativeBuild < MIN_NATIVE_BUILD) {
         txt += ' (trop ancien, min. ' + MIN_NATIVE_BUILD + ')';
       }
     }
@@ -3568,6 +3570,14 @@
     Native.appBuild().then(function (build) {
       nativeBuild = build;
       showVersion();
+      /* Le plancher ne vaut QUE pour l'APK Android, où le contenu web se met à
+         jour par OTA pendant que le code natif reste celui de l'APK installé.
+         Sur iOS il n'y a pas d'OTA : natif et web sont compilés ensemble à
+         chaque ▶, donc le natif est à jour par construction — et sa numérotation
+         repart de 1. Le plancher se déclenchait donc systématiquement et
+         masquait le bouton Relief, c'est-à-dire exactement la fonction qu'on
+         venait d'y porter. */
+      if (Native.platform && Native.platform !== 'android') return;
       if (build == null || build >= MIN_NATIVE_BUILD) return;
       var el = $('native-outdated');
       if (!el) return;
