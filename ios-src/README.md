@@ -99,6 +99,35 @@ hauteur moyenne dégonflée d'autant.
 des indicateurs de cadrage, pas des mesures — les passer à l'estimateur
 reviendrait à lui donner une surface fausse de 20 %.
 
+## Le liquide n'est pas mesuré, et rien ne le signale
+
+Bol en porcelaine posé sur le bureau, jamais déplacé entre les deux séries,
+trois prises chacune à 34-36 cm :
+
+| | Prises | Moyenne |
+|---|---|---|
+| Vide | 538 · 574 · 539 | 550 cm³ |
+| + 300 g d'eau troublée au lait | 664 · 665 · 641 | 657 cm³ |
+
+**Différence : 106 cm³ pour 300 versés**, à ±14 cm³ près. Un tiers du liquide.
+
+Ce qui compte n'est pas l'écart, c'est qu'aucun indicateur ne l'annonce. Sur la
+série pleine : `ecart 0.1cm`, `horiz 0deg`, `bord 0%`, `incl 2-3deg`, et une
+dispersion de **2,1 %** — la meilleure répétabilité de toute la campagne. Le
+capteur renvoie même *plus* de points fiables plein que vide (6284 contre
+5290). Il est confiant, reproductible, et faux d'un facteur trois.
+
+Les garde-fous écrits jusqu'ici détectent un mauvais cadrage, un plan d'appui
+faux, un objet coupé. **Aucun ne détecte une physique fausse**, et il n'est pas
+évident qu'un seul le puisse : une surface liquide est un miroir pour
+l'infrarouge, elle ne rétrodiffuse pas mais réfléchit, et ce qui revient est la
+distance au plafond via le miroir. Le niveau est lu trop bas, sans dropout ni
+perte de confiance.
+
+Conséquence directe : **la validation sur la brique ne suffit pas à autoriser
+le branchement sur l'estimateur.** Un objet mat et convexe se mesure à 1 % près,
+un contenu liquide à 65 % près, et rien à l'écran ne distingue les deux cas.
+
 ### Deux contraintes invisibles, corrigées après coup
 
 **Le plan d'appui n'est pas ajusté là où on vise.** Il l'est sur la couronne :
@@ -178,14 +207,28 @@ Ensuite, à chaque modification : `bash scripts/ios-sync.sh` puis ▶.
 
 ## Statut
 
-**Spike non validé.** Le code n'a jamais été compilé ni exécuté — il a été écrit
-sur une machine Linux, sans compilateur Swift. Il reste à :
+**Compilé, exécuté, partiellement validé — non branché.**
 
-1. le faire compiler ;
-2. mesurer 5 objets de volume connu (brique de lait, bol d'eau pesé, boîte
-   rectangulaire, etc.) et comparer ;
-3. **seulement alors** décider de le brancher sur l'estimateur.
+Ce qui est acquis :
 
-Tant que l'étape 2 n'est pas faite, aucun volume ne doit être transmis au
-modèle : une mesure fausse présentée comme une donnée physique est pire que pas
-de mesure du tout, parce qu'elle sert ensuite à calculer des glucides.
+- Sur un objet **mat, convexe, posé à plat** entre 29 et 33 cm : 1109 cm³ pour
+  1100 réels sur huit prises, écart-type 2,2 %. Le modèle de vision se trompe
+  de ~20 % en médiane. Le gain est d'un ordre de grandeur.
+- Seul le **volume** est exploitable ; la surface est haute de 20 %, la hauteur
+  moyenne basse d'autant.
+- Au-delà de 36 cm la mesure dérive et est refusée.
+
+Ce qui bloque le branchement :
+
+- Sur un **contenu liquide**, la mesure ne voit qu'un tiers du volume — et
+  aucun indicateur ne le signale, la répétabilité étant même meilleure que sur
+  la brique. Un plat en sauce, une soupe, un yaourt brillant relèvent
+  probablement du même cas.
+- Il manque la mesure d'un **contenu opaque et mat** de volume connu
+  (compote, yaourt) pour savoir si l'échec porte sur les liquides seuls ou sur
+  toutes les formes creuses remplies.
+
+Tant que ce point n'est pas tranché, aucun volume n'est transmis au modèle :
+une mesure fausse présentée comme une donnée physique est pire que pas de
+mesure du tout, parce qu'elle sert ensuite à calculer des glucides. Et le cas
+du bol montre qu'elle peut être fausse en ayant l'air parfaite.
