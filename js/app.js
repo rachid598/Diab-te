@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '62'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '63'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -435,14 +435,31 @@
      Le bouton n'apparaît que si l'appareil sait le faire. Le montrer partout
      pour l'expliquer ensuite ne servirait qu'à promettre ce qu'on ne peut pas
      tenir. */
+  /* Le bouton peut rester caché pour cinq raisons distinctes, dont trois sont
+     silencieuses côté natif. Sans cette ligne d'état, chacune se présente à
+     l'écran exactement de la même façon — un bouton qui n'est pas là — et il
+     faut une manche d'aller-retour pour éliminer une hypothèse. Elle est
+     affichée en permanence sous le réglage, y compris quand tout va bien. */
+  var depthWired = false;
   function initDepth() {
     var btn = $('btn-depth');
-    if (!btn || !Native.isApp) return;
+    var why = $('depth-why');
+    function say(t) { if (why) why.textContent = 'Relief : ' + t; }
 
-    if (!settings.experimentalTools) return;   // éteint par défaut
+    if (!btn) { say('bouton absent de la page.'); return; }
+    if (!Native.isApp) { say('PWA — la mesure exige l\'application native.'); return; }
+    if (!settings.experimentalTools) { say('réglage décoché.'); return; }
+
+    say('plateforme ' + (Native.platform || '?') + ', interrogation du capteur…');
     Native.depth.available().then(function (a) {
-      if (!a || !a.supported) return;
+      if (!a || !a.supported) {
+        say('capteur indisponible (' + ((a && a.reason) || 'sans réponse') + ').');
+        return;
+      }
+      say('disponible (' + (a.reason || 'ok') + ').');
       btn.hidden = false;
+      if (depthWired) return;
+      depthWired = true;
       btn.addEventListener('click', function () {
         if (images.length >= Camera.MAX_ANGLES) { toast('Maximum ' + Camera.MAX_ANGLES + ' vues.'); return; }
         btn.disabled = true;
@@ -3104,6 +3121,9 @@
     Storage.saveSettings(settings);
     $('settings-modal').hidden = true;
     updateCompareToggle();
+    // Cocher « outils expérimentaux » doit faire apparaître le bouton tout de
+    // suite : redémarrer l'app pour voir l'effet d'une case ne se devine pas.
+    initDepth();
     toast('Réglages enregistrés.');
   }
 
