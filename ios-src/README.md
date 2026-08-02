@@ -76,11 +76,28 @@ distance n'est donc pas un conseil, c'est un paramètre : au-delà de 35 cm la
 mesure dérive systématiquement vers le haut. La consigne affichée a été ramenée
 de « 40-50 cm » à « 30-35 cm ».
 
-Le bon volume vient d'une **compensation** : surface +15 %, hauteur moyenne
-−14 %. Aucun des deux termes n'est juste isolément. La hauteur moyenne mesurée
-reste bloquée à 4,97 cm pour une brique de 6,0 cm, quelle que soit la prise —
-c'est l'arrondi des arêtes par une carte de 256×192, et il faudra le
-re-quantifier sur des formes sans angle.
+Après correction du cadrage, huit prises entre 29 et 33 cm donnent **1109 cm³
+en moyenne pour 1100 réels — +0,9 %, écart-type 2,2 %**, étendue 1067 à
+1142 cm³. Le modèle de vision, lui, se trompe de ~20 % en médiane.
+
+### Le volume est juste, la surface et la hauteur ne le sont pas
+
+Sur ces mêmes prises, la surface annonce 210 à 227 cm² pour 183 réels
+(**+16 à +24 %**) et la hauteur moyenne — volume ÷ surface — tombe à 5,0-5,3 cm
+pour 6,0 (**−12 à −16 %**). Les deux sont franchement faux et le volume est
+juste quand même.
+
+Ce n'est pas une compensation heureuse, c'est une propriété. Le flou du capteur
+sur les arêtes est à peu près symétrique : il étale l'objet vers l'extérieur en
+ajoutant des pixels de faible hauteur, et rabote les pixels de pleine hauteur
+près du bord. Une convolution symétrique **conserve l'intégrale** ∫h·dA. Le
+volume y survit ; la surface, qui sort d'un seuillage, est gonflée du périmètre
+multiplié par la largeur du flou (~5 mm ici, soit environ 3 pixels), et la
+hauteur moyenne dégonflée d'autant.
+
+**Seul le volume doit être transmis en aval.** `areaCm2` et `heightMeanCm` sont
+des indicateurs de cadrage, pas des mesures — les passer à l'estimateur
+reviendrait à lui donner une surface fausse de 20 %.
 
 ### Deux contraintes invisibles, corrigées après coup
 
