@@ -1,5 +1,6 @@
 import ARKit
 import CoreVideo
+import simd
 import Foundation
 
 /**
@@ -47,6 +48,8 @@ enum DepthMeasure {
         var onPlane = 0
         var planeRmsCm: Double = 0
         var tiltDeg: Double = 0
+        var levelDeg: Double = 0    // écart du plan d'appui à l'horizontale réelle
+        var fillRatio: Double = 0   // part de la zone centrale comptée comme relief
         var diag = ""
     }
 
@@ -91,6 +94,20 @@ enum DepthMeasure {
     private static let maxTiltDeg: Double = 35
     private static let minCos: Double = 0.5
 
+    /* Une table est HORIZONTALE. ARKit connaît la gravité, donc on peut le
+       vérifier au lieu de l'espérer — et c'est le seul garde-fou qui distingue
+       une table d'un dossier de canapé, d'un mur ou d'un plan aberrant né d'une
+       couronne hétérogène. Sans lui, l'ajustement trouvait un plan « plausible »
+       à 1,2 cm près sur un mélange de table, de sol et de clavier, et tout le
+       centre passait ensuite pour du relief : 543 cm² de relief sur 610 cm² de
+       zone, d'où les 4403 cm³ annoncés pour une brique de lait. */
+    private static let maxLevelDeg: Double = 20
+
+    /* Un repas ne remplit pas toute la zone de mesure : il y a forcément de la
+       table visible autour de lui, dedans. Au-delà de cette proportion, ce n'est
+       pas un plat immense, c'est le plan d'appui qui est faux. */
+    private static let maxFillRatio: Double = 0.75
+
     /* Bornes de vraisemblance d'un repas. Ce sont elles qui auraient arrêté les
        « 5500 cm³ » d'ARCore avant qu'ils n'atteignent l'écran. */
     private static let minAreaCm2: Double = 30
@@ -111,6 +128,8 @@ enum DepthMeasure {
             + " px \(r.depthPixels) sur \(r.confident) fiables plan \(r.onPlane)"
             + " ecart \(String(format: "%.1f", r.planeRmsCm))cm"
             + " incl \(Int(r.tiltDeg.rounded()))deg"
+            + " horiz \(Int(r.levelDeg.rounded()))deg"
+            + " rempl \(Int((r.fillRatio * 100).rounded()))%"
     }
 
     /** Profondeur brute au centre de la carte, en cm. Aucun ajustement, aucun
@@ -291,6 +310,30 @@ enum DepthMeasure {
             return r
         }
 
+        /* Le plan ajusté est-il HORIZONTAL dans le monde réel ? La normale du
+           plan est exprimée dans le repère de l'image (x droite, y bas, z
+           devant) ; le repère caméra d'ARKit a y vers le haut et z vers
+           l'arrière, d'où les deux signes inversés. On la fait passer en repère
+           monde par la rotation de la pose, et l'axe y du monde est la verticale
+           gravitaire — ARKit la connaît, elle est gratuite.
+
+           C'est le contrôle qui manquait. Sans lui, une couronne mêlant table,
+           sol et clavier produisait un plan « plausible » à 1,2 cm près, et tout
+           le centre passait ensuite pour du relief. */
+        let camNormal = simd_float3(Float(a), Float(-b), 1)
+        let m = frame.camera.transform
+        let rot = simd_float3x3(simd_float3(m.columns.0.x, m.columns.0.y, m.columns.0.z),
+                                simd_float3(m.columns.1.x, m.columns.1.y, m.columns.1.z),
+                                simd_float3(m.columns.2.x, m.columns.2.y, m.columns.2.z))
+        let up = abs(simd_normalize(rot * camNormal).y)
+        r.levelDeg = Double(acos(min(1, up))) * 180 / .pi
+        if r.levelDeg > maxLevelDeg {
+            r.note = "Le support détecté n'est pas horizontal (\(Int(r.levelDeg.rounded()))° de la table) :"
+                + " vise une table dégagée, sans canapé ni bord de table dans le cadre."
+            r.diag = diag(r, dw, dh, fx, fy)
+            return r
+        }
+
         /* Inclinaison du téléphone par rapport à la table : la normale du plan
            ajusté fait cet angle avec l'axe optique. À plat au-dessus de
            l'assiette, elle vaut zéro. */
@@ -338,6 +381,14 @@ enum DepthMeasure {
         }
 
         let count = depths.count
+        r.fillRatio = Double(count) / Double((cx1 - cx0) * (cy1 - cy0))
+        if r.fillRatio > maxFillRatio {
+            r.samples = count
+            r.note = "Presque toute la zone est vue comme du relief (\(Int((r.fillRatio * 100).rounded())) %) :"
+                + " le plan d'appui est faux. Recule pour voir de la table nue tout autour du plat."
+            r.diag = diag(r, dw, dh, fx, fy)
+            return r
+        }
         if count < minSamples {
             r.samples = count
             r.note = "Aucun relief au centre (\(count) points) : centre l'assiette dans le cadre."
