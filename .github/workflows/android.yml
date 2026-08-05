@@ -5,7 +5,10 @@ name: Build APK Android
 on:
   workflow_dispatch:
   push:
-    branches: [claude/meal-carb-estimator-app-twxpqp]
+    branches:
+      - claude/meal-carb-estimator-app-twxpqp
+      - sans-relief
+      - avec-relief
     paths:
       - 'index.html'
       - 'css/**'
@@ -17,6 +20,7 @@ on:
       - 'capacitor.config.json'
       - 'package.json'
       - 'scripts/**'
+      - 'signing/**'
       - '.github/workflows/android.yml'
 
 # Nécessaire pour publier l'APK et le bundle de mise à jour dans des releases.
@@ -28,7 +32,7 @@ permissions:
 # la publication de son bundle : la version disparaissait purement et
 # simplement, l'app restant bloquée sur la dernière réellement publiée.
 concurrency:
-  group: android-apk
+  group: android-apk-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -36,6 +40,54 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # ---- Variante ----------------------------------------------------------
+      # Cette branche est la version STABLE : la v44, dernier état avant
+      # l'introduction d'ARCore. Elle garde le paquet d'origine, donc
+      # l'historique des repas déjà enregistré sur le téléphone est conservé.
+      # La branche avec-relief porte la version expérimentale sous un autre
+      # paquet, et chacune a ses propres tags de release — sans quoi la stable
+      # se mettrait à jour toute seule vers le contenu web de l'autre, l'OTA
+      # pointant sur un tag fixe.
+      - name: Déterminer la variante
+        id: variant
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            sans-relief)
+              echo "apk_tag=apk-stable"        >> "$GITHUB_OUTPUT"
+              echo "ota_tag=ota-stable"        >> "$GITHUB_OUTPUT"
+              echo "app_id=io.github.rachid598.glucovision" >> "$GITHUB_OUTPUT"
+              echo "label=GlucoVision"         >> "$GITHUB_OUTPUT"
+              echo "artifact=glucovision-apk-stable" >> "$GITHUB_OUTPUT"
+              # Décalage de 2000. Android refuse d'installer un versionCode
+              # inférieur à celui déjà présent, avec pour tout message « app
+              # not installed ». Les builds de développement sont montés à 64
+              # et un premier essai de branche stable a publié 1061 ; partir de
+              # 2044 garantit que cette version passe par-dessus n'importe
+              # lequel d'entre eux, en conservant les données.
+              echo "code_offset=2000"          >> "$GITHUB_OUTPUT"
+              echo "titre=GlucoVision — APK stable (avant ARCore)" >> "$GITHUB_OUTPUT"
+              ;;
+            avec-relief)
+              echo "apk_tag=apk-relief"        >> "$GITHUB_OUTPUT"
+              echo "ota_tag=ota-relief"        >> "$GITHUB_OUTPUT"
+              echo "app_id=io.github.rachid598.glucovision.relief" >> "$GITHUB_OUTPUT"
+              echo "label=GlucoVision Relief"  >> "$GITHUB_OUTPUT"
+              echo "artifact=glucovision-apk-relief" >> "$GITHUB_OUTPUT"
+              echo "code_offset=0"             >> "$GITHUB_OUTPUT"
+              echo "titre=GlucoVision — APK relief (expérimental)" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "apk_tag=apk-latest"        >> "$GITHUB_OUTPUT"
+              echo "ota_tag=ota-latest"        >> "$GITHUB_OUTPUT"
+              echo "app_id=io.github.rachid598.glucovision" >> "$GITHUB_OUTPUT"
+              echo "label=GlucoVision"         >> "$GITHUB_OUTPUT"
+              echo "artifact=glucovision-apk"  >> "$GITHUB_OUTPUT"
+              echo "code_offset=0"             >> "$GITHUB_OUTPUT"
+              echo "titre=GlucoVision — APK Android (dernier build)" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+          cat "$GITHUB_OUTPUT"
 
       # Capacitor 8 exige Node >= 22 : un Node plus ancien fait échouer « cap » net.
       - uses: actions/setup-node@v4
@@ -111,20 +163,41 @@ jobs:
         env:
           APP_VERSION: ${{ steps.version.outputs.app }}
           BUNDLE_VERSION: ${{ steps.version.outputs.bundle }}
+          APP_ID: ${{ steps.variant.outputs.app_id }}
+          LABEL: ${{ steps.variant.outputs.label }}
+          CODE_OFFSET: ${{ steps.variant.outputs.code_offset }}
         run: |
           GRADLE=android/app/build.gradle
-          sed -i "s/versionCode [0-9]\+/versionCode $APP_VERSION/" "$GRADLE"
+          CODE=$(( APP_VERSION + CODE_OFFSET ))
+          sed -i "s/versionCode [0-9]\+/versionCode $CODE/" "$GRADLE"
           sed -i "s/versionName \"[^\"]*\"/versionName \"$BUNDLE_VERSION\"/" "$GRADLE"
-          grep -n 'versionCode\|versionName' "$GRADLE"
+          # applicationId, PAS namespace : le paquet Java des sources ne bouge
+          # pas, seule l'identité de l'application installée change.
+          sed -i "s/applicationId \"[^\"]*\"/applicationId \"$APP_ID\"/" "$GRADLE"
+          grep -n 'versionCode\|versionName\|applicationId' "$GRADLE"
+
+          STRINGS=android/app/src/main/res/values/strings.xml
+          python3 - "$STRINGS" "$LABEL" <<'PY'
+          import re, sys
+          path, label = sys.argv[1], sys.argv[2]
+          s = open(path, encoding='utf-8').read()
+          for name in ('app_name', 'title_activity_main'):
+              s = re.sub(r'(<string name="%s">)[^<]*(</string>)' % name,
+                         lambda m: m.group(1) + label + m.group(2), s)
+          open(path, 'w', encoding='utf-8').write(s)
+          print(s)
+          PY
 
       # Raccourcis d'appui long sur l'icône + schéma glucovision:// qui les porte.
       # Au restaurant, ça évite d'ouvrir l'app puis de chercher le bouton Photo.
       - name: Ajouter les raccourcis d'écran d'accueil
+        env:
+          APP_ID: ${{ steps.variant.outputs.app_id }}
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
           mkdir -p android/app/src/main/res/xml android/app/src/main/res/values
 
-          cat > android/app/src/main/res/xml/shortcuts.xml <<'XML'
+          cat > android/app/src/main/res/xml/shortcuts.xml <<XML
           <?xml version="1.0" encoding="utf-8"?>
           <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
             <shortcut
@@ -134,7 +207,7 @@ jobs:
               android:shortcutLongLabel="@string/shortcut_photo_long">
               <intent
                 android:action="android.intent.action.VIEW"
-                android:targetPackage="io.github.rachid598.glucovision"
+                android:targetPackage="${APP_ID}"
                 android:targetClass="io.github.rachid598.glucovision.MainActivity"
                 android:data="glucovision://photo" />
             </shortcut>
@@ -145,7 +218,7 @@ jobs:
               android:shortcutLongLabel="@string/shortcut_manuel_long">
               <intent
                 android:action="android.intent.action.VIEW"
-                android:targetPackage="io.github.rachid598.glucovision"
+                android:targetPackage="${APP_ID}"
                 android:targetClass="io.github.rachid598.glucovision.MainActivity"
                 android:data="glucovision://manuel" />
             </shortcut>
@@ -184,6 +257,56 @@ jobs:
           PY
           grep -n 'android.app.shortcuts' "$MANIFEST"
 
+      - name: Installer la clé de signature stable
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+        run: |
+          DEST=android/app/glucovision-signing.jks
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$DEST"
+            PASS="$KEYSTORE_PASS"
+            echo "Clé de signature issue des secrets du dépôt."
+          else
+            cp signing/glucovision-signing.jks "$DEST"
+            PASS=glucovision
+            echo "Clé de signature issue de signing/ (committée)."
+          fi
+          keytool -list -keystore "$DEST" -storepass "$PASS" | grep -i 'fingerprint\|empreinte' || true
+
+          python3 - "$PASS" <<'PY'
+          import re, sys
+          pwd = sys.argv[1]
+          path = 'android/app/build.gradle'
+          s = open(path, encoding='utf-8').read()
+          if 'glucovisionStable' in s:
+              print('deja configure'); sys.exit(0)
+          block = (
+              '    signingConfigs {\n'
+              '        glucovisionStable {\n'
+              '            storeFile file("glucovision-signing.jks")\n'
+              '            storePassword "%s"\n'
+              '            keyAlias "glucovision"\n'
+              '            keyPassword "%s"\n'
+              '        }\n'
+              '    }\n' % (pwd, pwd)
+          )
+          m = re.search(r'(android\s*\{\n)', s)
+          if not m:
+              sys.exit("bloc android { introuvable dans build.gradle")
+          s = s[:m.end(1)] + block + s[m.end(1):]
+
+          # Le build « debug » reste celui qu'on publie (installable sans compte
+          # développeur) : on lui substitue simplement notre clé.
+          m2 = re.search(r'(buildTypes\s*\{\s*\n)', s)
+          if not m2:
+              sys.exit('bloc buildTypes { introuvable dans build.gradle')
+          s = s[:m2.end(1)] + '        debug {\n            signingConfig signingConfigs.glucovisionStable\n        }\n' + s[m2.end(1):]
+          open(path, 'w', encoding='utf-8').write(s)
+          print('signingConfig applique')
+          PY
+          grep -n 'glucovisionStable' android/app/build.gradle
+
       - name: Compiler l'APK
         run: |
           cd android
@@ -208,6 +331,7 @@ jobs:
           APP_VERSION: ${{ steps.version.outputs.app }}
           BUNDLE_VERSION: ${{ steps.version.outputs.bundle }}
           REPO: ${{ github.repository }}
+          OTA_TAG: ${{ steps.variant.outputs.ota_tag }}
         run: |
           # index.html doit être à la RACINE de l'archive.
           (cd www && zip -qr ../dist/www.zip .)
@@ -215,7 +339,7 @@ jobs:
           {
             "appVersion": "$APP_VERSION",
             "version": "$BUNDLE_VERSION",
-            "url": "https://github.com/$REPO/releases/download/ota-latest/www.zip"
+            "url": "https://github.com/$REPO/releases/download/$OTA_TAG/www.zip"
           }
           EOF
           cat dist/latest.json
@@ -223,7 +347,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: glucovision-apk
+          name: ${{ steps.variant.outputs.artifact }}
           path: dist/glucovision.apk
 
       # Releases aux tags fixes : les liens de téléchargement ne changent jamais,
@@ -234,6 +358,8 @@ jobs:
           COMMIT: ${{ github.sha }}
           APK_SIZE: ${{ steps.apk.outputs.size }}
           APP_VERSION: ${{ steps.version.outputs.app }}
+          APK_TAG: ${{ steps.variant.outputs.apk_tag }}
+          TITRE: ${{ steps.variant.outputs.titre }}
         run: |
           {
             echo "**GlucoVision v$APP_VERSION** — APK signé avec la clé de debug Android :"
@@ -250,15 +376,17 @@ jobs:
             echo
             echo "Build : commit \`$COMMIT\` · taille $APK_SIZE"
           } > notes.md
-          gh release delete apk-latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create apk-latest dist/glucovision.apk \
-            --title "GlucoVision — APK Android (dernier build)" \
+          gh release delete "$APK_TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$APK_TAG" dist/glucovision.apk \
+            --title "$TITRE" \
             --notes-file notes.md
 
       - name: Publier le bundle de mise à jour
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APP_VERSION: ${{ steps.version.outputs.app }}
+          OTA_TAG: ${{ steps.variant.outputs.ota_tag }}
+          TITRE: ${{ steps.variant.outputs.titre }}
         run: |
           {
             echo "Contenu web de GlucoVision v$APP_VERSION, téléchargé automatiquement"
@@ -266,7 +394,7 @@ jobs:
             echo
             echo "Rien à télécharger à la main ici."
           } > ota-notes.md
-          gh release delete ota-latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create ota-latest dist/www.zip dist/latest.json \
-            --title "GlucoVision — mise à jour du contenu web (v$APP_VERSION)" \
+          gh release delete "$OTA_TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$OTA_TAG" dist/www.zip dist/latest.json \
+            --title "$TITRE — contenu web (v$APP_VERSION)" \
             --notes-file ota-notes.md
