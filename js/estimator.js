@@ -171,41 +171,6 @@
     } else {
       lines.push('Aucun objet-repère : estime l\'échelle via l\'assiette/les couverts et baisse la confiance.');
     }
-    /* ÉCHELLE MESURÉE — transmise. VOLUME MESURÉ — pas transmis.
-       La distinction n'est pas de prudence, elle est expérimentale.
-
-       Le volume a été confronté à des objets pesés. Sur un objet mat, convexe,
-       posé à plat, il tombe à 2 % près. Sur un contenu liquide dans un bol, il
-       n'en voit qu'un tiers — et aucun indicateur ne le signale : la
-       répétabilité y était meilleure que sur l'objet de référence. Un chiffre
-       qui peut être faux d'un facteur trois en ayant l'air parfait n'entre pas
-       dans un calcul de glucides. Et de toute façon il mesure le contenant plus
-       la nourriture, ce qui ne se sépare pas devant un vrai repas.
-
-       L'échelle, elle, ne vient que de la distance et des intrinsèques de
-       l'objectif. Aucun seuillage, aucune hypothèse de forme, aucune dépendance
-       au contenu ou au récipient. C'est ce que ce capteur mesure le mieux, et
-       c'est précisément l'information qui manque à un modèle de vision : sur
-       une photo, une coupelle cadrée serré et une assiette de 28 cm se
-       ressemblent. Lui donner la largeur réelle du champ transforme sa tâche
-       de « devine la taille » en « identifie l'aliment ».
-
-       Voir ios-src/README.md pour la campagne de mesures qui a tranché. */
-    var sc = ctx.depth;
-    if (sc && sc.scaleOk && sc.fieldWidthCm > 0) {
-      lines.push('ÉCHELLE MESURÉE AU TÉLÉMÈTRE (LiDAR), fiable : la photo couvre '
-        + Math.round(sc.fieldWidthCm) + ' cm de large en vrai, sur toute sa largeur.');
-      lines.push('Sers-t\'en comme règle : une chose qui occupe la moitié de la largeur');
-      lines.push('de l\'image fait donc ' + Math.round(sc.fieldWidthCm / 2) + ' cm.');
-      lines.push('MESURE chaque aliment en cm avec cette règle et reporte les mesures');
-      lines.push('dans "assumptions".');
-      lines.push('Si un objet-repère est aussi annoncé, CETTE échelle-ci prime : elle est');
-      lines.push('mesurée par le capteur, pas déduite de l\'image.');
-      /* Aucune consigne de resserrer la fourchette. L'échelle est juste, mais
-         elle ne dit rien de la HAUTEUR — l'inconnue qui reste sur une vue de
-         dessus — ni de la densité de l'aliment. Resserrer ici reviendrait à
-         afficher une précision que la mesure ne porte pas. */
-    }
     if (ctx.imageCount > 1) {
       lines.push('Il y a ' + ctx.imageCount + ' angles du MÊME repas : croise-les pour le volume (hauteur incluse).');
     } else {

@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '64'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '65'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -11,7 +11,7 @@
      l'ancien natif. Toute version qui a besoin d'un plugin ou d'un comportement
      natif nouveau doit relever ce nombre au numéro de build qui l'apporte.
      Il est publié dans le manifeste OTA et vérifié avant toute application. */
-  var MIN_NATIVE_BUILD = 57;   // profondeur brute + carte de confiance (v57)
+  var MIN_NATIVE_BUILD = 57;   // appareil photo natif, Keystore, notifications
   var nativeBuild = null;      // build réellement en cours d'exécution, sur APK
   var settings = Storage.getSettings();
 
@@ -24,10 +24,6 @@
   var currentHistoryPhotoStarted = false;
   var lastEstimateContext = null;
   var lastVerification = null;
-  /* Mesure de relief affichée dans le volet photo. Ce n'est qu'un reflet de la
-     dernière capture : la donnée qui compte voyage AVEC son image, dans
-     images[].depth. */
-  var lastDepthShown = null;
   var estimateGeneration = 0;
 
   // ---------- Utilitaires d'affichage ----------
@@ -388,12 +384,11 @@
   /* Ajoute des images déjà encodées (venant de l'appareil photo natif).
      Elles ne repassent pas par un canvas si elles sont déjà à la bonne taille :
      c'est ce qui évite la seconde compression et fait la qualité supérieure. */
-  function addDataUrls(urls, depth) {
+  function addDataUrls(urls) {
     var room = Camera.MAX_ANGLES - images.length;
     if (room <= 0) { toast('Maximum ' + Camera.MAX_ANGLES + ' vues.'); return; }
     Camera.processDataUrls(urls.slice(0, room)).then(function (out) {
       out.results.forEach(function (r) {
-        if (depth) r.depth = depth;
         if (images.length < Camera.MAX_ANGLES) images.push(r);
       });
       renderThumbs();
@@ -431,114 +426,6 @@
     });
   }
 
-  /* ---------- Mesure du relief (ARCore) ----------
-     Le bouton n'apparaît que si l'appareil sait le faire. Le montrer partout
-     pour l'expliquer ensuite ne servirait qu'à promettre ce qu'on ne peut pas
-     tenir. */
-  /* Le bouton peut rester caché pour cinq raisons distinctes, dont trois sont
-     silencieuses côté natif. Sans cette ligne d'état, chacune se présente à
-     l'écran exactement de la même façon — un bouton qui n'est pas là — et il
-     faut une manche d'aller-retour pour éliminer une hypothèse. Elle est
-     affichée en permanence sous le réglage, y compris quand tout va bien. */
-  var depthWired = false;
-  function initDepth() {
-    var btn = $('btn-depth');
-    var why = $('depth-why');
-    function say(t) { if (why) why.textContent = 'Photo mesurée : ' + t; }
-
-    if (!btn) { say('bouton absent de la page.'); return; }
-    if (!Native.isApp) { say('PWA — la mesure exige l\'application native.'); return; }
-    if (!settings.experimentalTools) { say('réglage décoché.'); return; }
-
-    say('plateforme ' + (Native.platform || '?') + ', interrogation du capteur…');
-    Native.depth.available().then(function (a) {
-      if (!a || !a.supported) {
-        say('capteur indisponible (' + ((a && a.reason) || 'sans réponse') + ').');
-        return;
-      }
-      say('disponible (' + (a.reason || 'ok') + ').');
-      btn.hidden = false;
-      if (depthWired) return;
-      depthWired = true;
-      btn.addEventListener('click', function () {
-        if (images.length >= Camera.MAX_ANGLES) { toast('Maximum ' + Camera.MAX_ANGLES + ' vues.'); return; }
-        btn.disabled = true;
-        Native.depth.capture().then(function (r) {
-          btn.disabled = false;
-          if (!r) return;                                  // annulé
-          if (r.error) { toast('Photo mesurée : ' + r.error); return; }
-          /* La mesure est attachée à SON image, et non gardée dans une variable
-             globale. Sinon retirer la vignette du scan laissait la profondeur en
-             place, ajouter d'autres photos la conservait, et le relief d'un
-             repas pouvait repartir avec une image qui n'était pas la sienne. */
-          renderDepthResult(r.depth);
-          /* On attache la mesure dès que l'ÉCHELLE est valable, sans exiger que
-             le volume le soit. C'est le cas courant en usage réel : une assiette
-             remplit le cadre, ce qui fait échouer l'intégration du relief, alors
-             que la distance — donc la taille apparente — reste parfaitement
-             mesurée. C'est l'échelle qui part au modèle, pas le volume. */
-          var d = r.depth;
-          addDataUrls([r.dataUrl], d && (d.ok || d.scaleOk) ? d : null);
-        }).catch(function (e) {
-          btn.disabled = false;
-          toast('Photo mesurée indisponible : ' + ((e && e.message) || 'erreur'));
-        });
-      });
-    });
-  }
-
-  /* Mesure portée par les images réellement transmises. S'il y en a plusieurs,
-     aucune ne fait autorité : on n'en retient aucune plutôt que d'en choisir
-     une au hasard. */
-  function depthOfSent(sent) {
-    var found = null;
-    for (var i = 0; i < sent.length; i++) {
-      if (!sent[i].depth) continue;
-      if (found) return null;
-      found = sent[i].depth;
-    }
-    return found;
-  }
-
-  function renderDepthResult(d) {
-    lastDepthShown = d;
-    var el = $('depth-result');
-    if (!el) return;
-    if (!d) { el.hidden = true; return; }
-    el.hidden = false;
-    /* Deux blocs distincts, parce que ce sont deux mesures distinctes :
-       l'échelle part au modèle, le volume non. Les confondre à l'écran ferait
-       croire que le volume compte dans la dose. */
-    var diag = d.diag ? '<br><span class="tiny mono">' + escapeHtml(d.diag) + '</span>' : '';
-
-    if (d.scaleOk && d.fieldWidthCm > 0) {
-      var html = '📏 <strong>Échelle mesurée — ' + Math.round(d.fieldWidthCm) +
-        ' cm de large sur la photo</strong>' +
-        '<br><span class="tiny">Transmise au modèle : il n\'a plus à deviner la taille de ' +
-        'l\'assiette. Mesurée à ' + Math.round(d.distanceCm) + ' cm, soit ' +
-        fr(Math.round(d.cmPerPixel * 10000) / 10000) + ' cm par pixel.</span>';
-      if (d.ok) {
-        html += '<br>🧪 <span class="tiny"><strong>Volume ' + Math.round(d.volumeCm3) +
-          ' cm³</strong> (assiette comprise), hauteur max ' +
-          fr(Math.round(d.heightMaxCm * 10) / 10) + ' cm sur ' + Math.round(d.areaCm2) +
-          ' cm². Affiché seulement : le volume n\'entre pas dans le calcul des glucides. ' +
-          'Il est juste à 2 % sur un objet mat et plein, mais ne voit qu\'un tiers ' +
-          'd\'un contenu liquide, sans que rien ne le signale.</span>';
-      } else if (d.note) {
-        html += '<br><span class="tiny">Volume non mesuré (' + escapeHtml(d.note) +
-          '). Sans effet sur l\'estimation, qui n\'utilise que l\'échelle.</span>';
-      }
-      el.className = 'depth-result d-ok';
-      el.innerHTML = html + diag;
-      return;
-    }
-
-    el.className = 'depth-result d-warn';
-    el.innerHTML = '📐 <strong>Rien de mesuré</strong> — ' +
-      escapeHtml(d.note || 'la carte de profondeur n\'a rien donné.') +
-      '<br>La photo reste utilisable : l\'estimation se fera sans échelle.' + diag;
-  }
-
   function initPhotos() {
     initNativePhotoButtons();
     $('camera-input').addEventListener('change', function (e) {
@@ -554,7 +441,7 @@
       e.target.value = '';
     });
     $('clear-photos').addEventListener('click', function () {
-      images = []; lastDepthShown = null; renderDepthResult(null);
+      images = [];
       renderThumbs(); updateEstimateBtn();
     });
     $('reference-object').addEventListener('change', function (e) {
@@ -594,12 +481,7 @@
       plateDiameterCm: $('plate-diameter').value ? parseFloat($('plate-diameter').value) : null,
       notes: $('user-notes').value,
       extras: extrasText(),       // dessert / boisson, absents de la photo
-      imageCount: sent.length,    // 0 fait basculer l'estimateur en mode description
-      /* Mesure de l'image transmise, s'il y en a une. L'estimateur n'en retient
-         que l'ÉCHELLE — validée, et c'est le seul chiffre qui l'est ; le volume
-         reste enregistré avec le repas mais n'entre pas dans le calcul (voir
-         estimator.js et ios-src/README.md). */
-      depth: textOnly ? null : depthOfSent(sent)
+      imageCount: sent.length     // 0 fait basculer l'estimateur en mode description
     };
     lastEstimateContext = Object.assign({}, ctx);
 
@@ -721,8 +603,7 @@
               plateDiameterCm: item.ctx.plateDiameterCm || null,
               notes: item.ctx.notes || '',
               extras: item.ctx.extras || '',
-              imageCount: item.ctx.imageCount || 0,
-              depth: item.ctx.depth || null
+              imageCount: item.ctx.imageCount || 0
             } : null,
             items: result.items.map(function (it) {
               return { name: it.name, carbsG: it.carbsG,
@@ -1758,10 +1639,7 @@
         plateDiameterCm: lastEstimateContext.plateDiameterCm || null,
         notes: lastEstimateContext.notes || '',
         extras: lastEstimateContext.extras || '',
-        imageCount: lastEstimateContext.imageCount || 0,
-        /* Conservé pour le banc d'essai : rejouer un repas mesuré au capteur
-           sans sa mesure comparerait deux choses différentes. */
-        depth: lastEstimateContext.depth || null
+        imageCount: lastEstimateContext.imageCount || 0
       } : null,
       /* On garde la portion et l'origine de chaque aliment : c'est ce qui rend
          le détail de l'historique consultable des semaines plus tard. Ce sont
@@ -3052,7 +2930,6 @@
     populateVerifyModelSelect(vp, models[vp] || Storage.DEFAULT_MODELS[vp] || '');
     $('set-verify-threshold').value = String(settings.verifyThresholdPct || 20);
     $('set-merge').checked = !!settings.mergeVerification;
-    $('set-experimental').checked = !!settings.experimentalTools;
     $('set-partsize').value = settings.partSizeG;
     $('set-round-half').checked = settings.roundHalf;
     updateVerificationSettingsForm();
@@ -3107,7 +2984,6 @@
     settings.verifyProvider = verifyProvider;
     settings.verifyThresholdPct = parseInt($('set-verify-threshold').value, 10) || 20;
     settings.mergeVerification = verificationMode === 'auto' && $('set-merge').checked;
-    settings.experimentalTools = $('set-experimental').checked;
     settings.models = settings.models || {};
     settings.models[provider] = getModelFrom('set-model', 'set-model-custom', provider);
     settings.compareProvider = verificationMode === 'ask' ? verifyProvider : '';
@@ -3137,9 +3013,6 @@
     Storage.saveSettings(settings);
     $('settings-modal').hidden = true;
     updateCompareToggle();
-    // Cocher « outils expérimentaux » doit faire apparaître le bouton tout de
-    // suite : redémarrer l'app pour voir l'effet d'une case ne se devine pas.
-    initDepth();
     toast('Réglages enregistrés.');
   }
 
@@ -3384,7 +3257,7 @@
      Sans ça, chaque version imposerait de retélécharger et réinstaller l'APK.
      Seul un changement de plugin NATIF impose encore un nouvel APK. */
   var OTA_MANIFEST =
-    'https://github.com/rachid598/Diab-te/releases/download/ota-relief/latest.json';
+    'https://github.com/rachid598/Diab-te/releases/download/ota-stable/latest.json';
 
   function initNativeUpdate() {
     if (!Native.isApp) return;
@@ -3401,7 +3274,7 @@
             el.innerHTML = '⚠️ <strong>Mise à jour bloquée</strong> — la version ' +
               (info.appVersion || '') + ' exige l\'APK ' + info.minNativeBuild +
               ', tu as le ' + nativeBuild + '. ' +
-              '<a href="https://github.com/rachid598/Diab-te/releases/download/apk-latest/glucovision.apk">' +
+              '<a href="https://github.com/rachid598/Diab-te/releases/download/apk-stable/glucovision.apk">' +
               'Réinstalle l\'APK</a> pour l\'obtenir.';
           }
           return null;
@@ -3610,9 +3483,8 @@
          jour par OTA pendant que le code natif reste celui de l'APK installé.
          Sur iOS il n'y a pas d'OTA : natif et web sont compilés ensemble à
          chaque ▶, donc le natif est à jour par construction — et sa numérotation
-         repart de 1. Le plancher se déclenchait donc systématiquement et
-         masquait le bouton Relief, c'est-à-dire exactement la fonction qu'on
-         venait d'y porter. */
+         repart de 1. Le plancher se déclencherait donc systématiquement, et
+         masquerait des fonctions en réalité présentes. */
       if (Native.platform && Native.platform !== 'android') return;
       if (build == null || build >= MIN_NATIVE_BUILD) return;
       var el = $('native-outdated');
@@ -3621,11 +3493,8 @@
       el.innerHTML = '⚠️ <strong>Application Android trop ancienne</strong> — build ' + build +
         ', minimum requis ' + MIN_NATIVE_BUILD + '. Le contenu web s\'est mis à jour, ' +
         'mais le code natif non : certaines fonctions sont indisponibles. ' +
-        '<a href="https://github.com/rachid598/Diab-te/releases/download/apk-latest/glucovision.apk">' +
+        '<a href="https://github.com/rachid598/Diab-te/releases/download/apk-stable/glucovision.apk">' +
         'Réinstalle l\'APK</a>.';
-      // Une capacité native absente ne doit pas être proposée.
-      var btn = $('btn-depth');
-      if (btn) btn.hidden = true;
     });
   }
 
@@ -3639,7 +3508,6 @@
     initSafetyBanner();
     initTabs();
     initPhotos();
-    initDepth();
     initModeSwitch();
     initExtras();
     initEstimate();

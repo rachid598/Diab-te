@@ -89,10 +89,7 @@
             plateDiameterCm: ctx.plateDiameterCm || null,
             notes: ctx.notes || '',
             extras: '',
-            imageCount: imgs.length,
-            // Rejouer sans la mesure de profondeur du jour comparerait deux
-            // conditions différentes : le banc doit voir la même chose.
-            depth: ctx.depth || null
+            imageCount: imgs.length
           }, forced);
         })
         .then(function (r) {
