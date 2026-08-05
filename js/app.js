@@ -3348,7 +3348,7 @@
      Sans ça, chaque version imposerait de retélécharger et réinstaller l'APK.
      Seul un changement de plugin NATIF impose encore un nouvel APK. */
   var OTA_MANIFEST =
-    'https://github.com/rachid598/Diab-te/releases/download/ota-latest/latest.json';
+    'https://github.com/rachid598/Diab-te/releases/download/ota-stable/latest.json';
 
   function initNativeUpdate() {
     if (!Native.isApp) return;
