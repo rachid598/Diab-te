@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=61" />
+  <link rel="stylesheet" href="css/styles.css?v=65" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -147,16 +147,8 @@
               Galerie
               <input id="gallery-input" type="file" accept="image/*,video/*" multiple hidden />
             </label>
-            <button id="btn-depth" class="btn btn-secondary" hidden>
-              <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M3 17V8l9-5 9 5v9l-9 5z" />
-                <path d="m3 8 9 5 9-5M12 13v9" />
-              </svg>
-              Photo mesurée
-            </button>
             <button id="clear-photos" class="btn btn-ghost" hidden>Effacer</button>
           </div>
-          <div id="depth-result" class="depth-result" hidden></div>
         </div>
 
         <details class="card compact-card" id="reference-card">
@@ -553,11 +545,6 @@
         <button id="purge-photos" class="btn btn-ghost">Supprimer toutes les photos de l'historique</button>
         <p class="hint tiny">Les repas et leurs estimations sont conservés : seules les images sont effacées.</p>
         </div>
-
-        <h4>Outils expérimentaux</h4>
-        <label class="check"><input id="set-experimental" type="checkbox" /> Afficher le bouton <strong>Photo mesurée</strong> — le télémètre donne l'échelle réelle de la photo, que le modèle utilise au lieu de la deviner (LiDAR sur iPhone Pro, ARCore sur Android)</label>
-        <p class="hint tiny">Mesure du volume par la profondeur, <strong>jamais validée</strong> contre un objet de volume connu et <strong>non utilisée</strong> dans le calcul des glucides. Elle n'est là que pour être mise au point. Chaque évolution impose de réinstaller l'APK.</p>
-        <p class="hint tiny" id="depth-why"></p>
 
         <h4>Sauvegarde</h4>
         <p class="hint tiny">Tes repas, aliments perso et ta calibration ne vivent que dans ce navigateur. Exporte-les avant de changer de téléphone ou de nettoyer tes données.</p>

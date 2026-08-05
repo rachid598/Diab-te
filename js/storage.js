@@ -161,22 +161,7 @@
        l'intervalle de confiance à 95 % du gain contient encore zéro, et ce
        réglage déplace le nombre que l'utilisateur tape dans sa pompe : c'est
        à lui de l'activer, pas à une mise à jour de le décider. */
-    mergeVerification: false,
-
-    /* Outils expérimentaux — le bouton « Photo mesurée » (LiDAR sur iPhone Pro,
-       ARCore sur Android).
-
-       ALLUMÉ par défaut SUR CETTE BRANCHE uniquement. C'est la variante
-       « avec relief » : elle existe pour mettre la mesure au point, et l'y
-       trouver décochée à chaque installation n'aurait aucun sens. La branche
-       sans-relief garde false, et c'est elle qui sert au quotidien.
-
-       Ce que le bouton apporte réellement est l'ÉCHELLE de la photo, seule
-       grandeur validée et seule transmise à l'estimateur. Le volume reste
-       affiché mais n'entre pas dans le calcul des glucides : il est juste à 2 %
-       sur un objet mat et plein, et ne voit qu'un tiers d'un contenu liquide
-       sans que rien ne le signale. Voir ios-src/README.md. */
-    experimentalTools: true
+    mergeVerification: false
   };
 
   /* Clés API relues du Keystore au démarrage (APK). On les garde en mémoire
