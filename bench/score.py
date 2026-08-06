@@ -4,7 +4,7 @@ plus le cout et le taux d'erreurs cliniquement acceptables."""
 import json, os, statistics
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-res = json.load(open(os.path.join(HERE, 'resultats.json')))
+res = json.load(open(os.path.join(HERE, os.environ.get('BENCH_OUT', 'resultats.json'))))
 
 rows = []
 for model, recs in res.items():
