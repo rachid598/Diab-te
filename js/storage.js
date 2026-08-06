@@ -160,22 +160,34 @@
        parallèle à chaque estimation ; on n'alerte que si l'écart dépasse le
        seuil. C'est le seul garde-fou capable de rattraper une erreur grossière
        du modèle principal, et à ce prix il n'y a pas de raison de l'éteindre. */
-    verificationMode: 'off', // off | ask | auto
+    verificationMode: 'ask', // off | ask | auto
     verifyEnabled: false,    // compatibilité avant v37
-    /* Deuxième avis : Claude Opus 5. Ce n'est PAS le plus précis du banc — il
-       était au milieu du tableau en juillet (12,0 g) et coûte trente fois
-       Gemini. Il est ici pour une autre raison : un avis de contrôle n'a
-       d'intérêt que s'il se trompe autrement que le premier, et Claude est le
-       modèle le plus éloigné de Gemini par sa famille, son entraînement et son
-       fournisseur. Un vérificateur qui partage les biais du vérifié ne vérifie
-       rien.
+    /* Deuxième avis affiché EN MÊME TEMPS que le premier : Grok 4.5, via
+       OpenRouter. C'est le deuxième du banc — à égalité stricte avec Gemini
+       (9,8 g l'un et l'autre sur 44 plats) tout en se trompant autrement : il
+       surestime de 5 % là où Gemini sous-estime de 8 %. Deux avis qui penchent
+       du même côté ne servent à rien ; ceux-là encadrent.
 
-       À noter tout de même : la corrélation Claude/Gemini n'a pas été mesurée
-       en manche 3, faute de crédit. Le meilleur binôme mesuré reste
-       Gemini + Grok 4.5 (8,0 g contre 9,8), mais Grok tient déjà le rôle de
-       secours et le même modèle ne peut pas être les deux. */
-    verifyProvider: 'claude',
+       Mode « ask » par défaut, et la case est cochée d'avance : les deux
+       estimations arrivent côte à côte à chaque repas, et c'est l'utilisateur
+       qui tranche. Ça double le coût d'une analyse — environ 0,024 $ au lieu de
+       0,002 $ — et c'est un choix assumé : le nombre sert à doser de l'insuline,
+       et le banc n'a jamais pu départager les modèles à un seul avis. */
+    verifyProvider: 'openrouter',
     verifyThresholdPct: 20,
+    /* Troisième avis, à la demande, en bas du résultat. Il ne part JAMAIS tout
+       seul : c'est le recours quand les deux premiers laissent un doute, et le
+       doute est quelque chose que seul l'utilisateur constate.
+
+       Claude Opus 5 pour ce rôle précis. Il n'est pas le plus précis du banc
+       (12,0 g, milieu de tableau) et coûte trente fois Gemini, mais il vient
+       d'une troisième famille et d'un troisième fournisseur : après un
+       désaccord entre Gemini et Grok, c'est l'avis le plus indépendant qu'on
+       puisse aller chercher. Le prix ne compte pas ici — il est payé une fois,
+       sur décision explicite, pour lever une hésitation. */
+    doubtProvider: 'claude',
+    doubtModel: 'claude-opus-5',
+    rolesV66: true,   // voir la migration unique dans getSettings
     /* Fusionner les deux avis en une moyenne, au lieu de n'afficher que
        l'alerte d'écart. Mesuré sur le banc (44 plats) : la moyenne de Gemini
        3.1 Flash-Lite et de Qwen3-VL 235B Thinking fait mieux que CHACUN des
@@ -344,6 +356,41 @@
       }
       if (!/^(off|ask|auto)$/.test(merged.verificationMode)) {
         merged.verificationMode = 'off';
+      }
+      /* v66 — bascule UNIQUE vers les trois rôles issus de la manche 3 du banc :
+         Gemini en principal, Grok 4.5 en second avis affiché côte à côte, Claude
+         Opus 5 en troisième avis à la demande.
+
+         C'est la seule migration de ce fichier qui change un comportement déjà
+         choisi, et elle mérite d'être justifiée. La règle habituelle — ne jamais
+         remplacer dans le dos de l'utilisateur le modèle qui produit le nombre
+         saisi dans la pompe — vise à protéger un réglage DÉLIBÉRÉ. Or ici le
+         mode de vérification valait 'off' parce que c'était le défaut d'alors,
+         pas parce qu'on l'avait éteint.
+
+         Le drapeau garantit qu'elle ne passe qu'une fois : si le second avis est
+         ensuite désactivé, ce sera un choix, et il tiendra. Le modèle PRINCIPAL,
+         lui, n'est jamais touché — c'est celui qui donne le chiffre. */
+      if (!s.rolesV66) {
+        merged.verificationMode = 'ask';
+        merged.verifyProvider = 'openrouter';
+        merged.models.openrouter = DEFAULT_MODELS.openrouter;
+        merged.fallbackProvider = DEFAULT_SETTINGS.fallbackProvider;
+        merged.doubtProvider = DEFAULT_SETTINGS.doubtProvider;
+        merged.doubtModel = DEFAULT_SETTINGS.doubtModel;
+        merged.rolesV66 = true;
+        var brut = read(KEYS.settings, {}) || {};
+        if (brut && typeof brut === 'object' && Object.keys(brut).length) {
+          brut.rolesV66 = true;
+          brut.verificationMode = 'ask';
+          brut.verifyProvider = 'openrouter';
+          brut.models = Object.assign({}, brut.models || {},
+            { openrouter: DEFAULT_MODELS.openrouter });
+          brut.fallbackProvider = DEFAULT_SETTINGS.fallbackProvider;
+          brut.doubtProvider = DEFAULT_SETTINGS.doubtProvider;
+          brut.doubtModel = DEFAULT_SETTINGS.doubtModel;
+          write(KEYS.settings, brut);
+        }
       }
       /* La fusion n'a de sens que si un second avis tourne à chaque estimation.
          En mode 'ask' ou 'off', il n'y a rien à moyenner. */
