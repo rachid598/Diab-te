@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=65" />
+  <link rel="stylesheet" href="css/styles.css?v=66" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -422,6 +422,17 @@
           <input id="set-model-custom" class="input" type="text" placeholder="id du modèle (ex. gemini-2.5-flash)" />
         </div>
         <p class="hint tiny" id="model-hint"></p>
+
+        <label>Fournisseur de secours</label>
+        <select id="set-fallback-provider" class="input">
+          <option value="">Aucun — l'estimation échoue</option>
+          <option value="claude">Claude (Anthropic)</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="openai">OpenAI (ChatGPT)</option>
+          <option value="openrouter">OpenRouter</option>
+        </select>
+        <p class="hint tiny">Rejoué <strong>uniquement si le fournisseur actif échoue</strong> : panne, quota dépassé, clé refusée. Ne coûte rien le reste du temps. Choisis-en un <strong>différent</strong> du principal — servi par la même API, il tomberait avec lui. Le chiffre obtenu est signalé comme venant du secours.</p>
+
         <h4>Clés API <span class="tag">sur cet appareil</span></h4>
         <label>Anthropic (Claude)</label>
         <input id="set-key-claude" class="input" type="password" placeholder="sk-ant-…" autocomplete="off" />

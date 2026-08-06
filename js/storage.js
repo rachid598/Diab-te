@@ -118,7 +118,13 @@
     claude: 'claude-opus-5',
     gemini: 'gemini-3.1-flash-lite',
     openai: 'gpt-5.6-terra',
-    openrouter: 'qwen/qwen3-vl-235b-a22b-thinking'
+    /* Grok 4.5 : à égalité stricte avec Gemini 3.1 Flash-Lite sur les 44 plats
+       de la manche 3 (9,8 g d'écart absolu moyen l'un et l'autre), avec le
+       meilleur 9ᵉ décile de tout le tableau et le plus fort taux de réponses à
+       moins de 15 g. Il coûte dix fois plus cher et met dix fois plus de temps :
+       c'est exactement ce qu'on veut d'un SECOURS — appelé seulement quand le
+       modèle principal a échoué, où la question n'est plus le prix. */
+    openrouter: 'x-ai/grok-4.5'
   };
 
   var PROVIDERS = ['claude', 'gemini', 'openai', 'openrouter'];
@@ -129,6 +135,15 @@
        0,002 $ l'analyse. Ce défaut ne concerne QUE les installations neuves :
        un réglage déjà enregistré n'est jamais écrasé. */
     provider: 'gemini',                                   // fournisseur actif
+    /* Secours : rejoué automatiquement si le fournisseur principal échoue.
+       Sans lui, une panne côté Google faisait perdre l'estimation — au moment
+       précis où l'assiette est déjà entamée et où la photo ne peut plus être
+       refaite. Le second appel n'a lieu QUE sur échec du premier : il ne coûte
+       rien tant que tout va bien.
+
+       Choisi chez un autre fournisseur à dessein. Un secours servi par la même
+       API que le principal tomberait avec elle, et ne serait pas un secours. */
+    fallbackProvider: 'openrouter',
     compareProvider: '',                                  // compatibilité avant v37
     apiKeys: { claude: '', gemini: '', openai: '', openrouter: '' },
     models: {                                             // un modèle par fournisseur
@@ -147,7 +162,19 @@
        du modèle principal, et à ce prix il n'y a pas de raison de l'éteindre. */
     verificationMode: 'off', // off | ask | auto
     verifyEnabled: false,    // compatibilité avant v37
-    verifyProvider: 'openrouter',
+    /* Deuxième avis : Claude Opus 5. Ce n'est PAS le plus précis du banc — il
+       était au milieu du tableau en juillet (12,0 g) et coûte trente fois
+       Gemini. Il est ici pour une autre raison : un avis de contrôle n'a
+       d'intérêt que s'il se trompe autrement que le premier, et Claude est le
+       modèle le plus éloigné de Gemini par sa famille, son entraînement et son
+       fournisseur. Un vérificateur qui partage les biais du vérifié ne vérifie
+       rien.
+
+       À noter tout de même : la corrélation Claude/Gemini n'a pas été mesurée
+       en manche 3, faute de crédit. Le meilleur binôme mesuré reste
+       Gemini + Grok 4.5 (8,0 g contre 9,8), mais Grok tient déjà le rôle de
+       secours et le même modèle ne peut pas être les deux. */
+    verifyProvider: 'claude',
     verifyThresholdPct: 20,
     /* Fusionner les deux avis en une moyenne, au lieu de n'afficher que
        l'alerte d'écart. Mesuré sur le banc (44 plats) : la moyenne de Gemini
