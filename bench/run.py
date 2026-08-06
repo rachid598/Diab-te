@@ -12,7 +12,13 @@ KEY = open(os.path.join(HERE, '.key')).read().strip()
 URL = 'https://openrouter.ai/api/v1/chat/completions'
 SYSTEM = open(os.path.join(HERE, 'system_prompt.txt')).read()
 THINKING_MAX_TOKENS = 8000
-BUDGET_USD = 4.00
+
+# Parametres surchargeables par l'environnement. Les valeurs par defaut sont
+# celles des deux premieres manches (BENCHMARK.md) : sans variable, le script
+# rejoue exactement la mesure de juillet, ce qui doit rester possible.
+BUDGET_USD = float(os.environ.get('BENCH_BUDGET', '4.00'))
+SELECTIONS = os.environ.get('BENCH_SELECTION', 'selection.json').split(',')
+OUT = os.environ.get('BENCH_OUT', 'resultats.json')
 
 # Prompt utilisateur : mode photo, aucun objet-repere, une seule vue,
 # pas de notes, pas d'extras, pas de bloc de calibration (buildUserPrompt).
@@ -137,11 +143,20 @@ def run_model(model, dishes):
 
 
 def main():
-    dishes = json.load(open(os.path.join(HERE, 'selection.json')))
-    print('%d plats x %d modeles = %d appels\n' % (len(dishes), len(MODELS), len(dishes) * len(MODELS)))
+    models = os.environ.get('BENCH_MODELS')
+    models = [m.strip() for m in models.split(',') if m.strip()] if models else MODELS
+    dishes, vus = [], set()
+    for f in SELECTIONS:
+        for d in json.load(open(os.path.join(HERE, f.strip()))):
+            if d['id'] in vus:
+                continue          # les deux manches peuvent se recouvrir
+            vus.add(d['id'])
+            dishes.append(d)
+    print('%d plats x %d modeles = %d appels (budget $%.2f)\n'
+          % (len(dishes), len(models), len(dishes) * len(models), BUDGET_USD))
     results = {}
     with ThreadPoolExecutor(max_workers=5) as ex:
-        futs = {ex.submit(run_model, m, dishes): m for m in MODELS}
+        futs = {ex.submit(run_model, m, dishes): m for m in models}
         for f in futs:
             pass
         for f, m in futs.items():
@@ -150,7 +165,7 @@ def main():
             except Exception as e:
                 results[m] = [{'erreur': str(e)}]
             print('== %s termine (cumul $%.3f)' % (m, spent[0]), flush=True)
-    json.dump(results, open(os.path.join(HERE, 'resultats.json'), 'w'), ensure_ascii=False, indent=1)
+    json.dump(results, open(os.path.join(HERE, OUT), 'w'), ensure_ascii=False, indent=1)
     print('\nDepense totale : $%.4f' % spent[0])
 
 

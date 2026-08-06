@@ -1,1 +1,10 @@
+# Clé OpenRouter. Ne doit jamais être versionnée.
 .key
+
+# Artefacts fournis localement avant de rejouer une manche, jamais committés :
+# 22 Mo de photos, un catalogue tarifaire qui change toutes les semaines, et un
+# prompt extrait automatiquement de js/estimator.js — le versionner reviendrait
+# à en entretenir une seconde copie qui dériverait de la première.
+photos/
+models.json
+system_prompt.txt
