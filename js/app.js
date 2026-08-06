@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '65'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '66'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -518,7 +518,7 @@
 
     lastRunProvider = settings.provider;
     lastRunModel = (settings.models || {})[settings.provider] || null;
-    Estimator.estimate(sent, ctx, settings).then(function (result) {
+    estimateWithFallback(sent, ctx, status).then(function (result) {
       lastResult = result;
       status.hidden = true;
       renderResults(result);
@@ -528,6 +528,53 @@
       offerQueue(e, ctx, sent);
     }).then(function () {
       updateEstimateBtn();
+    });
+  }
+
+  /* Rejoue l'estimation chez un AUTRE fournisseur quand le principal échoue.
+
+     Le moment où une estimation échoue est le pire de tous : l'assiette est
+     déjà entamée, ou on a quitté la table, et la photo ne peut plus être
+     refaite. Perdre le repas pour une panne d'API n'est pas acceptable, alors
+     qu'un second appel chez un fournisseur indépendant aboutit dans la plupart
+     des cas — panne de service, quota dépassé, clé expirée, surcharge
+     temporaire : aucune de ces causes n'est partagée entre deux entreprises.
+
+     Trois règles, dans cet ordre d'importance :
+
+     1. Le secours n'est JAMAIS silencieux. Le modèle qui a produit le chiffre
+        n'est pas celui que l'utilisateur a choisi, et ce chiffre sert à doser
+        de l'insuline : un bandeau le dit, et lastRunProvider est mis à jour
+        pour que le reste de l'écran reste cohérent.
+     2. Il ne coûte rien tant que tout va bien — l'appel n'a lieu qu'après un
+        échec, jamais en parallèle.
+     3. Si le secours échoue aussi, c'est l'erreur du PRINCIPAL qui remonte.
+        C'est elle qui décrit le problème réel de l'utilisateur ; annoncer
+        « Grok a échoué » quand sa clé Gemini est expirée l'enverrait chercher
+        au mauvais endroit. */
+  function estimateWithFallback(sent, ctx, status) {
+    var primaire = settings.provider;
+    var secours = settings.fallbackProvider;
+    var cles = settings.apiKeys || {};
+    var utilisable = secours && secours !== primaire && cles[secours];
+
+    return Estimator.estimate(sent, ctx, settings).catch(function (err) {
+      if (!utilisable) throw err;
+      if (status) {
+        status.hidden = false;
+        status.innerHTML = '<div class="spinner"></div>' +
+          escapeHtml(PROVIDER_NAME[primaire] || primaire) + ' n\'a pas répondu — ' +
+          'nouvel essai avec ' + escapeHtml(PROVIDER_NAME[secours] || secours) + '…';
+      }
+      return Estimator.estimateWith(secours, sent, ctx, settings)
+        .then(function (r) {
+          r.fallbackFrom = primaire;
+          r.fallbackTo = secours;
+          lastRunProvider = secours;
+          lastRunModel = (settings.models || {})[secours] || null;
+          return r;
+        })
+        .catch(function () { throw err; });
     });
   }
 
@@ -972,6 +1019,17 @@
     var bloque = (r.blocking && r.blocking.length) ? r.blocking : null;
 
     var html = '';
+    if (r.fallbackFrom) {
+      /* Persistant, pas un toast : ce bandeau dit que le chiffre affiché vient
+         d'un autre modèle que celui choisi. Un message qui disparaît tout seul
+         ne convient pas à une information qui change la provenance d'une dose. */
+      html += '<div class="safety-banner" style="position:static;margin-bottom:12px">' +
+        '<span>🔁 <strong>' + escapeHtml(PROVIDER_NAME[r.fallbackFrom] || r.fallbackFrom) +
+        ' n\'a pas répondu.</strong> Cette estimation vient du fournisseur de secours, ' +
+        escapeHtml(PROVIDER_NAME[r.fallbackTo] || r.fallbackTo) +
+        ' — un autre modèle, donc un autre chiffre que celui qu\'aurait donné ton réglage habituel.</span>' +
+        '</div>';
+    }
     if (bloque) {
       /* Résultat retiré, pas seulement signalé. Une incohérence de ce niveau
          veut dire que le nombre ne représente rien : l'afficher en gros avec un
@@ -2919,6 +2977,7 @@
     var keys = settings.apiKeys || {};
     var models = settings.models || {};
     $('set-provider').value = settings.provider;
+    $('set-fallback-provider').value = settings.fallbackProvider || '';
     $('set-key-claude').value = keys.claude || '';
     $('set-key-gemini').value = keys.gemini || '';
     $('set-key-openai').value = keys.openai || '';
@@ -2973,6 +3032,15 @@
     settings.apiKeys.gemini = $('set-key-gemini').value.trim();
     settings.apiKeys.openai = $('set-key-openai').value.trim();
     settings.apiKeys.openrouter = $('set-key-openrouter').value.trim();
+    /* Même exigence que pour le second avis : un secours servi par l'API qui
+       vient de tomber n'est pas un secours. On refuse plutôt que d'enregistrer
+       un réglage qui donnerait une fausse impression de filet. */
+    var fallbackProvider = $('set-fallback-provider').value;
+    if (fallbackProvider && fallbackProvider === provider) {
+      toast('Choisis un fournisseur de secours différent du fournisseur actif.');
+      return;
+    }
+    settings.fallbackProvider = fallbackProvider;
     var verificationMode = $('set-verify-mode').value;
     var verifyProvider = $('set-verify-provider').value;
     if (verificationMode !== 'off' && verifyProvider === provider) {
