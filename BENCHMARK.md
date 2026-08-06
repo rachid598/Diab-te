@@ -4,7 +4,9 @@ Quel modèle d'IA compte le mieux les glucides d'une assiette ? La question n'a 
 de réponse d'opinion : ce chiffre est saisi dans une pompe à insuline. Ce document
 décrit la mesure, ses résultats et ce qu'elle ne prouve pas.
 
-Mesure réalisée le 30 juillet 2026. Coût total : **4,45 $** sur OpenRouter.
+Trois manches : 30 juillet 2026 (4,45 $) et 6 août 2026 (3,67 $), sur
+OpenRouter. Les résultats des deux dates sont conservés côte à côte — une mesure
+qu'on réécrit après coup ne prouve plus rien.
 
 ## Vérité terrain
 
@@ -83,7 +85,75 @@ signée : positif = le modèle surestime.
 | GPT-5.6 Terra | 12,5 g | 8,5 | +22,4 % | 37,2 | 68 % | 0,0158 | 21 s |
 | Qwen 3.7 Flash | 12,6 g | 10,3 | +17,4 % | 27,2 | 68 % | 0,0004 | 35 s |
 
-## Le résultat le plus important : rien n'est significatif
+## Manche 3 — 6 août 2026, 44 plats, 9 modèles
+
+Refaite pour deux raisons : vérifier que le classement tenait après les
+modifications du prompt, et mesurer les modèles de vision parus depuis.
+
+Sur le premier point, la réponse était connue d'avance et il faut le dire :
+**le prompt système n'a changé que d'un paragraphe** depuis le 30 juillet, et ce
+paragraphe porte sur `overallConfidence` et la fourchette, pas sur l'estimation
+en grammes. Tout le reste de ce qui a été ajouté depuis — blocage des résultats
+incohérents, fourchette calculée sur les écarts observés, confirmation de
+l'aliment glucidique dominant — vit **après** l'appel, côté application. Le banc
+note la sortie brute du modèle : il ne pouvait pas les voir.
+
+Échantillon élargi aux 44 plats des deux manches réunies, tous les modèles
+voyant exactement les mêmes. Coût : **3,67 $**.
+
+| modèle | MAE | méd | biais | p90 | ≤ 15 g | $/analyse | durée |
+|---|---|---|---|---|---|---|---|
+| **Gemini 3.1 Flash-Lite** | **9,8 g** | 7,0 | −8,3 % | 21,0 | 73 % | **0,0021** | **5 s** |
+| Grok 4.5 | 9,8 g | 9,0 | +5,2 % | **17,5** | **84 %** | 0,0218 | 53 s |
+| Muse Spark 1.2 *(nouveau)* | 10,6 g | 9,7 | +9,5 % | 19,9 | 77 % | 0,0145 | 16 s |
+| GPT-5.6 Terra | 11,9 g | 8,0 | +17,9 % | 22,2 | 77 % | 0,0133 | 22 s |
+| Qwen3-VL 235B Instruct | 11,9 g | 8,0 | +14,1 % | 25,1 | 68 % | 0,0026 | 23 s |
+| Qwen 3.7 Flash | 13,5 g | 10,6 | +21,6 % | 25,9 | 61 % | 0,0004 | 41 s |
+
+Bootstrap apparié contre Gemini, 20 000 rééchantillonnages : un seul écart est
+significatif, et il va dans le sens du bon marché puni — **Qwen 3.7 Flash est
+pire de 3,7 g** (IC95 [+0,2 ; +7,2]). Tous les autres restent indistinguables.
+
+**Aucun des trois modèles parus depuis juillet ne bat Gemini 3.1 Flash-Lite.**
+Muse Spark 1.2 est derrière pour 7 fois le prix. Inkling Small est très mauvais
+(17,0 g contre 8,3 pour Gemini sur les mêmes 33 plats). Qwen 3.8 Max a fait 7,4 g
+contre 9,8, mais sur **11 plats seulement** — le crédit de la clé s'est épuisé en
+cours de manche (402 Payment Required sur les 54 derniers appels). C'est trop peu
+pour conclure quoi que ce soit, et il coûte 21 fois le prix de Gemini.
+
+### La fusion de deux avis, à nouveau, et cette fois de justesse
+
+Moyenner Gemini avec un second modèle bat Gemini seul dans **tous** les binômes
+complets :
+
+| binôme | MAE | gain | $/analyse |
+|---|---|---|---|
+| Gemini + Grok 4.5 | **8,0 g** | −1,8 | 0,0239 |
+| Gemini + GPT-5.6 Terra | 8,6 g | −1,2 | 0,0154 |
+| Gemini + Muse Spark 1.2 | 8,9 g | −0,9 | 0,0165 |
+| Gemini + Qwen3-VL Instruct | 9,1 g | −0,7 | 0,0046 |
+
+Le binôme Gemini + Grok est le premier résultat **significatif** de toute la
+campagne en faveur de quelque chose : −1,77 g, IC95 [−3,34 ; −0,34], 99,2 % des
+rééchantillons favorables.
+
+Il faut immédiatement le tempérer. **Cinq binômes ont été testés** ; corrigé de
+ces comparaisons multiples (Bonferroni, IC99), l'intervalle devient
+[−3,86 ; **+0,11**] et cesse de conclure. Le gain est réel dans les données,
+il n'est pas démontré. Et il se paie 11 fois le prix d'une analyse simple, pour
+58 secondes d'attente au lieu de 5.
+
+### Ce que la manche 3 change
+
+**Rien.** Gemini 3.1 Flash-Lite reste le défaut : personne ne fait mieux, et les
+seuls écarts significatifs vont contre les modèles moins chers que lui. Le
+réglage « moyenne des deux » reste ce qu'il était — utile, non démontré.
+
+Pour trancher sur Qwen 3.8 Max il faudrait ses 33 plats manquants, soit environ
+1,50 $. Tant que ce n'est pas fait, il ne doit apparaître nulle part comme
+recommandation : 11 plats ne départagent rien.
+
+## Manches 1 et 2 — le résultat le plus important : rien n'est significatif
 
 Bootstrap apparié, 20 000 rééchantillonnages, sur les 38 plats communs :
 **aucune paire de modèles n'a un intervalle de confiance à 95 % qui exclut zéro.**
