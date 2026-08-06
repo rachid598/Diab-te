@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=66" />
+  <link rel="stylesheet" href="css/styles.css?v=67" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -219,8 +219,11 @@
       <p id="mode-warning" class="mode-warning" hidden></p>
 
       <div class="workflow-dock estimate-dock">
+        <!-- Cochée d'avance : les deux avis doivent arriver ensemble à chaque
+             repas, pas sur une action à ne pas oublier. Elle reste décochable
+             pour un repas où le doublon ne se justifie pas. -->
         <label id="compare-wrap" class="check compare-toggle" hidden>
-          <input type="checkbox" id="compare-toggle" />
+          <input type="checkbox" id="compare-toggle" checked />
           <span id="compare-label">Demander un 2ᵉ avis</span>
         </label>
         <button id="estimate-btn" class="btn btn-primary btn-lg" disabled>

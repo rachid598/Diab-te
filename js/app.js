@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '66'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '67'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -1440,6 +1440,15 @@
         out.push({ provider: p, model: m.id,
                    label: (PROVIDER_NAME[p] || p) + ' · ' + m.label });
       });
+    });
+    /* Le modèle du DOUTE en tête de liste, donc pré-sélectionné. Le sélecteur
+       liste tous les modèles disponibles — laisser l'ordre des fournisseurs
+       décider mettrait en premier celui qui vient justement de répondre, ou un
+       modèle proche de lui. Après un désaccord entre les deux premiers avis, ce
+       qu'on cherche est le plus indépendant, pas le plus proche. */
+    var dp = settings.doubtProvider, dm = settings.doubtModel;
+    out.sort(function (x, y) {
+      return (y.provider === dp && y.model === dm) - (x.provider === dp && x.model === dm);
     });
     return out;
   }
