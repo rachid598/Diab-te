@@ -631,11 +631,18 @@
     var low = num(result.rangeLowG);
     var high = num(result.rangeHighG);
     var conf = normConf(result.overallConfidence);
-    // Si le modèle n'a pas donné de fourchette, on en dérive une selon la confiance.
-    // Un objet-repère mesure la taille : on resserre la fourchette dans ce cas.
+    /* Si le modèle n'a pas donné de fourchette, on en dérive une selon la
+       confiance. Le repère ne la resserre PLUS.
+
+       Il la resserrait de 6 points quand le modèle déclarait l'avoir trouvé.
+       Or ce booléen ne vaut rien : sur 24 photos ne contenant aucune pompe,
+       envoyées en affirmant qu'il y en avait une, les modèles ont répondu
+       24 fois sur 24 « trouvé et mesuré », en fabriquant la mesure en pixels
+       et l'échelle qui en découle (BENCHMARK.md). Resserrer là-dessus, c'est
+       afficher une précision inventée sur le nombre qui sert à doser — et
+       d'autant plus quand le repère est justement hors cadre. */
     if (low == null || high == null) {
       var spread = conf === 'high' ? 0.12 : conf === 'medium' ? 0.22 : 0.35;
-      if (hasReference) spread = Math.max(0.08, spread - 0.06);
       // Une description ne permet pas de voir la portion : l'incertitude est
       // structurellement plus large, sauf si l'utilisateur a donné des poids
       // (auquel cas le modèle répond 'high' et on ne l'élargit qu'un peu).

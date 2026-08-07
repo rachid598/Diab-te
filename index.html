@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=69" />
+  <link rel="stylesheet" href="css/styles.css?v=70" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -157,7 +157,9 @@
             <span class="compact-value" id="reference-summary">Ma pompe</span>
           </summary>
           <div class="compact-content">
-            <p class="hint">Un objet de taille connue dans la photo réduit fortement l'erreur de portion. Pose-le <strong>à plat, sur le bord de l'assiette</strong> plutôt que sur la table : à la même hauteur que la nourriture, l'échelle est juste.</p>
+            <p class="hint">Un objet de taille connue donne au modèle la seule échelle réelle dont il dispose. Pose-le <strong>à plat, sur le bord de l'assiette</strong> plutôt que sur la table : à la même hauteur que la nourriture, l'échelle est juste.</p>
+            <p class="hint tiny"><strong>⚠️ S'il n'est pas vraiment dans le cadre, choisis « Aucun repère ».</strong> Testé sur 24 photos sans pompe, envoyées en affirmant qu'elle y était : les modèles ont répondu <strong>24 fois sur 24</strong> qu'ils l'avaient trouvée et mesurée, en inventant la mesure en pixels. Un repère annoncé mais absent est pire que pas de repère du tout.</p>
+            <p class="hint tiny">De combien il réduit l'erreur n'est pas chiffré : les photos du banc d'essai n'en contiennent aucun. Le conseil tient à la géométrie, pas à une mesure.</p>
             <select id="reference-object" class="input">
               <option value="pompe à insuline Medtronic MiniMed 780G : boîtier rectangulaire à écran couleur et coins arrondis, d'où sort une fine tubulure ; 96,8 mm de long sur 53,6 mm de large et 24,9 mm d'épaisseur" selected>Ma pompe MiniMed 780G (96,8 × 53,6 × 24,9 mm)</option>
               <option value="none">Aucun repère</option>
