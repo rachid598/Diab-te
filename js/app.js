@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '70'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '71'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -510,7 +510,7 @@
         status.hidden = true;
         var a = pair[0], b = pair[1];
         if (!a.ok && !b.ok) { toast(a.error || b.error); return; }
-        renderCompare(a, b);
+        renderCompare([a, b]);
       }).then(function () { updateEstimateBtn(); });
       return;
     }
@@ -523,6 +523,7 @@
        arrive après et complète l'affichage. Son échec est sans conséquence. */
     var verify = startVerification(sent, ctx);
 
+    lastCompare = null;
     lastCompareRun = null;
     lastRunProvider = settings.provider;
     lastRunModel = (settings.models || {})[settings.provider] || null;
@@ -727,89 +728,112 @@
   }
 
   // Affiche les deux avis côte à côte, avec un bouton « Utiliser cet avis ».
-  function renderCompare(a, b) {
-    var el = $('results');
+  /* Les avis actuellement affichés côte à côte. Conservé pour qu'une relance
+     AJOUTE une colonne au lieu de remplacer l'écran : après avoir demandé un
+     troisième avis pour départager les deux premiers, les faire disparaître
+     serait exactement le contraire du service rendu. */
+  var lastCompare = null;
 
-    /* Présentation en TABLEAU et non en deux cartes côte à côte. Deux cartes
-       obligent l'œil à faire l'aller-retour pour comparer chaque ligne : le
-       total de gauche avec le total de droite, puis la fourchette avec la
-       fourchette. Un tableau aligne les grandeurs comparables sur la même
-       ligne, ce qui est précisément le geste demandé ici — choisir entre deux
-       avis, pas les lire l'un après l'autre. */
-    function nomDe(x) { return PROVIDER_NAME[x.provider] || x.provider; }
-    function cell(x, rendu, classe) {
-      if (!x.ok) return '<td class="cmp-td cmp-td-fail">—</td>';
-      return '<td class="cmp-td' + (classe ? ' ' + classe : '') + '">' + rendu(x.result) + '</td>';
+  function renderCompare(avis) {
+    var el = $('results');
+    lastCompare = avis;
+
+    /* Présentation en TABLEAU et non en cartes côte à côte. Des cartes obligent
+       l'œil à faire l'aller-retour pour comparer chaque grandeur : le total de
+       gauche avec celui de droite, puis la fourchette avec la fourchette. Un
+       tableau aligne les grandeurs comparables sur la même ligne, ce qui est
+       précisément le geste demandé ici. */
+    /* En-tête : le MODÈLE en gros, le fournisseur en dessous. Comparer trois
+       avis, c'est comparer trois modèles — « OpenRouter » ne dit pas lequel a
+       répondu, et le mot se coupait en plein milieu dans une colonne étroite.
+       Le libellé vient du catalogue, qui porte des noms courts et lisibles. */
+    function nomDe(x) {
+      var id = x.ok && x.result && x.result.model;
+      var cat = (Storage.MODEL_CATALOG || {})[x.provider] || [];
+      for (var i = 0; i < cat.length; i++) {
+        if (cat[i].id === id) return cat[i].label;
+      }
+      return PROVIDER_NAME[x.provider] || x.provider;
+    }
+    function sousTitreDe(x) { return PROVIDER_NAME[x.provider] || x.provider; }
+    function ligne(intitule, rendu, classe) {
+      var h = '<tr' + (classe === 'cmp-big' ? ' class="cmp-row-main"' : '') + '>' +
+              '<th scope="row" class="cmp-metric">' + intitule + '</th>';
+      avis.forEach(function (x) {
+        h += x.ok
+          ? '<td class="cmp-td' + (classe ? ' ' + classe : '') + '">' + rendu(x.result) + '</td>'
+          : '<td class="cmp-td cmp-td-fail">—</td>';
+      });
+      return h + '</tr>';
     }
 
+    var ok = avis.filter(function (x) { return x.ok; });
+    var totaux = ok.map(function (x) { return x.result.totalCarbsG; });
+
     var html = '<div class="cmp-head">' +
-      '<h2>Deux avis indépendants</h2>' +
-      '<p class="hint">Deux modèles ont analysé la même photo, sans se consulter. ' +
+      '<h2>' + (avis.length > 2 ? avis.length + ' avis indépendants' : 'Deux avis indépendants') + '</h2>' +
+      '<p class="hint">' + (avis.length > 2
+        ? 'Trois modèles de familles différentes ont analysé la même photo. '
+        : 'Deux modèles ont analysé la même photo, sans se consulter. ') +
       'Retiens celui qui te paraît le plus juste — tu pourras encore corriger les portions.</p>' +
       '</div>';
 
     // Divergence : annoncée AVANT le tableau, sinon elle se lit après la décision.
-    if (a.ok && b.ok) {
-      var avg = Math.round((a.result.totalCarbsG + b.result.totalCarbsG) / 2);
-      var diff = Math.abs(a.result.totalCarbsG - b.result.totalCarbsG);
-      var rel = avg ? diff / avg : 0;
-      var bigGap = rel > 0.20 && diff >= 10;
-      if (bigGap) {
-        html += '<div class="cmp-warn">⚠️ <strong>Les deux avis divergent nettement</strong> — ' +
+    if (totaux.length > 1) {
+      var lo = Math.min.apply(null, totaux), hi = Math.max.apply(null, totaux);
+      var moy = Math.round(totaux.reduce(function (a2, b2) { return a2 + b2; }, 0) / totaux.length);
+      var diff = hi - lo;
+      var rel = moy ? diff / moy : 0;
+      if (rel > 0.20 && diff >= 10) {
+        html += '<div class="cmp-warn">⚠️ <strong>Les avis divergent nettement</strong> — ' +
           diff + ' g d\'écart (' + Math.round(rel * 100) + ' %). Ne prends pas la moyenne : ' +
-          'demande le troisième avis ci-dessous, ou compare le détail par aliment.</div>';
+          (avis.length > 2
+            ? 'regarde le détail par aliment pour comprendre lequel se trompe.'
+            : 'demande le troisième avis ci-dessous, ou compare le détail par aliment.') + '</div>';
       }
     }
 
-    html += '<div class="cmp-tablewrap"><table class="cmp-table">';
-    html += '<thead><tr><th class="cmp-metric"></th>' +
-      '<th scope="col" class="cmp-th">' + escapeHtml(nomDe(a)) +
-        (a.ok && a.result.model ? '<span class="cmp-model">' + escapeHtml(a.result.model) + '</span>' : '') +
-      '</th>' +
-      '<th scope="col" class="cmp-th">' + escapeHtml(nomDe(b)) +
-        (b.ok && b.result.model ? '<span class="cmp-model">' + escapeHtml(b.result.model) + '</span>' : '') +
-      '</th></tr></thead><tbody>';
+    html += '<div class="cmp-tablewrap"><table class="cmp-table' +
+            (avis.length > 2 ? ' cmp-table-3' : '') + '"><thead><tr><th class="cmp-metric"></th>';
+    avis.forEach(function (x) {
+      // Sur un avis en échec le modèle est inconnu : le libellé retombe sur le
+      // fournisseur, et l'afficher deux fois n'apprend rien.
+      var titre = nomDe(x), sous = sousTitreDe(x);
+      html += '<th scope="col" class="cmp-th">' + escapeHtml(titre) +
+        (sous === titre ? '' : '<span class="cmp-model">' + escapeHtml(sous) + '</span>') + '</th>';
+    });
+    html += '</tr></thead><tbody>';
 
-    html += '<tr class="cmp-row-main"><th scope="row" class="cmp-metric">Glucides</th>' +
-      cell(a, function (r) { return r.totalCarbsG + '<small> g</small>'; }, 'cmp-big') +
-      cell(b, function (r) { return r.totalCarbsG + '<small> g</small>'; }, 'cmp-big') + '</tr>';
-
-    html += '<tr><th scope="row" class="cmp-metric">Parts</th>' +
-      cell(a, function (r) { return fr(partsFrom(r.totalCarbsG)); }) +
-      cell(b, function (r) { return fr(partsFrom(r.totalCarbsG)); }) + '</tr>';
-
-    html += '<tr><th scope="row" class="cmp-metric">Fourchette</th>' +
-      cell(a, function (r) { return r.rangeLowG + ' – ' + r.rangeHighG + ' g'; }, 'cmp-soft') +
-      cell(b, function (r) { return r.rangeLowG + ' – ' + r.rangeHighG + ' g'; }, 'cmp-soft') + '</tr>';
-
-    html += '<tr><th scope="row" class="cmp-metric">Confiance</th>' +
-      cell(a, function (r) { return '<span class="confidence conf-' + r.overallConfidence + '">' +
-        CONF_LABEL[r.overallConfidence] + '</span>'; }) +
-      cell(b, function (r) { return '<span class="confidence conf-' + r.overallConfidence + '">' +
-        CONF_LABEL[r.overallConfidence] + '</span>'; }) + '</tr>';
+    html += ligne('Glucides', function (r) { return r.totalCarbsG + '<small> g</small>'; }, 'cmp-big');
+    html += ligne('Parts', function (r) { return fr(partsFrom(r.totalCarbsG)); });
+    html += ligne('Fourchette', function (r) { return r.rangeLowG + ' – ' + r.rangeHighG + ' g'; }, 'cmp-soft');
+    html += ligne('Confiance', function (r) {
+      return '<span class="confidence conf-' + r.overallConfidence + '">' +
+             CONF_LABEL[r.overallConfidence] + '</span>'; });
 
     // Un échec ne doit pas disparaître derrière un tiret : on dit lequel et pourquoi.
-    if (!a.ok || !b.ok) {
-      html += '<tr><th scope="row" class="cmp-metric">Échec</th>' +
-        '<td class="cmp-td cmp-err">' + (a.ok ? '' : escapeHtml(a.error || 'pas de réponse')) + '</td>' +
-        '<td class="cmp-td cmp-err">' + (b.ok ? '' : escapeHtml(b.error || 'pas de réponse')) + '</td></tr>';
+    if (ok.length !== avis.length) {
+      html += '<tr><th scope="row" class="cmp-metric">Échec</th>';
+      avis.forEach(function (x) {
+        html += '<td class="cmp-td cmp-err">' + (x.ok ? '' : escapeHtml(x.error || 'pas de réponse')) + '</td>';
+      });
+      html += '</tr>';
     }
 
-    html += '<tr class="cmp-row-actions"><td class="cmp-metric"></td>' +
-      '<td class="cmp-td">' + (a.ok
-        ? '<button class="btn btn-primary cmp-use" data-p="' + a.provider + '">Retenir</button>' : '') + '</td>' +
-      '<td class="cmp-td">' + (b.ok
-        ? '<button class="btn btn-primary cmp-use" data-p="' + b.provider + '">Retenir</button>' : '') + '</td></tr>';
-    html += '</tbody></table></div>';
+    html += '<tr class="cmp-row-actions"><td class="cmp-metric"></td>';
+    avis.forEach(function (x) {
+      html += '<td class="cmp-td">' + (x.ok
+        ? '<button class="btn btn-primary cmp-use" data-p="' + x.provider + '">Retenir</button>' : '') + '</td>';
+    });
+    html += '</tr></tbody></table></div>';
 
-    if (a.ok && b.ok) {
-      var avg2 = Math.round((a.result.totalCarbsG + b.result.totalCarbsG) / 2);
-      var diff2 = Math.abs(a.result.totalCarbsG - b.result.totalCarbsG);
-      var proche = diff2 < 5;
-      html += '<div class="cmp-avg">' + (proche
-        ? '<span class="cmp-agree">✓ Avis concordants</span> — ' + diff2 + ' g d\'écart seulement.'
-        : 'Écart de <strong>' + diff2 + ' g</strong> · moyenne ' + avg2 + ' g (' +
-          fr(partsFrom(avg2)) + ' parts)') + '</div>';
+    if (totaux.length > 1) {
+      var lo2 = Math.min.apply(null, totaux), hi2 = Math.max.apply(null, totaux);
+      var moy2 = Math.round(totaux.reduce(function (a2, b2) { return a2 + b2; }, 0) / totaux.length);
+      html += '<div class="cmp-avg">' + (hi2 - lo2 < 5
+        ? '<span class="cmp-agree">✓ Avis concordants</span> — ' + (hi2 - lo2) + ' g d\'écart seulement.'
+        : 'Écart de <strong>' + (hi2 - lo2) + ' g</strong> · moyenne ' + moy2 + ' g (' +
+          fr(partsFrom(moy2)) + ' parts)') + '</div>';
     }
 
     html += rerunHtml(true);
@@ -817,20 +841,22 @@
     el.hidden = false;
     initRerun();
 
-    // Stocke les résultats pour la sélection.
-    var results = {};
-    if (a.ok) results[a.provider] = a.result;
-    if (b.ok) results[b.provider] = b.result;
-
     el.querySelectorAll('.cmp-use').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        var chosenProvider = btn.dataset.p;
-        var other = a.provider === chosenProvider ? b : a;
-        lastResult = results[chosenProvider];
-        lastVerification = other.ok
-          ? { ok: true, provider: other.provider, total: other.result.totalCarbsG, checkedAt: Date.now() }
-          : { ok: false, provider: other.provider, error: other.error, checkedAt: Date.now() };
-        renderResults(lastResult); // remplace l'affichage par le détail éditable
+        var choisi = null, autres = [];
+        avis.forEach(function (x) {
+          if (x.provider === btn.dataset.p && !choisi) choisi = x; else autres.push(x);
+        });
+        if (!choisi) return;
+        lastResult = choisi.result;
+        /* La vérification retenue est le PREMIER autre avis abouti : c'est celui
+           qui sert de contrepoint dans le détail et dans l'historique. */
+        var autre = autres.filter(function (x) { return x.ok; })[0] || autres[0];
+        lastVerification = !autre ? null : (autre.ok
+          ? { ok: true, provider: autre.provider, total: autre.result.totalCarbsG, checkedAt: Date.now() }
+          : { ok: false, provider: autre.provider, error: autre.error, checkedAt: Date.now() });
+        lastCompare = null;          // on quitte la comparaison pour le détail
+        renderResults(lastResult);
       });
     });
     el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1486,6 +1512,13 @@
     var faits = [];
     if (lastRunProvider) faits.push(lastRunProvider + '|' + lastRunModel);
     if (lastCompareRun) faits = faits.concat(lastCompareRun);
+    // Les avis DÉJÀ affichés en colonne ne doivent pas être reproposés.
+    if (lastCompare) {
+      var mdl2 = settings.models || {};
+      lastCompare.forEach(function (x) {
+        faits.push(x.provider + '|' + ((x.result && x.result.model) || mdl2[x.provider] || ''));
+      });
+    }
     (Storage.PROVIDERS || []).forEach(function (p) {
       if (!(settings.apiKeys || {})[p]) return;          // pas de clé, pas d'option
       var cat = (Storage.MODEL_CATALOG || {})[p] || [];
@@ -1608,6 +1641,19 @@
         fini();
         lastRunProvider = o.provider;
         lastRunModel = o.model;
+
+        /* Depuis l'écran de comparaison, le nouvel avis s'AJOUTE en colonne.
+           Le remplacer par son seul résultat effaçait les deux avis qu'on
+           venait justement de lui demander de départager — on se retrouvait
+           avec un troisième chiffre isolé, et plus rien à quoi le comparer. */
+        if (lastCompare) {
+          var suite = lastCompare.concat([{ ok: true, provider: o.provider, result: r }]);
+          renderCompare(suite);
+          toast(escapeHtml(o.label) + ' : ' + r.totalCarbsG + ' g (' +
+                fr(partsFrom(r.totalCarbsG)) + ' parts)');
+          return;
+        }
+
         lastResult = r;
         /* keepPosition : sans ça la page remonte en haut et on perd le fil de ce
            qu'on était en train de comparer. */
