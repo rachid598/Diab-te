@@ -692,6 +692,26 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
   border: 1.5px solid var(--accent); border-radius: var(--r); padding: 11px 13px; }
 @media (prefers-color-scheme: dark) { .cmp-warn { color: var(--accent); } }
 
+/* Trois avis : les colonnes deviennent étroites. On leur impose une largeur
+   minimale et on laisse le conteneur défiler horizontalement, plutôt que de
+   comprimer les nombres jusqu'à les rendre illisibles — c'est précisément
+   l'information qu'on est venu comparer. */
+/* table-layout: fixed — sans lui, le tableau se dimensionne sur son contenu :
+   « 40 – 58 g » refusait de se réduire et poussait la troisième colonne hors de
+   l'écran. Fixe, la largeur restante se partage à parts égales entre les avis,
+   qui sont ce qu'on compare. */
+.cmp-table-3 { table-layout: fixed; width: 100%; }
+.cmp-table-3 .cmp-metric { width: 66px; white-space: normal; font-size: 11px; }
+.cmp-table-3 th, .cmp-table-3 td { padding: 9px 4px; }
+.cmp-table-3 .cmp-th { font-size: 12px; overflow-wrap: break-word; }
+.cmp-table-3 .cmp-big { font-size: 24px; }
+.cmp-table-3 .cmp-big small { font-size: 12px; }
+.cmp-table-3 .cmp-td { font-size: 13.5px; }
+.cmp-table-3 .cmp-soft { font-size: 11px; white-space: nowrap; }
+.cmp-table-3 .cmp-use { font-size: 13px; padding: 9px 4px; }
+.cmp-table-3 .cmp-model { font-size: 9.5px; }
+.cmp-table-3 .confidence { font-size: 11px; padding: 2px 7px; }
+
 /* Sous 360 px, l'intitulé de ligne mange la place des deux valeurs, qui sont
    l'information. On le réduit plutôt que de laisser le tableau déborder. */
 @media (max-width: 360px) {
