@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '67'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '68'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -224,6 +224,9 @@
   var inputMode = 'photo';
   // Fournisseur/modèle du dernier appel : sert à ne pas reproposer l'identique.
   var lastRunProvider = null, lastRunModel = null;
+  // « fournisseur|modèle » des deux avis d'une double analyse, pour ne pas les
+  // reproposer à la relance.
+  var lastCompareRun = null;
 
   function describedMeal() {
     var el = $('user-notes');
@@ -499,6 +502,10 @@
           .then(function (r) { return { ok: true, provider: p, result: r }; })
           .catch(function (e) { return { ok: false, provider: p, error: e.message }; });
       };
+      var mdl = settings.models || {};
+      lastCompareRun = [settings.provider + '|' + (mdl[settings.provider] || ''),
+                        cmp + '|' + (mdl[cmp] || '')];
+      lastRunProvider = null; lastRunModel = null;
       Promise.all([wrap(settings.provider), wrap(cmp)]).then(function (pair) {
         status.hidden = true;
         var a = pair[0], b = pair[1];
@@ -516,6 +523,7 @@
        arrive après et complète l'affichage. Son échec est sans conséquence. */
     var verify = startVerification(sent, ctx);
 
+    lastCompareRun = null;
     lastRunProvider = settings.provider;
     lastRunModel = (settings.models || {})[settings.provider] || null;
     estimateWithFallback(sent, ctx, status).then(function (result) {
@@ -764,8 +772,15 @@
     }
 
     html += '<div class="cmp-grid">' + card(a) + card(b) + '</div>';
+    /* Le troisième avis doit être atteignable ICI. C'est devant deux
+       estimations qui divergent qu'on doute — pas après avoir été forcé d'en
+       choisir une. Le laisser uniquement dans le détail éditable obligeait à
+       trancher d'abord pour pouvoir demander de l'aide ensuite, ce qui est
+       l'ordre inverse du besoin. */
+    html += rerunHtml();
     el.innerHTML = html;
     el.hidden = false;
+    initRerun();
 
     // Stocke les résultats pour la sélection.
     var results = {};
@@ -1430,12 +1445,18 @@
      simplement le même repas ailleurs, et le résultat remplace l'affichage. */
   function rerunOptions() {
     var out = [];
+    /* Après une double analyse, DEUX modèles ont déjà répondu. N'en exclure
+       qu'un laissait l'autre en tête de liste : la relance proposée par défaut
+       aurait refait à l'identique l'un des deux avis déjà affichés. */
+    var faits = [];
+    if (lastRunProvider) faits.push(lastRunProvider + '|' + lastRunModel);
+    if (lastCompareRun) faits = faits.concat(lastCompareRun);
     (Storage.PROVIDERS || []).forEach(function (p) {
       if (!(settings.apiKeys || {})[p]) return;          // pas de clé, pas d'option
       var cat = (Storage.MODEL_CATALOG || {})[p] || [];
       cat.forEach(function (m) {
         // On ne propose pas de refaire exactement ce qui vient d'être fait.
-        var dejaFait = (p === lastRunProvider && m.id === lastRunModel);
+        var dejaFait = faits.indexOf(p + '|' + m.id) !== -1;
         if (dejaFait) return;
         out.push({ provider: p, model: m.id,
                    label: (PROVIDER_NAME[p] || p) + ' · ' + m.label });
@@ -1447,9 +1468,16 @@
        modèle proche de lui. Après un désaccord entre les deux premiers avis, ce
        qu'on cherche est le plus indépendant, pas le plus proche. */
     var dp = settings.doubtProvider, dm = settings.doubtModel;
-    out.sort(function (x, y) {
-      return (y.provider === dp && y.model === dm) - (x.provider === dp && x.model === dm);
-    });
+    /* Le même modèle est atteignable par deux routes : en direct chez son
+       éditeur, ou via OpenRouter. Sans clé Anthropic, Claude Opus 5 sortait
+       purement et simplement de la liste alors qu'une clé OpenRouter suffit à
+       l'appeler. On accepte donc la seconde route, juste derrière la première. */
+    var rang = function (o) {
+      if (o.provider === dp && o.model === dm) return 0;
+      if (o.provider === 'openrouter' && o.model.split('/').pop() === String(dm).replace(/-(\d)-(\d)$/, '-$1.$2')) return 1;
+      return 2;
+    };
+    out.sort(function (x, y) { return rang(x) - rang(y); });
     return out;
   }
 
