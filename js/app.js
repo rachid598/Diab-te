@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '68'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '69'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -729,55 +729,90 @@
   // Affiche les deux avis côte à côte, avec un bouton « Utiliser cet avis ».
   function renderCompare(a, b) {
     var el = $('results');
-    function card(x) {
-      var name = PROVIDER_NAME[x.provider] || x.provider;
-      if (!x.ok) {
-        return '<div class="cmp-card cmp-fail"><div class="cmp-name">' + escapeHtml(name) + '</div>' +
-               '<div class="cmp-err">⚠️ ' + escapeHtml(x.error || 'Échec') + '</div></div>';
-      }
-      var r = x.result;
-      var parts = partsFrom(r.totalCarbsG);
-      var modelLine = r.model ? '<div class="cmp-model">' + escapeHtml(r.model) + '</div>' : '';
-      return '<div class="cmp-card">' +
-        '<div class="cmp-name">' + escapeHtml(name) + '</div>' +
-        modelLine +
-        '<div class="cmp-carbs">' + r.totalCarbsG + ' <small>g</small></div>' +
-        '<div class="cmp-parts">' + fr(parts) + ' parts</div>' +
-        '<div class="cmp-range">' + r.rangeLowG + ' – ' + r.rangeHighG + ' g</div>' +
-        '<div class="confidence conf-' + r.overallConfidence + '">' + CONF_LABEL[r.overallConfidence] + '</div>' +
-        '<button class="btn btn-primary cmp-use" data-p="' + x.provider + '">Utiliser cet avis →</button>' +
-        '</div>';
+
+    /* Présentation en TABLEAU et non en deux cartes côte à côte. Deux cartes
+       obligent l'œil à faire l'aller-retour pour comparer chaque ligne : le
+       total de gauche avec le total de droite, puis la fourchette avec la
+       fourchette. Un tableau aligne les grandeurs comparables sur la même
+       ligne, ce qui est précisément le geste demandé ici — choisir entre deux
+       avis, pas les lire l'un après l'autre. */
+    function nomDe(x) { return PROVIDER_NAME[x.provider] || x.provider; }
+    function cell(x, rendu, classe) {
+      if (!x.ok) return '<td class="cmp-td cmp-td-fail">—</td>';
+      return '<td class="cmp-td' + (classe ? ' ' + classe : '') + '">' + rendu(x.result) + '</td>';
     }
 
-    var html = '<div class="cmp-head"><h2>Deux avis</h2>' +
-      '<p class="hint">Compare les deux estimations. Choisis celle que tu retiens (tu pourras encore corriger les portions).</p></div>';
+    var html = '<div class="cmp-head">' +
+      '<h2>Deux avis indépendants</h2>' +
+      '<p class="hint">Deux modèles ont analysé la même photo, sans se consulter. ' +
+      'Retiens celui qui te paraît le plus juste — tu pourras encore corriger les portions.</p>' +
+      '</div>';
 
-    // Écart / moyenne quand les deux ont réussi.
+    // Divergence : annoncée AVANT le tableau, sinon elle se lit après la décision.
     if (a.ok && b.ok) {
       var avg = Math.round((a.result.totalCarbsG + b.result.totalCarbsG) / 2);
       var diff = Math.abs(a.result.totalCarbsG - b.result.totalCarbsG);
       var rel = avg ? diff / avg : 0;
-      var pAvg = partsFrom(avg);
-      // Divergence notable : > 20 % de la moyenne ET au moins 10 g d'écart.
       var bigGap = rel > 0.20 && diff >= 10;
       if (bigGap) {
-        html += '<div class="cmp-warn">⚠️ Les deux IA divergent nettement : ' + diff +
-                ' g d\'écart (' + Math.round(rel * 100) + ' %). La moyenne n\'est pas fiable ici — ' +
-                'ajoute une photo <strong>de côté</strong> avec un objet-repère et relance, ' +
-                'ou regarde le détail par aliment pour trancher toi-même.</div>';
+        html += '<div class="cmp-warn">⚠️ <strong>Les deux avis divergent nettement</strong> — ' +
+          diff + ' g d\'écart (' + Math.round(rel * 100) + ' %). Ne prends pas la moyenne : ' +
+          'demande le troisième avis ci-dessous, ou compare le détail par aliment.</div>';
       }
-      html += '<div class="cmp-avg' + (bigGap ? ' muted' : '') + '">Moyenne : <strong>' + avg +
-              ' g</strong> (' + fr(pAvg) + ' parts) · écart : ' + diff + ' g' +
-              (bigGap ? '' : ' · <span class="cmp-agree">avis concordants ✓</span>') + '</div>';
     }
 
-    html += '<div class="cmp-grid">' + card(a) + card(b) + '</div>';
-    /* Le troisième avis doit être atteignable ICI. C'est devant deux
-       estimations qui divergent qu'on doute — pas après avoir été forcé d'en
-       choisir une. Le laisser uniquement dans le détail éditable obligeait à
-       trancher d'abord pour pouvoir demander de l'aide ensuite, ce qui est
-       l'ordre inverse du besoin. */
-    html += rerunHtml();
+    html += '<div class="cmp-tablewrap"><table class="cmp-table">';
+    html += '<thead><tr><th class="cmp-metric"></th>' +
+      '<th scope="col" class="cmp-th">' + escapeHtml(nomDe(a)) +
+        (a.ok && a.result.model ? '<span class="cmp-model">' + escapeHtml(a.result.model) + '</span>' : '') +
+      '</th>' +
+      '<th scope="col" class="cmp-th">' + escapeHtml(nomDe(b)) +
+        (b.ok && b.result.model ? '<span class="cmp-model">' + escapeHtml(b.result.model) + '</span>' : '') +
+      '</th></tr></thead><tbody>';
+
+    html += '<tr class="cmp-row-main"><th scope="row" class="cmp-metric">Glucides</th>' +
+      cell(a, function (r) { return r.totalCarbsG + '<small> g</small>'; }, 'cmp-big') +
+      cell(b, function (r) { return r.totalCarbsG + '<small> g</small>'; }, 'cmp-big') + '</tr>';
+
+    html += '<tr><th scope="row" class="cmp-metric">Parts</th>' +
+      cell(a, function (r) { return fr(partsFrom(r.totalCarbsG)); }) +
+      cell(b, function (r) { return fr(partsFrom(r.totalCarbsG)); }) + '</tr>';
+
+    html += '<tr><th scope="row" class="cmp-metric">Fourchette</th>' +
+      cell(a, function (r) { return r.rangeLowG + ' – ' + r.rangeHighG + ' g'; }, 'cmp-soft') +
+      cell(b, function (r) { return r.rangeLowG + ' – ' + r.rangeHighG + ' g'; }, 'cmp-soft') + '</tr>';
+
+    html += '<tr><th scope="row" class="cmp-metric">Confiance</th>' +
+      cell(a, function (r) { return '<span class="confidence conf-' + r.overallConfidence + '">' +
+        CONF_LABEL[r.overallConfidence] + '</span>'; }) +
+      cell(b, function (r) { return '<span class="confidence conf-' + r.overallConfidence + '">' +
+        CONF_LABEL[r.overallConfidence] + '</span>'; }) + '</tr>';
+
+    // Un échec ne doit pas disparaître derrière un tiret : on dit lequel et pourquoi.
+    if (!a.ok || !b.ok) {
+      html += '<tr><th scope="row" class="cmp-metric">Échec</th>' +
+        '<td class="cmp-td cmp-err">' + (a.ok ? '' : escapeHtml(a.error || 'pas de réponse')) + '</td>' +
+        '<td class="cmp-td cmp-err">' + (b.ok ? '' : escapeHtml(b.error || 'pas de réponse')) + '</td></tr>';
+    }
+
+    html += '<tr class="cmp-row-actions"><td class="cmp-metric"></td>' +
+      '<td class="cmp-td">' + (a.ok
+        ? '<button class="btn btn-primary cmp-use" data-p="' + a.provider + '">Retenir</button>' : '') + '</td>' +
+      '<td class="cmp-td">' + (b.ok
+        ? '<button class="btn btn-primary cmp-use" data-p="' + b.provider + '">Retenir</button>' : '') + '</td></tr>';
+    html += '</tbody></table></div>';
+
+    if (a.ok && b.ok) {
+      var avg2 = Math.round((a.result.totalCarbsG + b.result.totalCarbsG) / 2);
+      var diff2 = Math.abs(a.result.totalCarbsG - b.result.totalCarbsG);
+      var proche = diff2 < 5;
+      html += '<div class="cmp-avg">' + (proche
+        ? '<span class="cmp-agree">✓ Avis concordants</span> — ' + diff2 + ' g d\'écart seulement.'
+        : 'Écart de <strong>' + diff2 + ' g</strong> · moyenne ' + avg2 + ' g (' +
+          fr(partsFrom(avg2)) + ' parts)') + '</div>';
+    }
+
+    html += rerunHtml(true);
     el.innerHTML = html;
     el.hidden = false;
     initRerun();
@@ -1481,12 +1516,21 @@
     return out;
   }
 
-  function rerunHtml() {
+  /* `troisieme` : rendu sous les deux avis plutôt que sous le détail éditable.
+     Le besoin n'est pas le même et le texte non plus — devant deux estimations
+     qui divergent, on ne se demande pas si le résultat est douteux, on sait
+     déjà qu'il l'est. */
+  function rerunHtml(troisieme) {
     if (!images.length && !describedMeal()) return '';
     var opts = rerunOptions();
     if (!opts.length) return '';
-    return '<div class="rerun-box">' +
-      '<label for="rerun-model">Ce résultat te paraît douteux ?</label>' +
+    var titre = troisieme
+      ? '<div class="rerun-title">🧭 Un doute ? Troisième avis</div>' +
+        '<p class="rerun-intro">Un modèle d\'une autre famille, indépendant des deux ci-dessus. ' +
+        'Même photo, rien à reprendre.</p>'
+      : '<label for="rerun-model">Ce résultat te paraît douteux ?</label>';
+    return '<div class="rerun-box' + (troisieme ? ' rerun-third' : '') + '">' +
+      titre +
       '<div class="rerun-row">' +
       '<select id="rerun-model" class="input">' +
         opts.map(function (o, i) {
@@ -1499,7 +1543,8 @@
          bas du résultat, et un indicateur placé au-dessus de l'écran ne se voit
          pas — l'appel semblait ne rien déclencher. */
       '<div id="rerun-status" class="rerun-status" hidden></div>' +
-      '<p class="hint tiny" id="rerun-hint">Même repas, même photo, autre modèle. Aucune photo à reprendre.</p>' +
+      (troisieme ? ''
+        : '<p class="hint tiny" id="rerun-hint">Même repas, même photo, autre modèle. Aucune photo à reprendre.</p>') +
       '</div>';
   }
 
