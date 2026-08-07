@@ -642,32 +642,62 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 .compare-toggle { justify-content: center; background: color-mix(in srgb, var(--brand) 8%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--brand) 45%, var(--border)); border-radius: var(--r); padding: 12px 14px; margin: 4px 0 14px; }
 .cmp-head h2 { margin-bottom: 4px; }
-.cmp-avg { text-align: center; font-size: 14px; color: var(--muted); margin: 4px 0 14px;
-  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r); padding: 10px 12px; }
-.cmp-avg.muted { opacity: .7; }
+.cmp-head .hint { margin-bottom: 12px; }
+
+/* Comparaison en tableau. Le but de cet écran est de CHOISIR entre deux avis :
+   les grandeurs comparables doivent donc être sur la même ligne, à hauteur
+   d'œil l'une de l'autre. Deux cartes côte à côte obligeaient à mémoriser le
+   total de gauche pour le comparer à celui de droite. */
+.cmp-tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.cmp-table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-lg); overflow: hidden;
+}
+.cmp-table th, .cmp-table td { padding: 10px 12px; text-align: center; }
+/* La colonne des intitulés est discrète : c'est un repère, pas une donnée. */
+.cmp-metric {
+  text-align: left !important; font-size: 12.5px; font-weight: 600;
+  color: var(--muted); white-space: nowrap; width: 1%;
+  background: var(--surface-2);
+}
+.cmp-th {
+  font-size: 13.5px; font-weight: 800; color: var(--brand);
+  background: var(--brand-soft); line-height: 1.25;
+  border-bottom: 1px solid var(--border);
+}
+.cmp-model {
+  display: block; font-size: 10.5px; font-weight: 600; color: var(--muted);
+  margin-top: 2px; text-transform: none; letter-spacing: 0;
+  /* Pas de break-all : il coupait « flash-lite » en « flash-lit / e ». Les
+     identifiants de modèles sont pleins de traits d'union, le navigateur sait
+     y aller tout seul si on le laisse faire. */
+  word-break: normal; overflow-wrap: break-word;
+}
+.cmp-td { font-size: 15px; font-weight: 700; color: var(--text); border-top: 1px solid var(--border); }
+.cmp-big { font-size: 30px; font-weight: 900; color: var(--brand); line-height: 1.1; }
+.cmp-big small { font-size: 14px; font-weight: 800; color: var(--muted); }
+.cmp-soft { font-size: 13px; font-weight: 600; color: var(--muted); }
+.cmp-td-fail { color: var(--faint); font-weight: 600; }
+.cmp-err { font-size: 12px; color: var(--danger); font-weight: 600; line-height: 1.4; }
+.cmp-row-main .cmp-td { padding-top: 12px; padding-bottom: 6px; }
+.cmp-row-actions .cmp-td { padding: 12px; border-top: 1px solid var(--border); }
+.cmp-row-actions .cmp-metric { background: var(--surface-2); }
+.cmp-use { width: 100%; font-size: 14px; padding: 10px 8px; }
+
+.cmp-avg { text-align: center; font-size: 13.5px; color: var(--muted); margin: 10px 0 0; }
 .cmp-agree { color: var(--ok); font-weight: 700; }
-.cmp-warn { text-align: left; font-size: 13.5px; line-height: 1.5; margin: 4px 0 10px;
+.cmp-warn { text-align: left; font-size: 13.5px; line-height: 1.5; margin: 4px 0 12px;
   background: color-mix(in srgb, var(--accent) 15%, var(--surface)); color: #b45309;
   border: 1.5px solid var(--accent); border-radius: var(--r); padding: 11px 13px; }
 @media (prefers-color-scheme: dark) { .cmp-warn { color: var(--accent); } }
-.cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.cmp-card {
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
-  box-shadow: none; padding: 16px 14px; text-align: center;
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-}
-.cmp-name { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0; color: var(--brand); }
-.cmp-model { font-size: 11px; color: var(--faint); font-weight: 600; word-break: break-all; }
-.cmp-carbs { font-size: 34px; font-weight: 900; color: var(--brand); line-height: 1.1; }
-.cmp-carbs small { font-size: 15px; font-weight: 800; color: var(--muted); }
-.cmp-parts { font-size: 15px; font-weight: 700; color: var(--text); }
-.cmp-range { font-size: 12.5px; color: var(--muted); }
-.cmp-use { margin-top: 10px; width: 100%; font-size: 14px; padding: 10px; }
-.cmp-fail { justify-content: center; }
-.cmp-err { font-size: 13px; color: var(--danger); font-weight: 600; }
-@media (max-width: 380px) {
-  .cmp-grid { grid-template-columns: 1fr; }
-  .cmp-carbs { font-size: 40px; }
+
+/* Sous 360 px, l'intitulé de ligne mange la place des deux valeurs, qui sont
+   l'information. On le réduit plutôt que de laisser le tableau déborder. */
+@media (max-width: 360px) {
+  .cmp-table th, .cmp-table td { padding: 9px 6px; }
+  .cmp-metric { font-size: 11.5px; }
+  .cmp-big { font-size: 26px; }
 }
 
 /* ---------- Toast ---------- */
@@ -906,6 +936,17 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 .rerun-box { margin-top: 14px; padding: 12px 13px; border-radius: var(--r);
   background: var(--surface-2); border: 1px solid var(--border); text-align: left; }
 .rerun-box label { margin-top: 0; }
+/* Troisième avis, sous la comparaison. Il ne doit ressembler ni à un réglage
+   ni à une carte de résultat : c'est une ACTION facultative, offerte au moment
+   où l'on hésite. D'où le liseré de la couleur d'information plutôt que la
+   grille neutre. */
+.rerun-third {
+  margin-top: 16px; padding: 14px;
+  background: color-mix(in srgb, var(--info) 7%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--info) 35%, var(--border));
+}
+.rerun-title { font-size: 14.5px; font-weight: 800; color: var(--text); margin-bottom: 3px; }
+.rerun-intro { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0 0 10px; }
 .rerun-row { display: flex; gap: 8px; align-items: stretch; }
 .rerun-row .input { flex: 1; min-width: 0; }
 .rerun-row .btn { flex: 0 0 auto; white-space: nowrap; }
