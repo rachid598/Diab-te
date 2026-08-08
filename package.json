@@ -1,10 +1,11 @@
 {
   "name": "glucovision",
-  "version": "1.72.0",
+  "version": "1.73.0",
   "private": true,
   "description": "GlucoVision — estimateur de glucides (emballage Android de la PWA)",
   "scripts": {
-    "build:www": "bash scripts/build-www.sh"
+    "build:www": "bash scripts/build-www.sh",
+    "test": "node --test tests/*.test.js"
   },
   "devDependencies": {
     "@aparajita/capacitor-secure-storage": "^8.0.0",

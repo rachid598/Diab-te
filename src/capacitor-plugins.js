@@ -16,6 +16,11 @@ import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import { Share } from '@capacitor/share';
 import { App } from '@capacitor/app';
 
+// Plugin Java local : l'enregistrement JS est nécessaire en plus de
+// MainActivity.registerPlugin(), sinon le pont natif existe mais reste
+// invisible sous window.Cap.DepthScan.
+const DepthScan = registerPlugin('DepthScan');
+
 window.Cap = {
   Capacitor: Capacitor,
   CapacitorHttp: CapacitorHttp,
@@ -29,5 +34,6 @@ window.Cap = {
   SecureStorage: SecureStorage,
   CapacitorUpdater: CapacitorUpdater,
   Share: Share,
-  App: App
+  App: App,
+  DepthScan: DepthScan
 };

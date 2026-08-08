@@ -31,6 +31,7 @@
   var NOTIF_CHANNEL = 'glucovision-controle';
   var photoBase = null;      // URL affichable du dossier photos (calculée une fois)
   var readyPromise = null;
+  var markedReadyPromise = null;
 
   function noop() {}
   function resolved(v) { return Promise.resolve(v); }
@@ -38,9 +39,13 @@
   // ---------- Démarrage ----------
 
   /* Prépare tout ce qui doit l'être avant le premier rendu :
-     - notifyAppReady() : obligatoire, sinon le plugin de mise à jour considère
-       que le bundle a planté et revient à la version précédente ;
-     - l'URL de base des photos, pour pouvoir construire les <img> en synchrone.
+     - l'URL de base des photos, pour pouvoir construire les <img> en synchrone ;
+     - le canal de notifications.
+
+     notifyAppReady() est volontairement absent d'ici. Le signaler avant que
+     Storage.hydrate() et l'interface aient réellement fini d'initialiser ferait
+     accepter comme sain un bundle OTA qui plante juste après. init() appelle
+     markReady() seulement une fois l'application utilisable.
      Un plugin qui ne répondrait pas ne doit jamais empêcher l'app de démarrer :
      d'où le garde-fou de 3 s. */
   function ready() {
@@ -48,7 +53,6 @@
     if (!isApp) { readyPromise = resolved(false); return readyPromise; }
 
     var work = Promise.all([
-      Cap.CapacitorUpdater.notifyAppReady().catch(noop),
       Cap.Filesystem.getUri({ directory: Cap.Directory.Data, path: PHOTO_DIR })
         .then(function (r) { photoBase = C.convertFileSrc(r.uri); })
         .catch(noop),
@@ -68,6 +72,18 @@
     var guard = new Promise(function (res) { setTimeout(function () { res(true); }, 3000); });
     readyPromise = Promise.race([work, guard]);
     return readyPromise;
+  }
+
+  function markReady() {
+    if (markedReadyPromise) return markedReadyPromise;
+    if (!isApp || !Cap.CapacitorUpdater ||
+        typeof Cap.CapacitorUpdater.notifyAppReady !== 'function') {
+      markedReadyPromise = resolved(false);
+      return markedReadyPromise;
+    }
+    markedReadyPromise = Cap.CapacitorUpdater.notifyAppReady()
+      .then(function () { return true; });
+    return markedReadyPromise;
   }
 
   // ---------- HTTP natif (sans CORS) ----------
@@ -240,8 +256,10 @@
   function loadKeys(providers) {
     if (!isApp) return resolved(null);
     return Promise.all(providers.map(function (p) {
-      return Cap.SecureStorage.get(SECURE_PREFIX + p)
-        .catch(function () { return null; });
+      /* Le plugin résout déjà `null` quand une clé n'existe pas. Une exception
+         signifie donc que le Keystore est réellement illisible : la masquer
+         ferait croire à Storage qu'il est sûr d'enregistrer quatre clés vides. */
+      return Cap.SecureStorage.get(SECURE_PREFIX + p);
     })).then(function (values) {
       var out = {};
       providers.forEach(function (p, i) {
@@ -258,7 +276,7 @@
       return (v
         ? Cap.SecureStorage.set(SECURE_PREFIX + p, v)
         : Cap.SecureStorage.remove(SECURE_PREFIX + p)
-      ).catch(noop);
+      );
     })).then(function () { return true; });
   }
 
@@ -300,6 +318,71 @@
     if (!isApp) return resolved(false);
     return Cap.LocalNotifications.cancel({ notifications: [{ id: id }] })
       .then(function () { return true; }).catch(function () { return false; });
+  }
+
+  // ---------- Photo mesurée (ARCore Depth, Android uniquement) ----------
+
+  /* Le plugin est optionnel : l'APK reste utilisable sur un téléphone sans
+     ARCore ou sans Depth API. La disponibilité est déterminée côté natif de
+     manière asynchrone, car Google Play Services peut répondre provisoirement
+     « en cours de vérification » au démarrage. */
+  var depthAvailabilityPromise = null;
+
+  function depthAvailable() {
+    if (!isApp || platform !== 'android' || !Cap.DepthScan ||
+        typeof Cap.DepthScan.available !== 'function') {
+      return resolved({ supported: false, installed: false, reason: 'INDISPONIBLE' });
+    }
+    if (depthAvailabilityPromise) return depthAvailabilityPromise;
+    depthAvailabilityPromise = Cap.DepthScan.available().then(function (r) {
+      return {
+        supported: !!(r && r.supported),
+        installed: !!(r && r.installed),
+        reason: (r && r.reason) || 'INCONNU'
+      };
+    }).catch(function (e) {
+      depthAvailabilityPromise = null; // une réponse transitoire pourra être retentée
+      return { supported: false, installed: false, transient: true,
+               reason: (e && e.message) || 'ERREUR' };
+    });
+    return depthAvailabilityPromise;
+  }
+
+  function depthCapture() {
+    if (!isApp || platform !== 'android' || !Cap.DepthScan ||
+        typeof Cap.DepthScan.capture !== 'function') return resolved(null);
+    return Cap.DepthScan.capture().then(function (r) {
+      if (!r || r.cancelled) return r || { cancelled: true };
+      if (r.error) return { error: String(r.error) };
+      var jpeg = (r.jpegBase64 || '').toString();
+      if (!jpeg) return { error: 'La photo ARCore est vide.' };
+      return {
+        urls: ['data:image/jpeg;base64,' + jpeg],
+        depth: {
+          ok: !!r.depthOk,
+          scaleOk: !!r.scaleOk,
+          volumeOk: !!r.volumeOk,
+          fieldWidthCm: Number(r.fieldWidthCm) || 0,
+          fieldHeightCm: Number(r.fieldHeightCm) || 0,
+          distanceCm: Number(r.distanceCm) || 0,
+          cmPerPixel: Number(r.cmPerPixel) || 0,
+          volumeCm3: Number(r.volumeCm3) || 0,
+          areaCm2: Number(r.areaCm2) || 0,
+          heightMaxCm: Number(r.heightMaxCm) || 0,
+          heightMeanCm: Number(r.heightMeanCm) || 0,
+          samples: Number(r.samples) || 0,
+          confidentPixels: Number(r.confidentPixels) || 0,
+          coverage: Number(r.coverage) || 0,
+          observations: Number(r.observations) || 0,
+          parallaxCm: Number(r.parallaxCm) || 0,
+          fresh: r.fresh !== false,
+          note: (r.note || '').toString(),
+          diag: (r.diag || '').toString()
+        }
+      };
+    }).catch(function (e) {
+      return { error: (e && e.message) || 'Mesure ARCore impossible.' };
+    });
   }
 
   // ---------- Identité de la couche native ----------
@@ -411,45 +494,103 @@
      Mode manuel volontaire (autoUpdate désactivé) : on veut décider quand la
      bascule a lieu et l'annoncer avec le même bandeau « Actualiser » que sur le
      web, pas voir l'app se recharger sous les doigts pendant un repas. */
-  function checkUpdate(manifestUrl, currentVersion) {
-    if (!isApp) return resolved(null);
-    // Anti-cache : les assets de release passent par un CDN.
-    var url = manifestUrl + (manifestUrl.indexOf('?') === -1 ? '?' : '&') + 't=' + Date.now();
-    return httpJson(url, 10000).then(function (res) {
-      var info = res && res.data;
-      if (!info || !info.appVersion || !info.url) return null;
-      if (String(info.appVersion) === String(currentVersion)) return null;
-      // On ne redescend jamais vers une version plus ancienne.
-      if (parseInt(info.appVersion, 10) <= parseInt(currentVersion, 10)) return null;
-      return info;
-    }).catch(function () { return null; });
+  function positiveInt(v, field) {
+    var s = (typeof v === 'number') ? String(v) : (v || '').toString();
+    if (!/^[1-9][0-9]*$/.test(s)) throw new Error('Manifeste OTA invalide (' + field + ').');
+    var n = Number(s);
+    if (!Number.isSafeInteger(n)) throw new Error('Manifeste OTA invalide (' + field + ').');
+    return n;
   }
 
-  function downloadUpdate(info) {
-    if (!isApp || !info) return resolved(null);
-    return Cap.CapacitorUpdater.download({
-      url: info.url,
-      version: info.version || ('1.' + info.appVersion + '.0')
-    }).then(function (bundle) {
-      // Prête pour le prochain démarrage ; applyUpdate() bascule tout de suite.
-      return Cap.CapacitorUpdater.next({ id: bundle.id }).then(function () { return bundle; });
-    }).catch(function () { return null; });
+  /* Le manifeste est une entrée réseau hostile jusqu'à preuve du contraire.
+     On refuse les URL arbitraires, les versions ambiguës et les archives sans
+     SHA-256. Le zip doit vivre sur un tag de release IMMUABLE qui porte son
+     numéro : une réécriture du canal « latest » ne peut donc pas remplacer le
+     contenu d'une version déjà validée. */
+  function validateManifest(raw, currentVersion) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error('Manifeste OTA absent ou illisible.');
+    }
+    var appVersion = positiveInt(raw.appVersion, 'appVersion');
+    var minNativeBuild = positiveInt(raw.minNativeBuild, 'minNativeBuild');
+    var version = (raw.version || '').toString();
+    if (version !== '1.' + appVersion + '.0') {
+      throw new Error('Manifeste OTA invalide (version).');
+    }
+    var checksum = (raw.checksum || '').toString().toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(checksum)) {
+      throw new Error('Manifeste OTA sans empreinte SHA-256 valide.');
+    }
+    var u;
+    try { u = new URL((raw.url || '').toString()); }
+    catch (e) { throw new Error('URL OTA invalide.'); }
+    var expected = '/rachid598/Diab-te/releases/download/ota-v' + appVersion + '/www.zip';
+    if (u.protocol !== 'https:' || u.hostname !== 'github.com' || u.port ||
+        u.username || u.password || u.search || u.hash || u.pathname !== expected) {
+      throw new Error('URL OTA refusée : la release n’est pas immuable ou n’appartient pas au projet.');
+    }
+    var current = (currentVersion == null || Number(currentVersion) === 0)
+      ? 0 : positiveInt(currentVersion, 'version locale');
+    return {
+      appVersion: String(appVersion),
+      appVersionNumber: appVersion,
+      version: version,
+      minNativeBuild: minNativeBuild,
+      checksum: checksum,
+      url: u.toString(),
+      newer: appVersion > current
+    };
+  }
+
+  function checkUpdate(manifestUrl, currentVersion) {
+    if (!isApp) return resolved(null);
+    // Anti-cache : le petit manifeste du canal est volontairement mutable.
+    var url = manifestUrl + (manifestUrl.indexOf('?') === -1 ? '?' : '&') + 't=' + Date.now();
+    return Promise.all([httpJson(url, 10000), appBuild()]).then(function (all) {
+      var res = all[0], build = all[1];
+      if (!res || res.status < 200 || res.status >= 300) {
+        throw new Error('Manifeste OTA indisponible (HTTP ' + ((res && res.status) || 0) + ').');
+      }
+      var info = validateManifest(res.data, currentVersion);
+      if (!info.newer) return null;
+      if (!(build >= info.minNativeBuild)) {
+        return { kind: 'apk-required', info: info, nativeBuild: build || 0 };
+      }
+      return { kind: 'available', info: info, nativeBuild: build };
+    });
+  }
+
+  function downloadUpdate(input) {
+    if (!isApp || !input) return resolved(null);
+    var raw = input.info || input;
+    var info = validateManifest(raw, 0);
+    return appBuild().then(function (build) {
+      if (!(build >= info.minNativeBuild)) {
+        throw new Error('Cet OTA exige l’APK ' + info.minNativeBuild + ' (installé : ' + (build || 0) + ').');
+      }
+      return Cap.CapacitorUpdater.download({
+        url: info.url,
+        version: info.version,
+        checksum: info.checksum
+      });
+    });
   }
 
   function applyUpdate(bundle) {
-    if (!isApp || !bundle) return resolved(false);
+    if (!isApp || !bundle || !bundle.id) return Promise.reject(new Error('Bundle OTA absent.'));
     // set() recharge la WebView sur le nouveau bundle : rien ne s'exécute après.
-    return Cap.CapacitorUpdater.set({ id: bundle.id })
-      .then(function () { return true; }).catch(function () { return false; });
+    return Cap.CapacitorUpdater.set({ id: bundle.id }).then(function () { return true; });
   }
 
   window.Native = {
     isApp: isApp,
     platform: platform,
     ready: ready,
+    markReady: markReady,
     httpJson: httpJson,
 
     camera: { capture: capture, pickMany: pickMany },
+    depth: { available: depthAvailable, capture: depthCapture },
     shareFile: shareFile,
     saveToDocuments: saveToDocuments,
     appBuild: appBuild,

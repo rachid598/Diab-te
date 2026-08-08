@@ -44,7 +44,10 @@
   function analyse(days) {
     var since = Date.now() - days * 86400000;
     var meals = Storage.getHistory().filter(function (e) {
-      return !e.draft && e.date >= since && e.totalCarbsG > 0;
+      var confirmed = Storage.isConfirmedMeal ? Storage.isConfirmedMeal(e)
+        : (!e.draft && !e.blocked && !(e.blocking && e.blocking.length) &&
+           !(e.dominantRequired && !e.dominantConfirmed));
+      return confirmed && e.date >= since && e.totalCarbsG > 0 && e.totalCarbsG <= 400;
     }).sort(function (a, b) { return a.date - b.date; });
 
     if (!meals.length) return null;
@@ -71,7 +74,10 @@
     var gls = meals.map(function (e) { return e.gi && e.gi.gl; }).filter(function (v) { return v != null; });
 
     // Fiabilité : uniquement les repas où une valeur réelle a été saisie.
-    var mesures = meals.filter(function (e) { return e.realCarbsG > 0; });
+    var mesures = meals.filter(function (e) {
+      return e.realCarbsG > 0 && e.realCarbsG <= 400 &&
+        (!Storage.isReliableReal || Storage.isReliableReal(e));
+    });
 
     return {
       days: days,
@@ -125,11 +131,11 @@
     } else {
       var sens = a.bias.pct > 0 ? 'sous-estimation' : 'sur-estimation';
       fiab = '<p>Sur <strong>' + a.mesures + ' repas</strong> où la valeur réelle a été relevée, ' +
-        'les estimations montrent une <strong>' + sens + ' moyenne de ' +
+        'les estimations montrent une <strong>' + sens + ' médiane de ' +
         Math.abs(a.bias.pct) + ' %</strong>.</p>';
       if (a.byCategory.length) {
         fiab += '<table><thead><tr><th>Catégorie</th><th class="num">Repas</th>' +
-          '<th class="num">Écart moyen</th></tr></thead><tbody>' +
+          '<th class="num">Écart médian</th></tr></thead><tbody>' +
           a.byCategory.map(function (g) {
             return '<tr><td>' + esc(g.category) + '</td><td class="num">' + g.count +
               '</td><td class="num">' + (g.pct > 0 ? '+' : '') + g.pct + ' %</td></tr>';

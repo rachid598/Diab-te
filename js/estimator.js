@@ -108,9 +108,9 @@
     "   Mets true UNIQUEMENT si tu as effectivement localisé l'objet-repère dans",
     "   l'image et t'en es servi pour mesurer. Mets false s'il est hors cadre,",
     "   masqué, flou, ou si tu n'en es pas sûr.",
-    "   Ne dis pas true « pour faire plaisir » : l'application resserre sa marge",
-    "   d'erreur quand tu réponds true. Annoncer une mesure qui n'a pas eu lieu",
-    "   produit une fausse précision sur une dose d'insuline.",
+    "   Ne dis pas true « pour faire plaisir » : cette information sert à expliquer",
+    "   la méthode employée. Annoncer une mesure qui n'a pas eu lieu produit une",
+    "   fausse précision sur un chiffre destiné au comptage des glucides.",
     "",
     "SORTIE : réponds UNIQUEMENT avec un objet JSON valide, sans texte ni balises markdown.",
     "Schéma exact :",
@@ -149,6 +149,7 @@
     if (!ctx.imageCount) return buildTextPrompt(ctx);
 
     var lines = ['Analyse ce repas et estime les glucides selon la méthode.'];
+    var depth = validDepthScale(ctx.depth, ctx.imageCount);
     if (ctx.referenceObject && ctx.referenceObject !== 'none') {
       var ref = ctx.referenceObject;
       if (ctx.plateDiameterCm) {
@@ -169,13 +170,30 @@
         lines.push('comme règle VERTICALE pour juger la hauteur de ce qu\'il y a dans l\'assiette.');
       }
     } else {
-      lines.push('Aucun objet-repère : estime l\'échelle via l\'assiette/les couverts et baisse la confiance.');
+      lines.push(depth
+        ? 'Aucun objet-repère visuel : utilise l\'échelle ARCore mesurée ci-dessous.'
+        : 'Aucun objet-repère : estime l\'échelle via l\'assiette/les couverts et baisse la confiance.');
     }
     if (ctx.imageCount > 1) {
       lines.push('Il y a ' + ctx.imageCount + ' angles du MÊME repas : croise-les pour le volume (hauteur incluse).');
     } else {
       lines.push('Une seule vue : tu ne vois pas directement la hauteur/épaisseur — estime-la et');
       lines.push('signale-la comme seule inconnue géométrique (une photo de côté la lèverait).');
+    }
+    if (depth) {
+      var depthScope = ctx.imageCount > 1
+        ? ' POUR L\'IMAGE ' + depth.viewIndex + '/' + ctx.imageCount + ' UNIQUEMENT'
+        : '';
+      lines.push('ÉCHELLE ARCORE EXPÉRIMENTALE VALIDÉE' + depthScope + ' : à ' + depth.distanceCm +
+        ' cm de l\'objectif, le champ de cette image mesure environ ' + depth.fieldWidthCm +
+        ' × ' + depth.fieldHeightCm + ' cm (' + depth.cmPerPixel + ' cm/pixel).');
+      lines.push('Utilise cette mesure uniquement comme échelle géométrique horizontale pour');
+      lines.push('les dimensions visibles dans cette image : elle prime sur une échelle devinée.');
+      if (ctx.imageCount > 1) {
+        lines.push('Ne l\'applique à aucun autre angle : leur perspective et leur distance diffèrent.');
+      }
+      lines.push('Ne déduis JAMAIS une masse ni des glucides');
+      lines.push('d\'un éventuel volumeCm3 : cette donnée expérimentale n\'est pas étalonnée.');
     }
     if (ctx.notes && ctx.notes.trim()) {
       lines.push('Précisions de l\'utilisateur (fiables, à intégrer) : ' + ctx.notes.trim());
@@ -208,6 +226,29 @@
     if (cal) lines.push(cal);
     lines.push('Réponds uniquement avec le JSON.');
     return lines.join('\n');
+  }
+
+  function validDepthScale(raw, imageCount) {
+    if (!raw || raw.scaleOk !== true || raw.fresh === false) return null;
+    var width = strictNum(raw.fieldWidthCm);
+    var height = strictNum(raw.fieldHeightCm);
+    var distance = strictNum(raw.distanceCm);
+    var scale = strictNum(raw.cmPerPixel);
+    if (!(width > 1 && width <= 250 && height > 1 && height <= 250 &&
+          distance >= 5 && distance <= 500 && scale > 0 && scale <= 5)) return null;
+    var count = strictNum(imageCount);
+    count = count == null ? 1 : Math.round(count);
+    var view = strictNum(raw.viewIndex);
+    if (count > 1 && (view == null || view !== Math.round(view) || view < 1 || view > count)) {
+      return null;
+    }
+    return {
+      fieldWidthCm: Math.round(width * 10) / 10,
+      fieldHeightCm: Math.round(height * 10) / 10,
+      distanceCm: Math.round(distance * 10) / 10,
+      cmPerPixel: Math.round(scale * 10000) / 10000,
+      viewIndex: count > 1 ? view : 1
+    };
   }
 
   /* Calibration personnelle : ce que les repas déjà mesurés par l'utilisateur
@@ -587,6 +628,7 @@
 
   // -------- Normalisation / garde-fous sur le résultat --------
   function sanitize(result, ctx) {
+    result = result && typeof result === 'object' ? result : {};
     var fromText = !(ctx && ctx.imageCount);
     var refAsked = !fromText && !!(ctx && ctx.referenceObject && ctx.referenceObject !== 'none');
 
@@ -599,13 +641,49 @@
        Faute de réponse explicite, on retombe sur « non trouvé » : mieux vaut
        une marge trop large qu'une marge trop serrée. */
     var refFound = refAsked && result.referenceFound === true;
-    var hasReference = refFound;
+    var rawBlocking = [];
+    var rawTotal = strictNum(result.totalCarbsG);
+    var rawLow = strictNum(result.rangeLowG);
+    var rawHigh = strictNum(result.rangeHighG);
+
+    if (rawTotal == null || rawTotal < 0) {
+      rawBlocking.push('Le total brut renvoyé par le modèle est absent ou invalide.');
+    }
+    if (rawLow == null || rawHigh == null || rawLow < 0 || rawHigh < 0) {
+      rawBlocking.push('La fourchette brute renvoyée par le modèle est absente ou invalide.');
+    } else if (rawLow > rawHigh) {
+      rawBlocking.push('La fourchette brute renvoyée par le modèle est inversée (' +
+        Math.round(rawLow) + ' g à ' + Math.round(rawHigh) + ' g).');
+    } else if (rawTotal != null && (rawTotal < rawLow || rawTotal > rawHigh)) {
+      rawBlocking.push('Le total brut du modèle (' + Math.round(rawTotal) +
+        ' g) est hors de sa propre fourchette (' + Math.round(rawLow) + '–' +
+        Math.round(rawHigh) + ' g).');
+    }
+
     var items = Array.isArray(result.items) ? result.items : [];
-    items = items.map(function (it) {
+    items = items.map(function (it, index) {
+      it = it && typeof it === 'object' ? it : {};
       var carbs = num(it.carbsG);
       if (carbs == null) {
         var mass = num(it.estimatedMassG), dens = num(it.carbDensityPer100g);
         carbs = (mass != null && dens != null) ? mass * dens / 100 : 0;
+      }
+      if (num(it.carbsG) == null && !(num(it.estimatedMassG) != null &&
+          num(it.carbDensityPer100g) != null)) {
+        rawBlocking.push('« ' + (it.name || ('Aliment ' + (index + 1))) +
+          ' » : glucides absents ou invalides.');
+      }
+      if (carbs < 0) {
+        rawBlocking.push('« ' + (it.name || ('Aliment ' + (index + 1))) +
+          ' » : quantité de glucides négative.');
+      }
+      if (num(it.estimatedMassG) != null && num(it.estimatedMassG) < 0) {
+        rawBlocking.push('« ' + (it.name || ('Aliment ' + (index + 1))) +
+          ' » : masse négative.');
+      }
+      if (num(it.carbDensityPer100g) != null && num(it.carbDensityPer100g) < 0) {
+        rawBlocking.push('« ' + (it.name || ('Aliment ' + (index + 1))) +
+          ' » : densité glucidique négative.');
       }
       return {
         name: it.name || 'Aliment',
@@ -619,71 +697,95 @@
         gi: nonNeg(it.gi),          // secours seulement : la table locale prime
         // Dessert / boisson annoncés mais absents de l'image : l'interface les
         // présente à part, pour ne pas les faire passer pour « vus ».
-        added: !fromText && it.fromPhoto === false,
+        added: it.added === true || (!fromText && it.fromPhoto === false),
         confidence: normConf(it.confidence),
         assumptions: it.assumptions || ''
       };
     });
 
-    // Total = somme des items (source de vérité, cohérent avec l'édition manuelle).
-    var total = items.reduce(function (s, it) { return s + it.carbsG; }, 0);
-
-    var low = num(result.rangeLowG);
-    var high = num(result.rangeHighG);
-    var conf = normConf(result.overallConfidence);
-    /* Si le modèle n'a pas donné de fourchette, on en dérive une selon la
-       confiance. Le repère ne la resserre PLUS.
-
-       Il la resserrait de 6 points quand le modèle déclarait l'avoir trouvé.
-       Or ce booléen ne vaut rien : sur 24 photos ne contenant aucune pompe,
-       envoyées en affirmant qu'il y en avait une, les modèles ont répondu
-       24 fois sur 24 « trouvé et mesuré », en fabriquant la mesure en pixels
-       et l'échelle qui en découle (BENCHMARK.md). Resserrer là-dessus, c'est
-       afficher une précision inventée sur le nombre qui sert à doser — et
-       d'autant plus quand le repère est justement hors cadre. */
-    if (low == null || high == null) {
-      var spread = conf === 'high' ? 0.12 : conf === 'medium' ? 0.22 : 0.35;
-      // Une description ne permet pas de voir la portion : l'incertitude est
-      // structurellement plus large, sauf si l'utilisateur a donné des poids
-      // (auquel cas le modèle répond 'high' et on ne l'élargit qu'un peu).
-      if (fromText) spread = Math.max(spread, conf === 'high' ? 0.14 : 0.28);
-      low = Math.round(total * (1 - spread));
-      high = Math.round(total * (1 + spread));
+    var derivedTotal = items.reduce(function (s, it) { return s + it.carbsG; }, 0);
+    if (rawTotal != null && rawTotal >= 0 && derivedTotal > 0 &&
+        Math.abs(rawTotal - derivedTotal) > Math.max(5, derivedTotal * 0.2)) {
+      rawBlocking.push('Le total brut annoncé (' + Math.round(rawTotal) +
+        ' g) ne correspond pas à la somme des aliments (' + Math.round(derivedTotal) + ' g).');
+    }
+    if (rawLow != null && rawHigh != null && rawLow >= 0 && rawLow <= rawHigh &&
+        derivedTotal > 0 && (derivedTotal < rawLow || derivedTotal > rawHigh)) {
+      rawBlocking.push('La somme des aliments (' + Math.round(derivedTotal) +
+        ' g) est hors de la fourchette brute du modèle (' + Math.round(rawLow) +
+        '–' + Math.round(rawHigh) + ' g).');
     }
 
-    var totalProtein = sumOf(items, 'proteinG');
-    var totalFat = sumOf(items, 'fatG');
-    var totalKcal = sumOf(items, 'kcal');
-    // Si le modèle n'a pas donné les calories, on les dérive des macros.
-    if (totalKcal == null && (totalProtein != null || totalFat != null)) {
-      totalKcal = Math.round(4 * total + 4 * (totalProtein || 0) + 9 * (totalFat || 0));
-    }
-
-    // Index et charge glycémiques, calculés depuis la table locale (js/gi.js).
-    var gi = (window.GI && window.GI.meal) ? window.GI.meal(items) : null;
-    var alerts = plausibility(items, total);
-
-    return {
+    var out = {
       items: items,
-      blocking: blocking(items, total, low, high),
-      totalCarbsG: total,
-      totalProteinG: totalProtein,
-      totalFatG: totalFat,
-      totalKcal: totalKcal,
-      rangeLowG: Math.max(0, Math.round(low)),
-      rangeHighG: Math.round(high),
-      overallConfidence: conf,
+      overallConfidence: normConf(result.overallConfidence),
       fromText: fromText,
       refAsked: refAsked,
       refFound: refFound,
-      alerts: alerts,
       seen: (result.seen || '').toString().trim(),
-      gi: gi,
-      glycemicSpeed: glycemicSpeed(result.glycemicSpeed, total, totalFat, totalProtein, gi),
+      glycemicSpeed: result.glycemicSpeed,
+      _modelGlycemicSpeed: result.glycemicSpeed,
       glycemicNote: result.glycemicNote || '',
       notes: result.notes || '',
       referenceUsed: result.referenceUsed || ''
     };
+    return recompute(out, rawBlocking);
+  }
+
+  /* Source de vérité unique après réception de l'IA comme après une correction
+     humaine. Le point est toujours la somme des aliments et la fourchette vient
+     des quantiles réellement observés au banc ; ni la confiance déclarée par
+     l'IA ni un repère qu'elle dit avoir trouvé ne peuvent la resserrer. */
+  function recompute(result, rawBlocking) {
+    result = result || {};
+    var items = Array.isArray(result.items) ? result.items : [];
+    var currentBlocking = [];
+
+    items = items.map(function (it, index) {
+      it = it && typeof it === 'object' ? it : {};
+      var carbs = strictNum(it.carbsG);
+      if (carbs == null || carbs < 0) {
+        currentBlocking.push('« ' + (it.name || ('Aliment ' + (index + 1))) +
+          ' » : quantité de glucides invalide.');
+        carbs = 0;
+      }
+      return Object.assign({}, it, {
+        name: (it.name || 'Aliment').toString(),
+        carbsG: Math.max(0, Math.round(carbs)),
+        estimatedMassG: nonNeg(it.estimatedMassG),
+        carbDensityPer100g: nonNeg(it.carbDensityPer100g),
+        proteinG: nonNeg(it.proteinG),
+        fatG: nonNeg(it.fatG),
+        kcal: nonNeg(it.kcal),
+        gi: nonNeg(it.gi),
+        confidence: normConf(it.confidence)
+      });
+    });
+    result.items = items;
+
+    var total = items.reduce(function (s, it) { return s + it.carbsG; }, 0);
+    result.totalCarbsG = Math.round(total);
+
+    // Quantiles empiriques q10/q90 sur le banc (368 estimations).
+    var band = result.fromText ? [0.62 * 0.9, 1.66 * 1.15] : [0.62, 1.66];
+    result.rangeLowG = Math.max(0, Math.round(total * band[0]));
+    result.rangeHighG = Math.round(total * band[1]);
+
+    result.totalProteinG = sumOf(items, 'proteinG');
+    result.totalFatG = sumOf(items, 'fatG');
+    result.totalKcal = sumOf(items, 'kcal');
+    if (result.totalKcal == null && (result.totalProteinG != null || result.totalFatG != null)) {
+      result.totalKcal = Math.round(4 * total + 4 * (result.totalProteinG || 0) +
+                                    9 * (result.totalFatG || 0));
+    }
+
+    result.gi = (window.GI && window.GI.meal) ? window.GI.meal(items) : null;
+    result.glycemicSpeed = glycemicSpeed(result._modelGlycemicSpeed || result.glycemicSpeed, total,
+                                         result.totalFatG, result.totalProteinG, result.gi);
+    result.alerts = plausibility(items, total);
+    result.blocking = uniqueMessages((rawBlocking || []).concat(currentBlocking,
+      blocking(items, total, result.rangeLowG, result.rangeHighG)));
+    return result;
   }
 
   /* Vitesse d'absorption. On part de l'avis du modèle, mais on le corrige si les
@@ -774,6 +876,9 @@
     if (!(total > 0)) {
       out.push('Total de glucides nul ou absent.');
     }
+    if (total > 400) {
+      out.push('Total supérieur à 400 g : résultat bloqué jusqu\'à correction des quantités.');
+    }
     if (low > high) {
       out.push('Fourchette inversée : ' + Math.round(low) + ' g à ' + Math.round(high) + ' g.');
     }
@@ -811,6 +916,24 @@
     var n = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v;
     return (typeof n === 'number' && isFinite(n)) ? n : null;
   }
+  // Les champs structurants ne tolèrent pas « 30 g », « environ 20 » ou une
+  // chaîne partiellement numérique : parseFloat les accepterait en silence.
+  function strictNum(v) {
+    if (typeof v === 'string') {
+      var s = v.trim().replace(',', '.');
+      if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(s)) return null;
+      v = Number(s);
+    }
+    return (typeof v === 'number' && isFinite(v)) ? v : null;
+  }
+  function uniqueMessages(list) {
+    var seen = {};
+    return (list || []).filter(function (message) {
+      if (!message || seen[message]) return false;
+      seen[message] = true;
+      return true;
+    });
+  }
   function nonNeg(v) {
     var n = num(v);
     return (n != null && n >= 0) ? n : null;
@@ -841,7 +964,9 @@
     }
     images = images || [];
     // Sans photo, la description devient la seule source : elle est obligatoire.
-    if (!images.length && !(ctx.notes && ctx.notes.trim())) {
+    ctx = ctx || {};
+    if (!images.length && !((ctx.notes && ctx.notes.trim()) ||
+                            (ctx.extras && ctx.extras.trim()))) {
       return Promise.reject(new Error('Ajoute une photo, ou décris ton repas.'));
     }
     var prompt = buildUserPrompt(ctx);
@@ -882,52 +1007,18 @@
        Centralisé ici parce que le total n'est pas seul concerné — la charge
        glycémique et la vitesse d'absorption dépendent aussi des aliments, et
        les laisser figés afficherait des chiffres qui ne correspondent plus. */
-    refresh: function (result) {
-      var items = (result && result.items) || [];
-      var total = items.reduce(function (s, it) { return s + (it.carbsG || 0); }, 0);
-      result.totalCarbsG = Math.round(total);
+    refresh: function (result) { return recompute(result); },
 
-      /* Fourchette CALIBRÉE sur les 368 estimations du banc d'essai, et non plus
-         sur un coefficient choisi à la main.
-
-         Les anciens coefficients (±12 / 22 / 35 % selon la confiance annoncée
-         par le modèle) ne contenaient la vraie valeur que dans 25 %, 46 % et
-         65 % des cas — là où une fourchette est censée la contenir presque
-         toujours. Elle affichait donc une précision qui n'existait pas, au
-         moment précis où l'utilisateur va saisir une dose.
-
-         Les bornes ci-dessous sont les quantiles empiriques du rapport
-         réel/estimé : q10 = 0,62 et q90 = 1,66, soit une couverture de 80 %.
-         Elles sont ASYMÉTRIQUES parce que l'erreur l'est — sous-estimer est
-         plus fréquent et plus ample que surestimer.
-
-         Deux réserves, qui vont en sens inverse et qu'il ne faut pas confondre :
-         le banc tourne SANS objet-repère, donc ces bornes sont pessimistes pour
-         un repas photographié avec la pompe dans le cadre ; mais elles viennent
-         d'une cuisine de cantine américaine, donc leur transposition à un repas
-         français n'est pas garantie. Voir BENCHMARK.md. */
-      var conf = result.overallConfidence;
-      var band = conf === 'high' ? [0.70, 1.45]
-               : conf === 'low'  ? [0.55, 1.90]
-                                 : [0.62, 1.66];
-      // Sans photo, aucune portion n'a été vue : l'incertitude ne peut qu'être pire.
-      if (result.fromText) band = [band[0] * 0.9, band[1] * 1.15];
-      result.rangeLowG = Math.max(0, Math.round(total * band[0]));
-      result.rangeHighG = Math.round(total * band[1]);
-
-      result.totalProteinG = sumOf(items, 'proteinG');
-      result.totalFatG = sumOf(items, 'fatG');
-      result.totalKcal = sumOf(items, 'kcal');
-      if (result.totalKcal == null && (result.totalProteinG != null || result.totalFatG != null)) {
-        result.totalKcal = Math.round(4 * total + 4 * (result.totalProteinG || 0) +
-                                      9 * (result.totalFatG || 0));
-      }
-
-      result.gi = (window.GI && window.GI.meal) ? window.GI.meal(items) : null;
-      result.glycemicSpeed = glycemicSpeed(result.glycemicSpeed, total,
-                                           result.totalFatG, result.totalProteinG, result.gi);
-      return result;
-    }
+    // Exposés pour les tests et pour que tous les futurs appelants passent par
+    // exactement les mêmes garde-fous, sans recopier la logique dans l'UI.
+    sanitize: sanitize,
+    recompute: recompute,
+    hasInput: function (images, ctx) {
+      ctx = ctx || {};
+      return !!((images && images.length) || (ctx.notes && ctx.notes.trim()) ||
+                (ctx.extras && ctx.extras.trim()));
+    },
+    buildPrompt: buildUserPrompt
   };
 
   window.Estimator = Estimator;

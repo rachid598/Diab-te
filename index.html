@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#f5f8f8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; worker-src 'self'; connect-src 'self' https://api.anthropic.com https://generativelanguage.googleapis.com https://api.openai.com https://openrouter.ai https://world.openfoodfacts.org https://search.openfoodfacts.org https://github.com https://objects.githubusercontent.com" />
   <title>GlucoVision — Estimateur de glucides</title>
   <meta name="description" content="Estime les glucides d'un repas à partir d'une photo et convertit en parts de glucides pour ta pompe à insuline." />
   <link rel="manifest" href="manifest.webmanifest" />
@@ -11,7 +12,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=72" />
+  <link rel="stylesheet" href="css/styles.css?v=73" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -130,6 +131,12 @@
               Photo
               <input id="camera-input" type="file" accept="image/*" capture="environment" hidden />
             </label>
+            <button id="btn-depth" class="btn btn-secondary" type="button" hidden>
+              <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 18h16M6 14h12M8 10h8M10 6h4" />
+              </svg>
+              Photo mesurée
+            </button>
             <label class="btn btn-secondary">
               <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <rect x="3" y="6" width="13" height="12" rx="2" />
@@ -149,20 +156,21 @@
             </label>
             <button id="clear-photos" class="btn btn-ghost" hidden>Effacer</button>
           </div>
+          <div id="depth-result" class="depth-result" hidden></div>
         </div>
 
         <details class="card compact-card" id="reference-card">
           <summary>
-            <span class="compact-title">Repère d'échelle <span class="tag">recommandé</span></span>
-            <span class="compact-value" id="reference-summary">Ma pompe</span>
+            <span class="compact-title">Repère d'échelle <span class="tag">optionnel</span></span>
+            <span class="compact-value" id="reference-summary">Aucun repère</span>
           </summary>
           <div class="compact-content">
             <p class="hint">Un objet de taille connue donne au modèle la seule échelle réelle dont il dispose. Pose-le <strong>à plat, sur le bord de l'assiette</strong> plutôt que sur la table : à la même hauteur que la nourriture, l'échelle est juste.</p>
             <p class="hint tiny"><strong>⚠️ S'il n'est pas vraiment dans le cadre, choisis « Aucun repère ».</strong> Testé sur 24 photos sans pompe, envoyées en affirmant qu'elle y était : les modèles ont répondu <strong>24 fois sur 24</strong> qu'ils l'avaient trouvée et mesurée, en inventant la mesure en pixels. Un repère annoncé mais absent est pire que pas de repère du tout.</p>
             <p class="hint tiny">De combien il réduit l'erreur n'est pas chiffré : les photos du banc d'essai n'en contiennent aucun. Le conseil tient à la géométrie, pas à une mesure.</p>
             <select id="reference-object" class="input">
-              <option value="pompe à insuline Medtronic MiniMed 780G : boîtier rectangulaire à écran couleur et coins arrondis, d'où sort une fine tubulure ; 96,8 mm de long sur 53,6 mm de large et 24,9 mm d'épaisseur" selected>Ma pompe MiniMed 780G (96,8 × 53,6 × 24,9 mm)</option>
-              <option value="none">Aucun repère</option>
+              <option value="none" selected>Aucun repère</option>
+              <option value="pompe à insuline Medtronic MiniMed 780G : boîtier rectangulaire à écran couleur et coins arrondis, d'où sort une fine tubulure ; 96,8 mm de long sur 53,6 mm de large et 24,9 mm d'épaisseur">Ma pompe MiniMed 780G (96,8 × 53,6 × 24,9 mm)</option>
               <option value="carte bancaire : rectangle de 85,6 mm de long sur 54 mm de large, 0,76 mm d'épaisseur">Carte bancaire (8,6 cm)</option>
               <option value="fourchette de table standard, environ 19 cm de long">Fourchette (~19 cm)</option>
               <option value="cuillère à soupe standard, environ 19 cm de long, cuilleron d'environ 4 cm de large">Cuillère à soupe (~19 cm)</option>
@@ -554,6 +562,16 @@
           <span class="set-summary">Sauvegarde et mises à jour</span>
         </summary>
         <div class="set-content">
+        <div id="set-group-depth" hidden>
+        <h4>Mesure ARCore expérimentale</h4>
+        <label class="check">
+          <input id="set-experimental" type="checkbox" />
+          <span>Afficher le bouton <strong>Photo mesurée</strong></span>
+        </label>
+        <p class="hint tiny">ARCore mesure l'échelle et le relief après un balayage d'au moins 20 cm, à 50–85 cm de la table. La mesure reste expérimentale : elle accompagne la photo, mais <strong>ne calcule jamais directement les glucides</strong>.</p>
+        <p class="hint tiny" id="depth-why"></p>
+        </div>
+
         <!-- Stockage (application Android uniquement) -->
         <div id="set-group-storage" hidden>
         <h4>Stockage des photos</h4>
@@ -571,7 +589,7 @@
             <input id="import-data" type="file" accept="application/json,.json" hidden />
           </label>
         </div>
-        <p class="hint tiny">⚠️ L'export contient <strong>tes clés API</strong> pour que la restauration soit immédiate (bascule vers l'APK, changement de téléphone). Le fichier est donc personnel : <strong>ne le partage pas</strong> et ne l'envoie pas par mail.</p>
+        <p class="hint tiny">Les clés API ne sont jamais incluses dans l'export. Après une restauration, renseigne-les de nouveau dans les Réglages.</p>
 
         <!-- Sauvegarde SANS fichier. Indispensable quand l'écriture de fichier
              échoue, et surtout avant une réinstallation d'APK : c'est le seul
@@ -582,7 +600,7 @@
           <button id="text-restore" class="btn btn-ghost">📥 Coller une sauvegarde</button>
         </div>
         <div id="text-backup-wrap" hidden>
-          <p class="hint tiny" id="text-backup-hint">Copie ce texte et colle-le dans une note. Il contient <strong>tes clés API</strong> : garde-le pour toi.</p>
+          <p class="hint tiny" id="text-backup-hint">Copie ce texte et colle-le dans une note. Les clés API en sont volontairement exclues.</p>
           <textarea id="text-backup-box" class="input" rows="6" spellcheck="false"></textarea>
           <div class="btn-row">
             <button id="text-backup-copy" class="btn btn-primary">Copier</button>
@@ -637,19 +655,19 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=61"></script>
-  <script src="js/native.js?v=61"></script>
-  <script src="js/storage.js?v=61"></script>
-  <script src="js/foods.js?v=61"></script>
-  <script src="js/gi.js?v=61"></script>
-  <script src="js/queue.js?v=61"></script>
-  <script src="js/report.js?v=61"></script>
-  <script src="js/bench.js?v=61"></script>
-  <script src="js/estimator.js?v=61"></script>
-  <script src="js/camera.js?v=61"></script>
-  <script src="js/off.js?v=61"></script>
-  <script src="vendor/zxing.min.js?v=61"></script>
-  <script src="js/barcode.js?v=61"></script>
-  <script src="js/app.js?v=61"></script>
+  <script src="vendor/capacitor-plugins.js?v=73"></script>
+  <script src="js/native.js?v=73"></script>
+  <script src="js/storage.js?v=73"></script>
+  <script src="js/foods.js?v=73"></script>
+  <script src="js/gi.js?v=73"></script>
+  <script src="js/queue.js?v=73"></script>
+  <script src="js/report.js?v=73"></script>
+  <script src="js/bench.js?v=73"></script>
+  <script src="js/estimator.js?v=73"></script>
+  <script src="js/camera.js?v=73"></script>
+  <script src="js/off.js?v=73"></script>
+  <script src="vendor/zxing.min.js?v=73"></script>
+  <script src="js/barcode.js?v=73"></script>
+  <script src="js/app.js?v=73"></script>
 </body>
 </html>

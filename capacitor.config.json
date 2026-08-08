@@ -11,7 +11,8 @@
   "plugins": {
     "CapacitorUpdater": {
       "autoUpdate": false,
-      "appReadyTimeout": 20000
+      "appReadyTimeout": 20000,
+      "statsUrl": ""
     }
   }
 }
