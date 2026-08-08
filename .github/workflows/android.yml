@@ -157,6 +157,16 @@ jobs:
       - name: Exécuter les tests
         run: npm test
 
+      # Test NAVIGATEUR. La suite ci-dessus ne charge jamais js/app.js — 4 400
+      # lignes qui produisent l'écran de comparaison, c'est-à-dire l'endroit où
+      # se décide le chiffre affiché. Un rendu ne se vérifie pas en lisant du
+      # code : il se charge, et on regarde ce qu'il écrit.
+      - name: Installer Chromium pour le test navigateur
+        run: npx playwright install --with-deps chromium
+
+      - name: Exécuter le test navigateur
+        run: npm run test:browser
+
       - name: Lire et contrôler la version de l'app
         id: version
         shell: bash
