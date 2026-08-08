@@ -873,9 +873,40 @@
     if (!items.length) {
       out.push('Le modèle n\'a identifié aucun aliment.');
     }
+    /* Renommer un aliment ne recalcule rien : les glucides et la densité restent
+       ceux de l'aliment précédent. Le bouton invitait pourtant à « corriger le
+       nom », et le résultat restait confirmable — « fromage blanc » devenu
+       « flocons d'avoine » gardait ses glucides d'origine, avec l'apparence
+       d'une correction faite. On bloque donc jusqu'à ce que les glucides de
+       cette ligne soient repris à la main. */
+    items.forEach(function (it) {
+      if (!it.needsNutrition) return;
+      out.push('« ' + it.name + ' » vient d\'être renommé : ses ' +
+        Math.round(it.carbsG || 0) + ' g de glucides sont encore ceux de « ' +
+        (it.renamedFrom || 'l\'aliment précédent') +
+        ' ». Corrige les glucides de cette ligne, ou relance l\'analyse.');
+    });
     if (!(total > 0)) {
       out.push('Total de glucides nul ou absent.');
     }
+    /* Contradiction masse x densité assez forte pour rendre le chiffre
+       inutilisable, et non plus seulement suspect. La version « alerte » se
+       déclenche à 35 % d'écart, ce qui attrape des arrondis ; ici on exige le
+       double du calcul ET au moins 20 g, c'est-à-dire un aliment dont les
+       glucides annoncés ne peuvent pas venir de sa masse et de sa densité.
+       Une alerte se lit ou ne se lit pas ; ce nombre-là sert à doser. */
+    items.forEach(function (it) {
+      var d = it.carbDensityPer100g;
+      if (!(it.estimatedMassG > 0) || d == null || !(d >= 0)) return;
+      var attendu = it.estimatedMassG * d / 100;
+      var ecart = Math.abs((it.carbsG || 0) - attendu);
+      if (ecart >= 20 && ecart > attendu) {
+        out.push('« ' + it.name + ' » : ' + Math.round(it.carbsG || 0) +
+          ' g de glucides annoncés, mais ' + Math.round(it.estimatedMassG) + ' g à ' +
+          Math.round(d) + ' g/100 g en donnent ' + Math.round(attendu) +
+          '. Corrige la masse, la densité ou les glucides.');
+      }
+    });
     if (total > 400) {
       out.push('Total supérieur à 400 g : résultat bloqué jusqu\'à correction des quantités.');
     }
@@ -1008,6 +1039,41 @@
        glycémique et la vitesse d'absorption dépendent aussi des aliments, et
        les laisser figés afficherait des chiffres qui ne correspondent plus. */
     refresh: function (result) { return recompute(result); },
+
+    /* Deux décisions extraites de l'interface pour être testables sans écran.
+       Elles portent sur des nombres et des chaînes, pas sur du DOM : les
+       laisser dans app.js, c'était les rendre invérifiables — et ce sont
+       précisément elles qui décident du chiffre affiché. */
+
+    /* Moyenner deux avis n'a de sens que s'ils parlent du même repas. Deux
+       bornes, parce qu'aucune ne suffit seule : le pourcentage laisse passer
+       200 contre 260 g, l'absolu laisse passer 4 contre 8 g. */
+    mergeAllowed: function (totalA, totalB, thresholdPct, maxAbsG) {
+      var a = strictNum(totalA), b = strictNum(totalB);
+      if (a == null || b == null || a <= 0 || b <= 0) return false;
+      var pct = strictNum(thresholdPct);
+      pct = (pct == null || pct <= 0) ? 20 : pct;
+      var maxAbs = strictNum(maxAbsG);
+      maxAbs = (maxAbs == null || maxAbs <= 0) ? 25 : maxAbs;
+      var ecart = Math.abs(a - b), moyenne = (a + b) / 2;
+      return ecart <= moyenne * (pct / 100) && ecart <= maxAbs;
+    },
+
+    /* Le même modèle appelé par deux fournisseurs ne fait pas deux avis :
+       « gemini-3.1-flash-lite » et « google/gemini-3.1-flash-lite » sont un
+       seul modèle affiché deux fois, et leur accord ne confirme rien. */
+    sameUnderlyingModel: function (models) {
+      var vus = {};
+      var list = Array.isArray(models) ? models : [];
+      for (var i = 0; i < list.length; i++) {
+        var noyau = String(list[i] || '').toLowerCase().trim().split('/').pop();
+        if (!noyau) continue;
+        if (vus[noyau]) return true;
+        vus[noyau] = true;
+      }
+      return false;
+    },
+
 
     // Exposés pour les tests et pour que tous les futurs appelants passent par
     // exactement les mêmes garde-fous, sans recopier la logique dans l'UI.

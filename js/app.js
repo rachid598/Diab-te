@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '73'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '74'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -1155,10 +1155,37 @@
     if (totaux.length > 1) {
       var lo2 = Math.min.apply(null, totaux), hi2 = Math.max.apply(null, totaux);
       var moy2 = Math.round(totaux.reduce(function (a2, b2) { return a2 + b2; }, 0) / totaux.length);
-      html += '<div class="cmp-avg">' + (hi2 - lo2 < 5
+
+      /* « Concordants » ne peut pas se décider sur les totaux seuls : « pain
+         40 g » et « riz 40 g » se ressemblent parfaitement en chiffres et
+         décrivent deux repas différents. On exige donc aussi que les aliments
+         glucidiques se recoupent — c'est la seule façon de savoir que les deux
+         modèles ont regardé la même assiette. */
+      var memeContenu = true;
+      for (var ci = 1; ci < ok.length && memeContenu; ci++) {
+        var dd = foodDisagreements(ok[0].result.items, ok[ci].result.items);
+        if (dd.onlyMine.length || dd.onlyTheirs.length) memeContenu = false;
+      }
+      html += '<div class="cmp-avg">' + ((hi2 - lo2 < 5 && memeContenu)
         ? '<span class="cmp-agree">✓ Avis concordants</span> — ' + (hi2 - lo2) + ' g d\'écart seulement.'
         : 'Écart de <strong>' + (hi2 - lo2) + ' g</strong> · moyenne ' + moy2 + ' g (' +
           fr(partsFrom(moy2)) + ' parts)') + '</div>';
+      if (hi2 - lo2 < 5 && !memeContenu) {
+        html += '<div class="cmp-warn">⚠️ <strong>Même total, aliments différents.</strong> ' +
+          'Les avis tombent sur le même chiffre en décrivant des assiettes qui ne se ' +
+          'recoupent pas : au moins l\'un des deux s\'est trompé d\'aliment. Ouvre le ' +
+          'détail avant de retenir un chiffre.</div>';
+      }
+    }
+
+    /* Deux routes vers le MÊME modèle ne font pas deux avis. Gemini appelé en
+       direct et le même Gemini appelé via OpenRouter donnent deux colonnes
+       d'apparence indépendante, alors que c'est un seul avis affiché deux fois
+       — et rien n'empêchait de les choisir ainsi dans les réglages. */
+    if (Estimator.sameUnderlyingModel(ok.map(function (x) { return x.result.model; }))) {
+      html += '<div class="cmp-warn">⚠️ <strong>Deux de ces avis viennent du même modèle</strong>, ' +
+        'appelé par deux fournisseurs différents. Ils ne sont pas indépendants : leur accord ' +
+        'ne confirme rien. Choisis un modèle d\'une autre famille dans les réglages.</div>';
     }
 
     html += rerunHtml(true);
@@ -1739,6 +1766,10 @@
     }
   }
 
+  /* Écart absolu au-delà duquel deux avis ne décrivent plus le même repas, quel
+     que soit le pourcentage. 25 g, c'est deux parts et demie d'insuline. */
+  var MAX_ECART_FUSION_G = 25;
+
   function mergePairValidated(mainResult, verification) {
     var a = (mainResult && mainResult.model || '').toLowerCase();
     var b = (verification && verification.model || '').toLowerCase();
@@ -1775,8 +1806,18 @@
          écraserait la valeur corrigée. On compare aussi le total, et on
          s'abstient dès que le repas a été confirmé. */
       var touched = lastResult.totalCarbsG !== verifiedTotal || currentHistoryConfirmed;
+      /* Moyenner n'a de sens que si les deux avis parlent du même repas. Sans
+         cette borne, 20 g et 200 g donnaient 110 g — un nombre qu'aucun des
+         deux modèles n'a proposé, affiché pendant que l'écran signalait par
+         ailleurs une divergence majeure. Le seuil configuré ne servait qu'au
+         message ; il décide maintenant aussi de la fusion.
+
+         Deux bornes, parce qu'une seule ne suffit pas : le relatif laisse
+         passer 200 contre 260 g, l'absolu laisse passer 4 contre 8 g. */
+      var fusionRaisonnable = Estimator.mergeAllowed(
+        lastResult.totalCarbsG, v.total, settings.verifyThresholdPct, MAX_ECART_FUSION_G);
       if (settings.mergeVerification && v.ok && v.total > 0 && lastResult.totalCarbsG > 0
-          && !touched && mergePairValidated(lastResult, v)) {
+          && !touched && fusionRaisonnable && mergePairValidated(lastResult, v)) {
         lastResult.mergedTotalCarbsG = Math.round((lastResult.totalCarbsG + v.total) / 2);
         lastResult.verifyTotalCarbsG = v.total;
         lastResult.rangeLowG = Math.min(lastResult.rangeLowG, v.total);
@@ -2203,7 +2244,18 @@
         var i = parseInt(inp.dataset.nameI, 10);
         var name = inp.value.trim();
         if (!name) { inp.value = lastResult.items[i].name; return; }
-        lastResult.items[i].name = name;
+        var it = lastResult.items[i];
+        if (name !== it.name) {
+          /* Changer le nom ne change RIEN au calcul : les glucides, la masse et
+             la densité restent ceux de l'aliment d'avant. On marque donc la
+             ligne, ce qui pose un blocage et retire le nombre, jusqu'à ce que
+             les glucides soient repris à la main. Sans ça, renommer donnait le
+             sentiment d'avoir corrigé une erreur d'identification alors que le
+             chiffre saisi dans la pompe n'avait pas bougé d'un gramme. */
+          if (!it.needsNutrition) it.renamedFrom = it.name;
+          it.needsNutrition = true;
+        }
+        it.name = name;
         recomputeTotal();
         renderResults(lastResult, true);
       });
@@ -2219,6 +2271,11 @@
           lastResult.items[i].estimatedMassG = v;
           lastResult.items[i].carbsG = Math.round(v * d / 100);
         }
+        /* Reprendre le chiffre à la main est ce qui lève le blocage posé par un
+           renommage : à partir d'ici les glucides ne viennent plus de l'aliment
+           précédent, ils viennent de l'utilisateur. */
+        delete lastResult.items[i].needsNutrition;
+        delete lastResult.items[i].renamedFrom;
         recomputeTotal();
         renderResults(lastResult, true);
       });
