@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '72'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '73'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -11,7 +11,10 @@
      l'ancien natif. Toute version qui a besoin d'un plugin ou d'un comportement
      natif nouveau doit relever ce nombre au numéro de build qui l'apporte.
      Il est publié dans le manifeste OTA et vérifié avant toute application. */
-  var MIN_NATIVE_BUILD = 57;   // appareil photo natif, Keystore, notifications
+  /* La branche stable utilise un offset de 2000 pour versionCode. 2073 est le
+     premier APK qui contient le nouveau plugin ARCore : un OTA v73 ne doit pas
+     se charger sur le build stable 2072, même si son nombre est > 73. */
+  var MIN_NATIVE_BUILD = 2073;
   var nativeBuild = null;      // build réellement en cours d'exécution, sur APK
   var settings = Storage.getSettings();
 
@@ -25,6 +28,10 @@
   var lastEstimateContext = null;
   var lastVerification = null;
   var estimateGeneration = 0;
+  var lastDepthShown = null;
+  var currentDominantConfirmed = false;
+  var resumedPhotoDraft = false;
+  var depthSupported = false;
 
   // ---------- Utilitaires d'affichage ----------
   function fr(n) { return (Math.round(n * 10) / 10).toString().replace('.', ','); }
@@ -45,7 +52,11 @@
     toast._t = setTimeout(function () { t.hidden = true; }, ms);
   }
 
-  var CONF_LABEL = { high: 'Confiance élevée', medium: 'Confiance moyenne', low: 'Confiance faible' };
+  var CONF_LABEL = {
+    high: 'Confiance déclarée par l’IA : élevée',
+    medium: 'Confiance déclarée par l’IA : moyenne',
+    low: 'Confiance déclarée par l’IA : faible'
+  };
   // Forme courte pour la pastille d'un aliment (l'anglais brut y était affiché).
   var CONF_SHORT = { high: 'sûr', medium: 'moyen', low: 'incertain' };
 
@@ -162,6 +173,7 @@
     wrap.querySelectorAll('button').forEach(function (b) {
       b.addEventListener('click', function () {
         images.splice(parseInt(b.dataset.i, 10), 1);
+        renderDepthResult(depthOfSent(images));
         renderThumbs();
         updateEstimateBtn();
       });
@@ -387,17 +399,139 @@
   /* Ajoute des images déjà encodées (venant de l'appareil photo natif).
      Elles ne repassent pas par un canvas si elles sont déjà à la bonne taille :
      c'est ce qui évite la seconde compression et fait la qualité supérieure. */
-  function addDataUrls(urls) {
+  function addDataUrls(urls, depth) {
     var room = Camera.MAX_ANGLES - images.length;
     if (room <= 0) { toast('Maximum ' + Camera.MAX_ANGLES + ' vues.'); return; }
     Camera.processDataUrls(urls.slice(0, room)).then(function (out) {
       out.results.forEach(function (r) {
-        if (images.length < Camera.MAX_ANGLES) images.push(r);
+        if (images.length < Camera.MAX_ANGLES) {
+          if (depth) r.depth = depth;
+          images.push(r);
+        }
       });
       renderThumbs();
       updateEstimateBtn();
       if (out.errors.length) toast(out.errors.length + ' photo(s) ignorée(s).');
     }).catch(function (e) { toast(e.message); });
+  }
+
+  /* Une mesure appartient à une vue précise. S'il y en a plusieurs, on ne
+     transmet au modèle qu'une mesure non ambiguë, avec son numéro de vue. */
+  function depthOfSent(sent) {
+    var found = null, count = 0;
+    (sent || []).forEach(function (img, i) {
+      if (!img || !img.depth || !img.depth.scaleOk || img.depth.fresh === false) return;
+      count++;
+      found = Object.assign({}, img.depth, { viewIndex: i + 1 });
+    });
+    return count === 1 ? found : null;
+  }
+
+  function renderDepthResult(d) {
+    lastDepthShown = d || null;
+    var el = $('depth-result');
+    if (!el) return;
+    if (!d) { el.hidden = true; el.innerHTML = ''; return; }
+    el.hidden = false;
+
+    if (d.scaleOk && d.fresh !== false) {
+      var html = '📏 <strong>Échelle ARCore acceptée</strong> — champ photographié ' +
+        Math.round(d.fieldWidthCm || 0) + ' × ' + Math.round(d.fieldHeightCm || 0) +
+        ' cm à ' + Math.round(d.distanceCm || 0) + ' cm.';
+      html += '<br><span class="tiny">Mesure obtenue après ' +
+        Math.round(d.parallaxCm || 0) + ' cm de déplacement et ' +
+        Math.round(d.observations || 0) + ' observations stables. ' +
+        'Elle sert uniquement à donner l’échelle de cette vue au modèle.</span>';
+      if (d.volumeOk) {
+        html += '<br><span class="tiny">Relief expérimental : ' +
+          Math.round(d.volumeCm3 || 0) + ' cm³. Ce volume est affiché pour le test, ' +
+          '<strong>jamais converti directement en glucides</strong>.</span>';
+      } else if (d.note) {
+        html += '<br><span class="tiny">Relief non retenu : ' + escapeHtml(d.note) + '</span>';
+      }
+      if (d.diag) html += '<br><span class="mono">' + escapeHtml(d.diag) + '</span>';
+      el.className = 'depth-result d-ok';
+      el.innerHTML = html;
+      return;
+    }
+
+    el.className = 'depth-result d-warn';
+    el.innerHTML = '📐 <strong>Aucune mesure utilisée</strong> — ' +
+      escapeHtml(d.note || (d.fresh === false
+        ? 'la carte de profondeur ne correspond pas à cette image.'
+        : 'la profondeur n’est pas assez fiable.')) +
+      (d.diag ? '<br><span class="mono">' + escapeHtml(d.diag) + '</span>' : '');
+  }
+
+  function initDepth() {
+    var btn = $('btn-depth');
+    var why = $('depth-why');
+    if (!btn) return;
+    var say = function (msg) { if (why) why.textContent = msg; };
+    if (!Native.isApp || Native.platform !== 'android' || !Native.depth) {
+      btn.hidden = true;
+      say('Disponible uniquement dans l’APK Android compatible ARCore Depth.');
+      return;
+    }
+
+    var availabilityBusy = false;
+    var checkAvailability = function (attempt) {
+      if (availabilityBusy) return;
+      availabilityBusy = true;
+      Native.depth.available().then(function (a) {
+        availabilityBusy = false;
+        if (a && a.transient) {
+          depthSupported = false;
+          btn.hidden = true;
+          say('Vérification ARCore temporairement impossible ; nouvel essai automatique…');
+          if (attempt < 2) {
+            setTimeout(function () { checkAvailability(attempt + 1); }, 1500 * (attempt + 1));
+          }
+          return;
+        }
+        if (!a || !a.supported) {
+          depthSupported = false;
+          btn.hidden = true;
+          say('ARCore Depth non pris en charge sur ce téléphone (' +
+            ((a && a.reason) || 'inconnu') + ').');
+          return;
+        }
+        depthSupported = true;
+        say(a.installed
+          ? 'ARCore Depth est disponible. Active l’option pour afficher le bouton.'
+          : 'ARCore est compatible ; Google Play Services pourra demander son installation au premier essai.');
+        btn.hidden = !settings.experimentalDepth;
+      }).catch(function () {
+        availabilityBusy = false;
+        depthSupported = false;
+        btn.hidden = true;
+        say('Vérification ARCore impossible pour le moment.');
+      });
+    };
+    checkAvailability(0);
+    if (Native.onResume) {
+      Native.onResume(function () {
+        if (!depthSupported) checkAvailability(0);
+      });
+    }
+
+    btn.addEventListener('click', function () {
+      if (btn.disabled || images.length >= Camera.MAX_ANGLES) return;
+      btn.disabled = true;
+      var old = btn.textContent;
+      btn.textContent = 'Mesure…';
+      Native.depth.capture().then(function (r) {
+        if (!r || r.cancelled) return;
+        if (r.error) { toast('Photo mesurée : ' + r.error); return; }
+        renderDepthResult(r.depth || null);
+        if (r.urls && r.urls.length) addDataUrls(r.urls, r.depth || null);
+      }).catch(function (e) {
+        toast('Photo mesurée indisponible : ' + ((e && e.message) || 'erreur'));
+      }).then(function () {
+        btn.disabled = false;
+        btn.textContent = old;
+      });
+    });
   }
 
   /* APK : on détourne les boutons vers l'appareil photo du système au lieu du
@@ -445,6 +579,8 @@
     });
     $('clear-photos').addEventListener('click', function () {
       images = [];
+      lastDepthShown = null;
+      renderDepthResult(null);
       renderThumbs(); updateEstimateBtn();
     });
     $('reference-object').addEventListener('change', function (e) {
@@ -474,6 +610,8 @@
     currentHistoryDate = null;
     currentHistoryConfirmed = false;
     currentHistoryPhotoStarted = false;
+    currentDominantConfirmed = false;
+    resumedPhotoDraft = false;
     lastVerification = null;
 
     // En mode description, les photos éventuelles ne sont pas envoyées.
@@ -484,7 +622,8 @@
       plateDiameterCm: $('plate-diameter').value ? parseFloat($('plate-diameter').value) : null,
       notes: $('user-notes').value,
       extras: extrasText(),       // dessert / boisson, absents de la photo
-      imageCount: sent.length     // 0 fait basculer l'estimateur en mode description
+      imageCount: sent.length,    // 0 fait basculer l'estimateur en mode description
+      depth: textOnly ? null : depthOfSent(sent)
     };
     lastEstimateContext = Object.assign({}, ctx);
 
@@ -517,7 +656,7 @@
 
     status.innerHTML = '<div class="spinner"></div>' + (textOnly
       ? 'Estimation d\'après ta description… interprétation des portions et calcul des glucides.'
-      : 'Analyse en cours… mesure des portions via le repère, calcul des glucides. Le raisonnement approfondi peut prendre 10 à 30 s.');
+      : 'Analyse en cours… identification des aliments, estimation des portions et calcul des glucides. Le raisonnement peut prendre 10 à 30 s.');
     /* Vérification croisée : lancée EN PARALLÈLE, jamais en série. Elle ne doit
        pas retarder le chiffre dont l'utilisateur a besoin pour doser — elle
        arrive après et complète l'affichage. Son échec est sans conséquence. */
@@ -632,66 +771,118 @@
      relancer cinq analyses qui échoueraient toutes ensemble. */
   function processQueue(manual) {
     if (!Queue.isAvailable() || queueBusy) return;
-    Queue.prune();
     var pending = Queue.list();
     if (!pending.length) { renderQueue(); return; }
     if (!navigator.onLine && !manual) return;
 
     queueBusy = true;
     renderQueue();
+    var stoppedBy = null;
 
     var next = function (i) {
       if (i >= pending.length) return Promise.resolve();
       var item = pending[i];
+      var loadedImages = null;
+      var historyPhoto = null;
+      var historySaved = false;
       return Queue.load(item)
-        .then(function (imgs) { return Estimator.estimate(imgs, item.ctx, settings); })
+        .then(function (imgs) {
+          loadedImages = imgs;
+          return Estimator.estimate(imgs, item.ctx, settings);
+        })
         .then(function (result) {
-          var entry = {
-            date: item.date, source: 'photo', draft: true,
-            totalCarbsG: result.totalCarbsG,
-            parts: partsFrom(result.totalCarbsG), partSizeG: settings.partSizeG,
-            provider: result.provider || settings.provider,
-            model: result.model || (settings.models || {})[settings.provider] || '',
-            glycemicSpeed: result.glycemicSpeed || null,
-            gi: result.gi ? { gl: result.gi.gl, gi: result.gi.gi } : null,
-            seen: result.seen || '',
-            input: item.ctx ? {
-              referenceObject: item.ctx.referenceObject || '',
-              plateDiameterCm: item.ctx.plateDiameterCm || null,
-              notes: item.ctx.notes || '',
-              extras: item.ctx.extras || '',
-              imageCount: item.ctx.imageCount || 0
-            } : null,
-            items: result.items.map(function (it) {
-              return { name: it.name, carbsG: it.carbsG,
-                       portion: it.portionDescription || '', added: !!it.added };
-            })
-          };
-          Storage.addHistory(entry);
-          Queue.remove(item.id);
-          // L'utilisateur n'a pas l'app sous les yeux : c'est le rôle d'une notification.
-          Native.notify.schedule({
-            id: Math.floor(item.date / 1000),
-            title: 'Estimation prête',
-            body: 'Le repas mis de côté a été analysé : ' + result.totalCarbsG + ' g (' +
+          /* La photo HD est copiée dans l'historique AVANT de retirer les
+             fichiers de file. Si cette copie, l'écriture de l'historique ou
+             la suppression de l'index échoue, le repas reste récupérable. */
+          if (!loadedImages || !loadedImages[0] || !loadedImages[0].base64) {
+            throw new Error('La photo du repas en attente est illisible.');
+          }
+          var media = loadedImages[0].mediaType || 'image/jpeg';
+          var extension = media === 'image/png' ? '.png' :
+            (media === 'image/webp' ? '.webp' : '.jpg');
+          historyPhoto = 'meal-' + item.date + extension;
+          return Native.photos.save(historyPhoto,
+            'data:' + media + ';base64,' + loadedImages[0].base64).then(function (name) {
+            if (!name) throw new Error('Impossible de conserver la photo dans l\'historique.');
+
+            var blocked = !!(result.blocking && result.blocking.length);
+            var dominant = dominantItem(result);
+            var entry = {
+              date: item.date,
+              queueId: item.id,
+              source: 'photo',
+              draft: true,
+              confirmed: false,
+              blocked: blocked,
+              blocking: blocked ? result.blocking.slice(0, 10) : [],
+              dominantRequired: !!dominant,
+              dominantConfirmed: false,
+              totalCarbsG: result.totalCarbsG,
+              parts: partsFrom(result.totalCarbsG),
+              partSizeG: settings.partSizeG,
+              provider: result.provider || settings.provider,
+              model: result.model || (settings.models || {})[settings.provider] || '',
+              glycemicSpeed: result.glycemicSpeed || null,
+              gi: result.gi ? { gl: result.gi.gl, gi: result.gi.gi } : null,
+              seen: result.seen || '',
+              photo: name,
+              input: item.ctx ? {
+                referenceObject: item.ctx.referenceObject || '',
+                plateDiameterCm: item.ctx.plateDiameterCm || null,
+                notes: item.ctx.notes || '',
+                extras: item.ctx.extras || '',
+                imageCount: item.ctx.imageCount || 0,
+                depth: item.ctx.depth || null
+              } : null,
+              items: (result.items || []).map(function (it) {
+                return { name: it.name, carbsG: it.carbsG,
+                         portion: it.portionDescription || '', added: !!it.added };
+              })
+            };
+            try { entry.resultSnapshot = JSON.parse(JSON.stringify(result)); }
+            catch (e) { entry.resultSnapshot = null; }
+
+            var saved = Storage.addHistory(entry);
+            if (!saved) throw new Error('Impossible d\'enregistrer le repas analysé.');
+            historySaved = saved.some(function (e) {
+              return e.date === item.date && e.queueId === item.id && e.photo === name;
+            });
+            if (!historySaved) {
+              throw new Error('Le repas n\'a pas pu être vérifié après son enregistrement.');
+            }
+            return Queue.remove(item.id);
+          }).then(function (removed) {
+            if (!removed) throw new Error('Le repas est enregistré, mais la file n\'a pas pu être mise à jour.');
+            var blocked = !!(result.blocking && result.blocking.length);
+            // L'utilisateur n'a pas l'app sous les yeux : c'est le rôle d'une notification.
+            Native.notify.schedule({
+              id: Math.floor(item.date / 1000),
+              title: blocked ? 'Repas à vérifier' : 'Estimation prête',
+              body: blocked
+                ? 'Le repas mis de côté a été conservé, mais son estimation est incohérente. Ouvre le brouillon pour la corriger.'
+                : 'Le repas mis de côté a été analysé : ' + result.totalCarbsG + ' g (' +
                   fr(partsFrom(result.totalCarbsG)) + ' parts). Confirme-le dans l\'historique.',
-            at: new Date(Date.now() + 1000)
+              at: new Date(Date.now() + 1000)
+            });
+            return next(i + 1);
           });
-          return next(i + 1);
         })
         .catch(function (e) {
-          // Toujours hors ligne : on s'arrête et on retentera plus tard.
-          if (Queue.isNetworkError(e)) return;
-          // Erreur définitive (clé invalide) : inutile de la garder indéfiniment.
-          Queue.remove(item.id);
-          return next(i + 1);
+          /* Même une clé expirée ou une réponse incohérente ne justifie pas de
+             détruire les seules photos d'un repas déjà mangé. On s'arrête au
+             premier échec et le bouton Réessayer reste disponible. */
+          stoppedBy = e || new Error('Analyse interrompue.');
+          if (historyPhoto && !historySaved) Native.photos.remove(historyPhoto);
         });
     };
 
-    next(0).then(function () {
+    next(0).catch(function (e) { stoppedBy = stoppedBy || e; }).then(function () {
       queueBusy = false;
       renderQueue();
       if ($('tab-history').classList.contains('active')) renderHistory();
+      if (manual && stoppedBy) {
+        toast('Repas conservé dans la file : ' + (stoppedBy.message || 'analyse impossible.'));
+      }
     });
   }
 
@@ -738,24 +929,117 @@
      l'APK elles sont déjà rattachées au brouillon d'historique. */
   var CLE_EN_COURS = 'diabete.encours.v1';
   var MAX_AGE_EN_COURS = 12 * 3600000;
+  var MAX_EN_COURS_CHARS = 250000;
+
+  function safePendingContext(raw, fallbackImageCount) {
+    raw = raw && typeof raw === 'object' ? raw : {};
+    var text = function (v, max) {
+      return typeof v === 'string' ? v.trim().slice(0, max) : '';
+    };
+    var num = function (v, min, max) {
+      return typeof v === 'number' && isFinite(v) && v >= min && v <= max ? v : null;
+    };
+    var count = num(raw.imageCount, 0, Camera.MAX_ANGLES);
+    var ctx = {
+      referenceObject: text(raw.referenceObject, 80) || 'none',
+      plateDiameterCm: num(raw.plateDiameterCm, 5, 100),
+      notes: text(raw.notes, 4000),
+      extras: text(raw.extras, 4000),
+      imageCount: count == null ? (fallbackImageCount || 0) : Math.round(count)
+    };
+    if (raw.depth && raw.depth.scaleOk === true) {
+      var d = { scaleOk: true };
+      ['fieldWidthCm', 'fieldHeightCm', 'distanceCm', 'cmPerPixel', 'volumeCm3',
+       'areaCm2', 'heightMaxCm', 'heightMeanCm', 'samples', 'confidentPixels',
+       'coverage', 'observations', 'parallaxCm'].forEach(function (key) {
+        var value = num(raw.depth[key], 0, 1000000);
+        if (value != null) d[key] = value;
+      });
+      d.fresh = raw.depth.fresh !== false;
+      var viewIndex = num(raw.depth.viewIndex, 1, Camera.MAX_ANGLES);
+      if (ctx.imageCount <= 1) {
+        d.viewIndex = 1;
+        ctx.depth = d;
+      } else if (viewIndex != null && viewIndex === Math.round(viewIndex) &&
+                 viewIndex <= ctx.imageCount) {
+        d.viewIndex = viewIndex;
+        ctx.depth = d;
+      }
+    }
+    return ctx;
+  }
+
+  function safePendingOpinions(raw, ctx) {
+    if (!Array.isArray(raw)) return [];
+    var allowed = Storage.PROVIDERS || [];
+    return raw.slice(0, 3).map(function (x) {
+      if (!x || typeof x !== 'object' || allowed.indexOf(x.provider) < 0) return null;
+      if (!x.ok) {
+        return { ok: false, provider: x.provider,
+          error: typeof x.error === 'string' ? x.error.slice(0, 1000) : 'pas de réponse' };
+      }
+      if (!x.result || typeof x.result !== 'object' || !Estimator.sanitize) return null;
+      try {
+        var result = Estimator.sanitize(x.result, ctx);
+        result.provider = x.provider;
+        result.model = typeof x.result.model === 'string' ? x.result.model.slice(0, 200) : '';
+        return { ok: true, provider: x.provider, result: result };
+      } catch (e) { return null; }
+    }).filter(Boolean);
+  }
 
   function sauverEnCours(avis) {
     try {
-      localStorage.setItem(CLE_EN_COURS, JSON.stringify({
-        ts: Date.now(), date: currentHistoryDate, avis: avis
-      }));
+      var fallback = avis && avis.some(function (x) {
+        return x && x.ok && x.result && x.result.fromText === false;
+      }) ? 1 : 0;
+      var ctx = safePendingContext(lastEstimateContext, fallback);
+      var safeAvis = safePendingOpinions(avis, ctx);
+      if (safeAvis.length < 2 || !safeAvis.some(function (x) { return x.ok; })) return false;
+      var encoded = JSON.stringify({
+        version: 2,
+        ts: Date.now(),
+        date: currentHistoryDate,
+        ctx: ctx,
+        avis: safeAvis
+      });
+      if (encoded.length > MAX_EN_COURS_CHARS) return false;
+      localStorage.setItem(CLE_EN_COURS, encoded);
+      return true;
     } catch (e) { /* quota : le brouillon d'historique reste, lui */ }
+    return false;
   }
   function oublierEnCours() {
     try { localStorage.removeItem(CLE_EN_COURS); } catch (e) {}
   }
   function restaurerEnCours() {
     var d = null;
-    try { d = JSON.parse(localStorage.getItem(CLE_EN_COURS)); } catch (e) { return; }
-    if (!d || !d.avis || d.avis.length < 2) return;
-    if (Date.now() - (d.ts || 0) > MAX_AGE_EN_COURS) { oublierEnCours(); return; }
-    currentHistoryDate = d.date || null;
-    renderCompare(d.avis);
+    var raw = null;
+    try { raw = localStorage.getItem(CLE_EN_COURS); } catch (e) { return; }
+    if (!raw || raw.length > MAX_EN_COURS_CHARS) { oublierEnCours(); return; }
+    try { d = JSON.parse(raw); } catch (e2) { oublierEnCours(); return; }
+    var age = Date.now() - (d && Number(d.ts));
+    if (!d || !isFinite(age) || age < -300000 || age > MAX_AGE_EN_COURS) {
+      oublierEnCours(); return;
+    }
+    var fallback = d.avis && d.avis.some(function (x) {
+      return x && x.ok && x.result && x.result.fromText === false;
+    }) ? 1 : 0;
+    var ctx = safePendingContext(d.ctx, fallback);
+    var avis = safePendingOpinions(d.avis, ctx);
+    if (avis.length < 2 || !avis.some(function (x) { return x.ok; })) {
+      oublierEnCours(); return;
+    }
+    currentHistoryDate = typeof d.date === 'number' && isFinite(d.date) && d.date > 0
+      ? d.date : null;
+    currentHistoryConfirmed = false;
+    currentHistoryPhotoStarted = true;
+    currentDominantConfirmed = false;
+    lastEstimateContext = ctx;
+    images = [];
+    resumedPhotoDraft = ctx.imageCount > 0;
+    if (ctx.notes && $('user-notes')) $('user-notes').value = ctx.notes;
+    renderCompare(avis);
     toast('Estimation retrouvée — elle n\'avait pas encore été validée.');
   }
 
@@ -767,6 +1051,16 @@
 
   function renderCompare(avis) {
     var el = $('results');
+    avis = (avis || []).map(function (x) {
+      if (x && x.ok && x.result && x.result.blocking && x.result.blocking.length) {
+        return {
+          ok: false,
+          provider: x.provider,
+          error: 'Résultat incohérent refusé : ' + x.result.blocking.join(' ')
+        };
+      }
+      return x;
+    });
     lastCompare = avis;
 
     /* Présentation en TABLEAU et non en cartes côte à côte. Des cartes obligent
@@ -852,9 +1146,9 @@
     }
 
     html += '<tr class="cmp-row-actions"><td class="cmp-metric"></td>';
-    avis.forEach(function (x) {
+    avis.forEach(function (x, i) {
       html += '<td class="cmp-td">' + (x.ok
-        ? '<button class="btn btn-primary cmp-use" data-p="' + x.provider + '">Retenir</button>' : '') + '</td>';
+        ? '<button class="btn btn-primary cmp-use" data-i="' + i + '">Retenir</button>' : '') + '</td>';
     });
     html += '</tr></tbody></table></div>';
 
@@ -886,7 +1180,9 @@
       lastResult = ok[0].result;
       var second = ok[1];
       lastVerification = second
-        ? { ok: true, provider: second.provider, total: second.result.totalCarbsG, checkedAt: Date.now() }
+        ? { ok: true, provider: second.provider, model: second.result.model || '',
+            total: second.result.totalCarbsG,
+            items: second.result.items || [], checkedAt: Date.now() }
         : lastVerification;
       autoSaveCurrentResult();
       sauverEnCours(avis);
@@ -894,17 +1190,20 @@
 
     el.querySelectorAll('.cmp-use').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        var choisi = null, autres = [];
-        avis.forEach(function (x) {
-          if (x.provider === btn.dataset.p && !choisi) choisi = x; else autres.push(x);
+        var choisiIndex = parseInt(btn.dataset.i, 10);
+        var choisi = avis[choisiIndex], autres = avis.filter(function (x, i) {
+          return i !== choisiIndex;
         });
         if (!choisi) return;
         lastResult = choisi.result;
+        currentDominantConfirmed = false;
         /* La vérification retenue est le PREMIER autre avis abouti : c'est celui
            qui sert de contrepoint dans le détail et dans l'historique. */
         var autre = autres.filter(function (x) { return x.ok; })[0] || autres[0];
         lastVerification = !autre ? null : (autre.ok
-          ? { ok: true, provider: autre.provider, total: autre.result.totalCarbsG, checkedAt: Date.now() }
+          ? { ok: true, provider: autre.provider, model: autre.result.model || '',
+              total: autre.result.totalCarbsG,
+              items: autre.result.items || [], checkedAt: Date.now() }
           : { ok: false, provider: autre.provider, error: autre.error, checkedAt: Date.now() });
         lastCompare = null;          // on quitte la comparaison pour le détail
         oublierEnCours();
@@ -926,6 +1225,12 @@
        qui n'existent plus. */
     delete lastResult.mergedTotalCarbsG;
     delete lastResult.verifyTotalCarbsG;
+    delete lastResult.dominantConfirmed;
+    currentDominantConfirmed = false;
+    currentHistoryConfirmed = false;
+    /* Une correction humaine rend l'ancien second avis périmé : il portait sur
+       la liste précédente. Le conserver comme « confirmé » serait trompeur. */
+    lastVerification = null;
     Estimator.refresh(lastResult);
   }
 
@@ -1177,7 +1482,7 @@
       html += '<div id="items-list"></div></div>';
       el.innerHTML = html;
       renderItems();
-      updateResultSaveState();
+      autoSaveCurrentResult();
       if (!keepPosition) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
@@ -1244,7 +1549,14 @@
     renderItems();
     initDominant();
     $('confirm-result').addEventListener('click', confirmCurrentResult);
-    $('save-meal').addEventListener('click', function () { promptSaveMeal(lastResult.items); });
+    $('save-meal').addEventListener('click', function () {
+      if ((lastResult.blocking && lastResult.blocking.length) ||
+          (dominantItem(lastResult) && !currentDominantConfirmed)) {
+        toast('Confirme et corrige d’abord ce résultat avant d’en faire un repas fréquent.');
+        return;
+      }
+      promptSaveMeal(lastResult.items);
+    });
     initRerun();
     renderVerificationState();
     autoSaveCurrentResult();
@@ -1302,7 +1614,12 @@
     if (!(settings.apiKeys || {})[p]) return null;
     return Estimator.estimateWith(p, images, ctx, settings)
       .then(function (r) {
-        return { ok: true, provider: p, total: r.totalCarbsG, items: r.items || [] };
+        if (r.blocking && r.blocking.length) {
+          return { ok: false, provider: p,
+                   error: 'résultat incohérent refusé : ' + r.blocking.join(' ') };
+        }
+        return { ok: true, provider: p, model: r.model || '',
+                 total: r.totalCarbsG, items: r.items || [] };
       })
       .catch(function (e) { return { ok: false, provider: p, error: e.message }; });
   }
@@ -1326,12 +1643,10 @@
   }
 
   function sameFood(a, b) {
+    if (Storage.sameFood) return Storage.sameFood(a, b);
     var ka = foodKey(a), kb = foodKey(b);
     if (!ka || !kb) return false;
-    if (ka === kb) return true;
-    // Un mot significatif partagé suffit : « riz blanc » ≈ « riz long grain ».
-    var wa = ka.split(' '), wb = kb.split(' ');
-    return wa.some(function (w) { return wb.indexOf(w) !== -1; });
+    return ka === kb;
   }
 
   // Aliments porteurs de glucides vus par l'un et pas par l'autre.
@@ -1340,12 +1655,24 @@
       return (list || []).filter(function (it) { return (it.carbsG || 0) >= 5; });
     };
     var a = carbed(mine), b = carbed(theirs);
+    if (Storage.matchFoods) {
+      var matched = Storage.matchFoods(a, b);
+      return { onlyMine: matched.onlyA || [], onlyTheirs: matched.onlyB || [] };
+    }
+    /* Repli un-à-un : un aliment du second avis ne peut pas « confirmer »
+       plusieurs lignes du premier. */
+    var used = {};
     var missing = function (from, into) {
       return from.filter(function (x) {
-        return !into.some(function (y) { return sameFood(x.name, y.name); });
+        for (var i = 0; i < into.length; i++) {
+          if (!used[i] && sameFood(x.name, into[i].name)) { used[i] = true; return false; }
+        }
+        return true;
       });
     };
-    return { onlyMine: missing(a, b), onlyTheirs: missing(b, a) };
+    var onlyMine = missing(a, b);
+    used = {};
+    return { onlyMine: onlyMine, onlyTheirs: missing(b, a) };
   }
 
   function renderVerificationState() {
@@ -1412,6 +1739,20 @@
     }
   }
 
+  function mergePairValidated(mainResult, verification) {
+    var a = (mainResult && mainResult.model || '').toLowerCase();
+    var b = (verification && verification.model || '').toLowerCase();
+    var gemini = function (m) { return /(^|\/)gemini-3\.1-flash-lite$/.test(m); };
+    var complement = function (m) {
+      return m === 'x-ai/grok-4.5' ||
+        m === 'qwen/qwen3-vl-235b-a22b-thinking' ||
+        m === 'qwen/qwen3-vl-235b-a22b-instruct';
+    };
+    if (!((gemini(a) && complement(b)) || (gemini(b) && complement(a)))) return false;
+    var d = foodDisagreements(mainResult.items, verification.items);
+    return !d.onlyMine.length && !d.onlyTheirs.length;
+  }
+
   function attachVerification(promise, generation) {
     if (!promise) return;
     var verifiedResult = lastResult;
@@ -1435,30 +1776,33 @@
          s'abstient dès que le repas a été confirmé. */
       var touched = lastResult.totalCarbsG !== verifiedTotal || currentHistoryConfirmed;
       if (settings.mergeVerification && v.ok && v.total > 0 && lastResult.totalCarbsG > 0
-          && !touched) {
+          && !touched && mergePairValidated(lastResult, v)) {
         lastResult.mergedTotalCarbsG = Math.round((lastResult.totalCarbsG + v.total) / 2);
         lastResult.verifyTotalCarbsG = v.total;
         lastResult.rangeLowG = Math.min(lastResult.rangeLowG, v.total);
         lastResult.rangeHighG = Math.max(lastResult.rangeHighG, v.total);
         renderResults(lastResult, true);
         if (verifiedDate) {
-          Storage.updateHistory(verifiedDate, {
+          if (!Storage.updateHistory(verifiedDate, {
             totalCarbsG: lastResult.mergedTotalCarbsG,
             parts: partsFrom(lastResult.mergedTotalCarbsG),
             mergedFrom: [lastResult.totalCarbsG, v.total]
-          });
+          })) toast('La fusion est affichée, mais n’a pas pu être enregistrée.');
         }
       }
       renderVerificationState();
       if (verifiedDate) {
-        Storage.updateHistory(verifiedDate, {
+        if (!Storage.updateHistory(verifiedDate, {
           verification: {
             provider: v.provider,
+            model: v.model || '',
             ok: !!v.ok,
             totalCarbsG: v.ok ? v.total : null,
+            items: v.ok ? (v.items || []) : [],
+            error: v.ok ? '' : (v.error || ''),
             checkedAt: v.checkedAt
           }
-        });
+        })) toast('Le second avis est affiché, mais n’a pas pu être enregistré.');
       }
     });
   }
@@ -1479,16 +1823,23 @@
      D'où cet encadré : il isole l'aliment qui porte la majorité des glucides et
      demande confirmation de sa NATURE. C'est le seul point du parcours où une
      seconde d'attention peut valoir 30 g. */
-  function dominantHtml(r) {
+  function dominantItem(r) {
     var items = (r.items || []).filter(function (it) { return it.carbsG > 0; });
-    if (!items.length || !(r.totalCarbsG > 0)) return '';
+    if (!items.length || !(r.totalCarbsG > 0)) return null;
 
     var top = items.reduce(function (a, b) { return b.carbsG > a.carbsG ? b : a; });
     var part = top.carbsG / r.totalCarbsG;
     // En dessous de la moitié du total, se tromper dessus ne déplace pas la dose.
-    if (part < 0.5) return '';
+    if (part < 0.5) return null;
+    return { item: top, part: part };
+  }
 
-    return '<div class="dominant-box">' +
+  function dominantHtml(r) {
+    var dominant = dominantItem(r);
+    if (!dominant) return '';
+    var top = dominant.item, part = dominant.part;
+
+    return '<div class="dominant-box' + (currentDominantConfirmed ? ' dominant-done' : '') + '">' +
       '<div class="dominant-head">🔎 À vérifier en priorité</div>' +
       '<p><strong>' + escapeHtml(top.name) + '</strong> porte ' +
       Math.round(part * 100) + ' % des glucides de ce repas (' + top.carbsG + ' g). ' +
@@ -1496,7 +1847,9 @@
       '<p class="tiny">Se tromper d\'aliment coûte bien plus qu\'une portion mal jaugée : ' +
       'des flocons d\'avoine pris pour du fromage blanc, c\'est 33 g d\'écart.</p>' +
       '<div class="btn-row">' +
-      '<button id="dominant-ok" class="btn btn-secondary">✓ Oui, c\'est bien ça</button>' +
+      '<button id="dominant-ok" class="btn btn-secondary"' +
+      (currentDominantConfirmed ? ' disabled' : '') + '>' +
+      (currentDominantConfirmed ? '✓ Confirmé' : '✓ Oui, c\'est bien ça') + '</button>' +
       '<button id="dominant-no" class="btn btn-ghost">✗ Non, corriger</button>' +
       '</div></div>';
   }
@@ -1506,10 +1859,13 @@
     var no = $('dominant-no');
     if (ok) {
       ok.addEventListener('click', function () {
+        currentDominantConfirmed = true;
+        if (lastResult) lastResult.dominantConfirmed = true;
         var box = ok.closest('.dominant-box');
         if (box) box.classList.add('dominant-done');
         ok.textContent = '✓ Confirmé';
         ok.disabled = true;
+        autoSaveCurrentResult();
       });
     }
     if (no) {
@@ -1518,6 +1874,8 @@
            directement sur la liste éditable. */
         var list = $('items-list');
         if (list) list.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        var first = list && list.querySelector('.item-name-edit');
+        if (first) first.focus();
         toast('Corrige le nom ou la quantité dans le détail ci-dessous.');
       });
     }
@@ -1606,7 +1964,15 @@
      qui divergent, on ne se demande pas si le résultat est douteux, on sait
      déjà qu'il l'est. */
   function rerunHtml(troisieme) {
-    if (!images.length && !describedMeal()) return '';
+    if (resumedPhotoDraft) {
+      return '<div class="rerun-box"><div class="rerun-title">Photo conservée dans l’historique</div>' +
+        '<p class="hint tiny">Le brouillon peut être corrigé et confirmé, mais sa photo n’est plus ' +
+        'chargée en mémoire après le redémarrage. Une relance IA exigerait de reprendre ou sélectionner la photo.</p></div>';
+    }
+    var rememberedText = lastEstimateContext &&
+      ((lastEstimateContext.notes && lastEstimateContext.notes.trim()) ||
+       (lastEstimateContext.extras && lastEstimateContext.extras.trim()));
+    if (!images.length && !describedMeal() && !rememberedText) return '';
     var opts = rerunOptions();
     if (!opts.length) return '';
     var titre = troisieme
@@ -1678,14 +2044,19 @@
           var m = {}; m[o.provider] = o.model; return m;
         })())
       });
-      var sent = inputMode === 'texte' ? [] : images;
-      var ctx = {
-        referenceObject: $('reference-object').value,
-        plateDiameterCm: $('plate-diameter').value ? parseFloat($('plate-diameter').value) : null,
-        notes: $('user-notes').value,
-        extras: extrasText(),
-        imageCount: sent.length
-      };
+      /* Rejoue exactement le contexte du repas estimé, pas les champs que
+         l'utilisateur aurait pu commencer à remplir pour le repas suivant. */
+      var ctx = lastEstimateContext
+        ? safePendingContext(lastEstimateContext, lastEstimateContext.imageCount || 0)
+        : {
+            referenceObject: $('reference-object').value,
+            plateDiameterCm: $('plate-diameter').value ? parseFloat($('plate-diameter').value) : null,
+            notes: $('user-notes').value,
+            extras: extrasText(),
+            imageCount: inputMode === 'texte' ? 0 : images.length,
+            depth: inputMode === 'texte' ? null : depthOfSent(images)
+          };
+      var sent = ctx.imageCount > 0 ? images : [];
 
       var avant = lastResult ? lastResult.totalCarbsG : null;
 
@@ -1707,6 +2078,8 @@
         }
 
         lastResult = r;
+        currentDominantConfirmed = false;
+        currentHistoryConfirmed = false;
         /* keepPosition : sans ça la page remonte en haut et on perd le fil de ce
            qu'on était en train de comparer. */
         renderResults(r, true);
@@ -1813,7 +2186,8 @@
 
       row.innerHTML =
         '<div class="item-main">' +
-        '  <div class="item-name">' + escapeHtml(it.name) +
+        '  <div class="item-name"><input class="input item-name-edit" type="text" value="' +
+             escapeHtml(it.name) + '" data-name-i="' + idx + '" aria-label="Nom de l’aliment">' +
              ' <span class="mini-conf conf-' + it.confidence + '">' +
              (CONF_SHORT[it.confidence] || it.confidence) + '</span></div>' +
         '  <div class="item-detail">' + editControl + '</div>' +
@@ -1824,10 +2198,20 @@
     });
 
     // Édition des grammes / glucides
+    list.querySelectorAll('.item-name-edit').forEach(function (inp) {
+      inp.addEventListener('change', function () {
+        var i = parseInt(inp.dataset.nameI, 10);
+        var name = inp.value.trim();
+        if (!name) { inp.value = lastResult.items[i].name; return; }
+        lastResult.items[i].name = name;
+        recomputeTotal();
+        renderResults(lastResult, true);
+      });
+    });
     list.querySelectorAll('.item-grams-edit').forEach(function (inp) {
       inp.addEventListener('change', function () {
         var i = parseInt(inp.dataset.i, 10);
-        var v = parseFloat(inp.value) || 0;
+        var v = Math.max(0, parseFloat(inp.value) || 0);
         if (inp.dataset.carb) {
           lastResult.items[i].carbsG = Math.round(v);
         } else {
@@ -1855,6 +2239,7 @@
       // n'ont pas la même valeur selon qu'une portion a été vue ou décrite.
       source: lastResult.fromText ? 'texte' : 'photo',
       draft: !currentHistoryConfirmed,
+      confirmed: !!currentHistoryConfirmed,
       // Le total enregistré est celui qui a été AFFICHÉ, donc la moyenne des deux
       // modèles quand la fusion est active : c'est lui qui a servi à doser, et
       // c'est donc lui que la calibration doit comparer aux glucides réels.
@@ -1864,6 +2249,10 @@
          il est marqué, pour qu'on ne le retrouve pas des semaines plus tard sans
          savoir que son total avait été refusé à l'écran. */
       blocked: !!(lastResult.blocking && lastResult.blocking.length),
+      blocking: lastResult.blocking && lastResult.blocking.length
+        ? lastResult.blocking.slice(0, 10) : [],
+      dominantRequired: !!dominantItem(lastResult),
+      dominantConfirmed: !dominantItem(lastResult) || !!currentDominantConfirmed,
       mergedFrom: typeof lastResult.mergedTotalCarbsG === 'number'
         ? [lastResult.totalCarbsG, lastResult.verifyTotalCarbsG] : null,
       partSizeG: settings.partSizeG,
@@ -1877,7 +2266,8 @@
         plateDiameterCm: lastEstimateContext.plateDiameterCm || null,
         notes: lastEstimateContext.notes || '',
         extras: lastEstimateContext.extras || '',
-        imageCount: lastEstimateContext.imageCount || 0
+        imageCount: lastEstimateContext.imageCount || 0,
+        depth: lastEstimateContext.depth || null
       } : null,
       /* On garde la portion et l'origine de chaque aliment : c'est ce qui rend
          le détail de l'historique consultable des semaines plus tard. Ce sont
@@ -1891,11 +2281,17 @@
         };
       })
     };
+    /* Snapshot sans photo ni secret : il permet de reprendre un brouillon après
+       que la WebView a été recyclée, puis de corriger/valider le même repas. */
+    try { entry.resultSnapshot = JSON.parse(JSON.stringify(lastResult)); }
+    catch (e) { entry.resultSnapshot = null; }
     if (lastVerification && !lastVerification.loading) {
       entry.verification = {
         provider: lastVerification.provider,
+        model: lastVerification.model || '',
         ok: !!lastVerification.ok,
         totalCarbsG: lastVerification.ok ? lastVerification.total : null,
+        items: lastVerification.ok ? (lastVerification.items || []) : [],
         error: lastVerification.ok ? '' : (lastVerification.error || ''),
         checkedAt: lastVerification.checkedAt || Date.now()
       };
@@ -1929,27 +2325,56 @@
     if (!first || !first.previewUrl) return;
 
     if (Native.isApp && first && first.previewUrl) {
-      Native.photos.save('meal-' + date + '.jpg', first.previewUrl)
+      var media = first.mediaType || 'image/jpeg';
+      var extension = media === 'image/png' ? '.png' :
+        (media === 'image/webp' ? '.webp' : '.jpg');
+      var photoName = 'meal-' + date + extension;
+      Native.photos.save(photoName, first.previewUrl)
         .then(function (name) {
-          if (name) Storage.updateHistory(date, { photo: name });
+          if (!name) {
+            currentHistoryPhotoStarted = false;
+            return;
+          }
+          var saved = Storage.updateHistory(date, { photo: name });
+          var attached = saved && saved.some(function (e) {
+            return e.date === date && e.photo === name;
+          });
+          if (!attached) {
+            currentHistoryPhotoStarted = false;
+            Native.photos.remove(name);
+            toast('Photo non jointe au brouillon : stockage indisponible.');
+          }
         })
-        .catch(function () {});
+        .catch(function () { currentHistoryPhotoStarted = false; });
     } else if (first && first.previewUrl && Camera.makeThumb) {
       Camera.makeThumb(first.previewUrl)
         .then(function (thumb) {
-          if (thumb) Storage.updateHistory(date, { thumb: thumb });
+          if (!thumb) { currentHistoryPhotoStarted = false; return; }
+          var saved = Storage.updateHistory(date, { thumb: thumb });
+          var attached = saved && saved.some(function (e) {
+            return e.date === date && e.thumb === thumb;
+          });
+          if (!attached) {
+            currentHistoryPhotoStarted = false;
+            toast('Vignette non jointe au brouillon : stockage indisponible.');
+          }
         })
-        .catch(function () {});
+        .catch(function () { currentHistoryPhotoStarted = false; });
     }
   }
 
   function autoSaveCurrentResult() {
-    if (!lastResult) return;
+    if (!lastResult) return false;
     if (!currentHistoryDate) currentHistoryDate = Date.now();
     var entry = currentResultEntry(currentHistoryDate);
-    Storage.upsertHistory(entry);
+    var saved = Storage.upsertHistory(entry);
+    if (!saved) {
+      toast('Brouillon non enregistré : libère de l’espace puis réessaie.');
+      return false;
+    }
     prepareCurrentHistoryPhoto(currentHistoryDate);
     updateResultSaveState();
+    return true;
   }
 
   function confirmCurrentResult() {
@@ -1961,12 +2386,24 @@
       toast('Corrige d\'abord l\'incohérence signalée : ce total ne peut pas être confirmé.');
       return;
     }
-    autoSaveCurrentResult();
-    oublierEnCours();
-    if (currentHistoryConfirmed) return;
+    if (dominantItem(lastResult) && !currentDominantConfirmed) {
+      toast('Confirme d’abord la nature de l’aliment principal, ou corrige son nom.');
+      var box = document.querySelector('.dominant-box');
+      if (box) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    if (!autoSaveCurrentResult()) return;
+    if (currentHistoryConfirmed) { oublierEnCours(); return; }
     currentHistoryConfirmed = true;
     var entry = currentResultEntry(currentHistoryDate);
-    Storage.upsertHistory(entry);
+    var saved = Storage.upsertHistory(entry);
+    if (!saved) {
+      currentHistoryConfirmed = false;
+      toast('Impossible d’enregistrer ce repas : stockage indisponible.');
+      updateResultSaveState();
+      return;
+    }
+    oublierEnCours();
     updateResultSaveState();
     scheduleReminderFor(entry);
     toast('Repas confirmé dans l\'historique.');
@@ -2370,7 +2807,9 @@
     });
     $('save-manual').addEventListener('click', function () {
       var entry = {
-        date: Date.now(), source: 'manuel', totalCarbsG: total,
+        date: Date.now(), source: 'manuel', draft: false, confirmed: true,
+        blocked: false, dominantRequired: false, dominantConfirmed: true,
+        totalCarbsG: total,
         parts: parts, partSizeG: settings.partSizeG,
         gi: giInfo ? { gl: giInfo.gl, gi: giInfo.gi } : null,
         items: manualItems.map(function (it) {
@@ -2381,7 +2820,10 @@
           };
         })
       };
-      Storage.addHistory(entry);
+      if (!Storage.addHistory(entry)) {
+        toast('Repas non enregistré : stockage indisponible.');
+        return;
+      }
       toast('Enregistré dans l\'historique.');
       // Un repas saisi à la main mérite le même rappel qu'un repas photographié.
       // Faute de vitesse d'absorption estimée par l'IA, le délai reste le défaut.
@@ -2443,9 +2885,19 @@
 
     if (e.draft) {
       out += '<div class="draft-note">Sauvegardé automatiquement. Confirme ce repas pour ' +
-        'l\'inclure dans tes synthèses.</div>' +
-        '<button class="btn btn-primary history-confirm" data-confirm="' + e.date +
-        '">✓ Confirmer ce repas</button>';
+        'l\'inclure dans tes synthèses.</div>';
+      if (e.resultSnapshot) {
+        out += '<button class="btn btn-secondary history-resume" data-resume="' + e.date +
+          '">↩ Reprendre et corriger</button>';
+      }
+      if (e.blocked) {
+        out += '<p class="hint tiny">⛔ Ce brouillon est incohérent : reprends-le pour le corriger.</p>';
+      } else if (e.dominantRequired && !e.dominantConfirmed) {
+        out += '<p class="hint tiny">🔎 Confirme d’abord l’aliment principal dans le résultat.</p>';
+      } else {
+        out += '<button class="btn btn-primary history-confirm" data-confirm="' + e.date +
+          '">✓ Confirmer ce repas</button>';
+      }
     }
 
     out += '<div class="history-real-line" data-line="' + e.date + '" hidden></div>' +
@@ -2486,6 +2938,80 @@
     return hay.indexOf(q) !== -1;
   }
 
+  function resumeHistoryDraft(date) {
+    var e = Storage.getHistory().filter(function (x) { return x.date === date; })[0];
+    if (!e || !e.draft || !e.resultSnapshot || !Array.isArray(e.resultSnapshot.items)) {
+      toast('Ce brouillon ancien ne contient pas assez de données pour être repris.');
+      return;
+    }
+    var snapshot;
+    try { snapshot = JSON.parse(JSON.stringify(e.resultSnapshot)); }
+    catch (err) { toast('Brouillon illisible.'); return; }
+    var ctx = safePendingContext(e.input, e.source === 'photo' ? 1 : 0);
+    try { lastResult = Estimator.sanitize(snapshot, ctx); }
+    catch (err2) { toast('Brouillon invalide : impossible de le reprendre.'); return; }
+    lastResult.provider = (Storage.PROVIDERS || []).indexOf(e.provider) >= 0 ? e.provider : '';
+    lastResult.model = typeof e.model === 'string' ? e.model.slice(0, 200) : '';
+    var restoredVerification = e.verification ? {
+      provider: e.verification.provider,
+      model: e.verification.model || '',
+      ok: !!e.verification.ok,
+      total: e.verification.totalCarbsG,
+      items: e.verification.items || [],
+      error: e.verification.error || '',
+      checkedAt: e.verification.checkedAt
+    } : null;
+
+    /* Le snapshot normalisé repart volontairement de la somme de ses aliments.
+       Une moyenne de deux modèles n'est restaurée que si toutes ses traces
+       indépendantes concordent encore : entrée, snapshot, second avis et paire
+       de modèles/aliments autorisée. Sinon on l'abandonne explicitement. */
+    var fusionDropped = false;
+    if (Array.isArray(e.mergedFrom)) {
+      var restoredMerge = Storage.validateStoredMerge
+        ? Storage.validateStoredMerge(e, snapshot, lastResult, restoredVerification)
+        : null;
+      if (restoredMerge && mergePairValidated(lastResult, restoredVerification)) {
+        lastResult.mergedTotalCarbsG = restoredMerge.mergedTotal;
+        lastResult.verifyTotalCarbsG = restoredMerge.verifyTotal;
+        lastResult.rangeLowG = Math.min(lastResult.rangeLowG, restoredMerge.verifyTotal);
+        lastResult.rangeHighG = Math.max(lastResult.rangeHighG, restoredMerge.verifyTotal);
+      } else {
+        fusionDropped = true;
+      }
+    }
+    /* Un blocage brut (total/fourchette incohérents dans la réponse initiale)
+       ne doit pas disparaître au simple fait de recharger la WebView. Une
+       correction explicite appellera ensuite recomputeTotal et le lèvera. */
+    if (e.blocked) {
+      var prior = Array.isArray(snapshot.blocking) ? snapshot.blocking : e.blocking;
+      prior = (Array.isArray(prior) ? prior : ['Ce brouillon avait été refusé avant son enregistrement.'])
+        .filter(function (m) { return typeof m === 'string' && m; }).slice(0, 10);
+      lastResult.blocking = (lastResult.blocking || []).concat(prior)
+        .filter(function (m, i, a) { return a.indexOf(m) === i; });
+    }
+    currentHistoryDate = e.date;
+    currentHistoryConfirmed = false;
+    currentHistoryPhotoStarted = true;
+    currentDominantConfirmed = !!e.dominantConfirmed;
+    lastResult.dominantConfirmed = currentDominantConfirmed;
+    lastEstimateContext = ctx;
+    lastVerification = restoredVerification;
+    images = [];
+    resumedPhotoDraft = ctx.imageCount > 0;
+    lastRunProvider = e.provider || null;
+    lastRunModel = e.model || null;
+    setMode(e.source === 'texte' ? 'texte' : 'photo');
+    if (e.source === 'texte' && ctx.notes) $('user-notes').value = ctx.notes;
+    renderThumbs();
+    renderDepthResult(ctx.depth || null);
+    selectTab('analyze');
+    renderResults(lastResult);
+    toast(fusionDropped
+      ? 'Brouillon repris : l’ancienne moyenne n’était plus vérifiable, le total du modèle principal est affiché. Relis avant de confirmer.'
+      : 'Brouillon repris. Relis, corrige puis confirme.');
+  }
+
   function initHistorySearch() {
     var inp = $('history-search');
     if (!inp) return;
@@ -2518,7 +3044,9 @@
     }
     list.innerHTML = '';
 
-    var confirmed = h.filter(function (e) { return !e.draft; });
+    var confirmed = h.filter(function (e) {
+      return Storage.isConfirmedMeal ? Storage.isConfirmedMeal(e) : !e.draft;
+    });
     var draftCount = h.length - confirmed.length;
     var summary = document.createElement('div');
     summary.className = 'history-summary';
@@ -2587,16 +3115,38 @@
     list.querySelectorAll('.history-del').forEach(function (b) {
       b.addEventListener('click', function (ev) {
         ev.stopPropagation();
-        Storage.deleteHistory(Number(b.dataset.del));
+        if (!Storage.deleteHistory(Number(b.dataset.del))) {
+          toast('Suppression non enregistrée : stockage indisponible.');
+          return;
+        }
         delete openMeals[Number(b.dataset.del)];
         renderHistory();
+      });
+    });
+
+    list.querySelectorAll('.history-resume').forEach(function (b) {
+      b.addEventListener('click', function () {
+        resumeHistoryDraft(Number(b.dataset.resume));
       });
     });
 
     list.querySelectorAll('.history-confirm').forEach(function (b) {
       b.addEventListener('click', function () {
         var date = Number(b.dataset.confirm);
-        Storage.updateHistory(date, { draft: false });
+        var entry = Storage.getHistory().filter(function (x) { return x.date === date; })[0];
+        if (!entry || entry.blocked || (entry.dominantRequired && !entry.dominantConfirmed)) {
+          toast('Reprends ce brouillon et termine ses vérifications avant de le confirmer.');
+          return;
+        }
+        var saved = Storage.updateHistory(date, { draft: false, confirmed: true });
+        var confirmed = saved && saved.some(function (e) {
+          return e.date === date && e.draft === false;
+        });
+        if (!confirmed) {
+          toast('Confirmation non enregistrée : stockage indisponible.');
+          return;
+        }
+        scheduleReminderFor(Object.assign({}, entry, { draft: false, confirmed: true }));
         renderHistory();
         toast('Repas confirmé.');
       });
@@ -2613,7 +3163,10 @@
           toast('Saisis d\'abord les glucides réels.');
           return;
         }
-        Storage.setHistoryReal(date, entry.realCarbsG, sel.value);
+        if (!Storage.setHistoryReal(date, entry.realCarbsG, sel.value)) {
+          toast('Source non enregistrée : stockage indisponible.');
+          return;
+        }
         refreshBiasCard();
         toast(sel.value === 'estimation'
           ? 'Marqué comme estimation : ne sert plus à calibrer.'
@@ -2627,7 +3180,10 @@
         var v = inp.value.trim();
         var real = v === '' ? null : parseFloat(v);
         if (real != null && (!isFinite(real) || real < 0)) return;
-        Storage.setHistoryReal(date, real);
+        if (!Storage.setHistoryReal(date, real)) {
+          if (announce) toast('Valeur non enregistrée : stockage indisponible.');
+          return;
+        }
         var entry = Storage.getHistory().filter(function (x) { return x.date === date; })[0];
         if (entry) updateRealLine(date, entry.totalCarbsG, entry.realCarbsG);
         refreshBiasCard();
@@ -2731,7 +3287,12 @@
 
   function initHistory() {
     $('clear-history').addEventListener('click', function () {
-      if (confirm('Vider tout l\'historique ?')) { Storage.clearHistory(); renderHistory(); }
+      if (!confirm('Vider tout l\'historique ?')) return;
+      if (!Storage.clearHistory()) {
+        toast('Historique non effacé : stockage indisponible.');
+        return;
+      }
+      renderHistory();
     });
     // La synthèse médecin vivait dans les Réglages, où personne ne la cherchait.
     initReport();
@@ -2792,8 +3353,12 @@
         if (!confirm('Supprimer toutes les photos de l\'historique ?\n\nLes repas et leurs estimations sont conservés.')) return;
         var h = Storage.getHistory();
         h.forEach(function (e) { delete e.photo; delete e.thumb; });
-        Storage.replaceHistory(h);
-        Storage.prunePhotos(h).then(function () {
+        var saved = Storage.replaceHistory(h);
+        if (!saved) {
+          toast('Photos non supprimées : impossible d\'enregistrer l\'historique.');
+          return;
+        }
+        Storage.prunePhotos(saved).then(function () {
           refreshStorageUsage();
           renderHistory();
           toast('Photos supprimées.');
@@ -2902,10 +3467,7 @@
       var stamp = d.getFullYear() + '-' +
                   ('0' + (d.getMonth() + 1)).slice(-2) + '-' +
                   ('0' + d.getDate()).slice(-2);
-      // Le nom du fichier dit lui-même qu'il contient des secrets : c'est ce
-      // qu'on voit dans le gestionnaire de fichiers avant de le partager.
-      var name = (payload.containsApiKeys ? 'glucovision-sauvegarde-PRIVEE-' : 'glucovision-sauvegarde-')
-                 + stamp + '.json';
+      var name = 'glucovision-sauvegarde-' + stamp + '.json';
 
       saveTextFile(name, JSON.stringify(payload, null, 2), 'application/json',
                    'Sauvegarde GlucoVision').then(function (mode) {
@@ -2918,9 +3480,7 @@
                    (lastSaveError ? ' (' + lastSaveError + ')' : '') +
                    ' — fichier écrit ici : ' + lastSavePath
                : 'Téléchargée dans le dossier de téléchargements.';
-        toast((payload.containsApiKeys
-          ? '🔑 Sauvegarde AVEC tes clés API — ne la partage pas, ne l\'envoie pas par mail. '
-          : 'Sauvegarde exportée. ') + ou);
+        toast('Sauvegarde exportée sans clé API. ' + ou);
       });
     });
 
@@ -2937,8 +3497,14 @@
       if (!file) return;
       var reader = new FileReader();
       reader.onload = function () {
+        var parsed;
         try {
-          var restored = Storage.importAll(JSON.parse(reader.result));
+          parsed = JSON.parse(reader.result);
+        } catch (err) {
+          toast(err.message || 'Fichier illisible.');
+          return;
+        }
+        Storage.importAll(parsed).then(function (restored) {
           settings = Storage.getSettings();
           renderSavedMeals();
           renderHistory();
@@ -2946,10 +3512,10 @@
           renderFoodResults($('food-search').value);
           updateCompareToggle();
           $('settings-modal').hidden = true;
-          toast('Sauvegarde restaurée (' + restored.length + ' éléments), clés API comprises si le fichier en contenait.');
-        } catch (err) {
+          toast('Sauvegarde restaurée (' + restored.length + ' catégories).');
+        }).catch(function (err) {
           toast(err.message || 'Fichier illisible.');
-        }
+        });
       };
       reader.onerror = function () { toast('Impossible de lire le fichier.'); };
       reader.readAsText(file);
@@ -2960,10 +3526,8 @@
 
   /* ---------- Sauvegarde par copier-coller ----------
      Le seul chemin qui ne dépend d'AUCUNE écriture de fichier : ni partage, ni
-     gestionnaire de fichiers, ni permission de stockage. C'est ce qui reste
-     quand tout le reste échoue — et c'est aussi la seule façon de récupérer ses
-     clés API avant de réinstaller un APK signé d'une autre clé, qu'Android
-     refuse d'installer par-dessus et qui oblige donc à désinstaller. */
+     gestionnaire de fichiers, ni permission de stockage. Les clés API restent
+     volontairement dans le Keystore et ne sont jamais placées dans ce texte. */
   function initTextBackup() {
     var wrap = $('text-backup-wrap');
     var box = $('text-backup-box');
@@ -2979,9 +3543,7 @@
         box.readOnly = true;
         copy.hidden = false;
         apply.hidden = true;
-        hint.innerHTML = payload.containsApiKeys
-          ? 'Copie ce texte et colle-le dans une note. Il contient <strong>tes clés API</strong> : garde-le pour toi.'
-          : 'Copie ce texte et colle-le dans une note.';
+        hint.textContent = 'Copie ce texte et colle-le dans une note. Il ne contient aucune clé API.';
         box.focus();
         box.setSelectionRange(0, box.value.length);
       } else {
@@ -3022,8 +3584,14 @@
       var raw = box.value.trim();
       if (!raw) { toast('Colle d\'abord le texte de ta sauvegarde.'); return; }
       if (!confirm('Restaurer remplacera ton historique, tes aliments perso et ta calibration actuels. Continuer ?')) return;
+      var parsed;
       try {
-        var restored = Storage.importAll(JSON.parse(raw));
+        parsed = JSON.parse(raw);
+      } catch (err) {
+        toast('Texte illisible : ' + (err.message || 'ce n\'est pas une sauvegarde JSON.'));
+        return;
+      }
+      Storage.importAll(parsed).then(function (restored) {
         settings = Storage.getSettings();
         renderSavedMeals();
         renderHistory();
@@ -3031,10 +3599,10 @@
         renderFoodResults($('food-search').value);
         wrap.hidden = true; box.value = '';
         $('settings-modal').hidden = true;
-        toast('Sauvegarde restaurée (' + restored.length + ' éléments), clés API comprises si le texte en contenait.');
-      } catch (err) {
+        toast('Sauvegarde restaurée (' + restored.length + ' catégories).');
+      }).catch(function (err) {
         toast('Texte illisible : ' + (err.message || 'ce n\'est pas une sauvegarde JSON.'));
-      }
+      });
     });
   }
 
@@ -3172,6 +3740,7 @@
     $('set-merge').checked = !!settings.mergeVerification;
     $('set-partsize').value = settings.partSizeG;
     $('set-round-half').checked = settings.roundHalf;
+    if ($('set-experimental')) $('set-experimental').checked = !!settings.experimentalDepth;
     updateVerificationSettingsForm();
     updateSettingsSummaries();
     renderUsage();
@@ -3184,7 +3753,7 @@
      programmé là où le navigateur ne sait pas le déclencher de façon fiable. */
   function openNativeSettings() {
     if (!Native.isApp) return;
-    ['set-group-remind', 'set-group-storage', 'keystore-note'].forEach(function (id) {
+    ['set-group-remind', 'set-group-storage', 'set-group-depth', 'keystore-note'].forEach(function (id) {
       var el = $(id);
       if (el) el.hidden = false;
     });
@@ -3207,12 +3776,18 @@
 
   function saveSettingsFromForm() {
     var provider = $('set-provider').value;
-    settings.provider = provider;
-    settings.apiKeys = settings.apiKeys || {};
-    settings.apiKeys.claude = $('set-key-claude').value.trim();
-    settings.apiKeys.gemini = $('set-key-gemini').value.trim();
-    settings.apiKeys.openai = $('set-key-openai').value.trim();
-    settings.apiKeys.openrouter = $('set-key-openrouter').value.trim();
+    /* Construit une copie : si le Keystore ou localStorage refuse l'écriture,
+       l'application continue d'utiliser les derniers réglages réellement
+       persistés au lieu d'un mélange non sauvegardé. */
+    var nextSettings = Object.assign({}, settings, {
+      provider: provider,
+      apiKeys: Object.assign({}, settings.apiKeys || {}),
+      models: Object.assign({}, settings.models || {})
+    });
+    nextSettings.apiKeys.claude = $('set-key-claude').value.trim();
+    nextSettings.apiKeys.gemini = $('set-key-gemini').value.trim();
+    nextSettings.apiKeys.openai = $('set-key-openai').value.trim();
+    nextSettings.apiKeys.openrouter = $('set-key-openrouter').value.trim();
     /* Même exigence que pour le second avis : un secours servi par l'API qui
        vient de tomber n'est pas un secours. On refuse plutôt que d'enregistrer
        un réglage qui donnerait une fausse impression de filet. */
@@ -3221,48 +3796,57 @@
       toast('Choisis un fournisseur de secours différent du fournisseur actif.');
       return;
     }
-    settings.fallbackProvider = fallbackProvider;
+    nextSettings.fallbackProvider = fallbackProvider;
     var verificationMode = $('set-verify-mode').value;
     var verifyProvider = $('set-verify-provider').value;
     if (verificationMode !== 'off' && verifyProvider === provider) {
       toast('Choisis un fournisseur différent pour le second avis.');
       return;
     }
-    settings.verificationMode = verificationMode;
-    settings.verifyEnabled = verificationMode === 'auto';
-    settings.verifyProvider = verifyProvider;
-    settings.verifyThresholdPct = parseInt($('set-verify-threshold').value, 10) || 20;
-    settings.mergeVerification = verificationMode === 'auto' && $('set-merge').checked;
-    settings.models = settings.models || {};
-    settings.models[provider] = getModelFrom('set-model', 'set-model-custom', provider);
-    settings.compareProvider = verificationMode === 'ask' ? verifyProvider : '';
+    nextSettings.verificationMode = verificationMode;
+    nextSettings.verifyEnabled = verificationMode === 'auto';
+    nextSettings.verifyProvider = verifyProvider;
+    nextSettings.verifyThresholdPct = parseInt($('set-verify-threshold').value, 10) || 20;
+    nextSettings.mergeVerification = verificationMode === 'auto' && $('set-merge').checked;
+    nextSettings.models[provider] = getModelFrom('set-model', 'set-model-custom', provider);
+    nextSettings.compareProvider = verificationMode === 'ask' ? verifyProvider : '';
     if (verificationMode !== 'off') {
-      settings.models[verifyProvider] =
+      nextSettings.models[verifyProvider] =
         getModelFrom('set-verify-model', 'set-verify-model-custom', verifyProvider);
     }
     var ps = parseInt($('set-partsize').value, 10);
-    settings.partSizeG = (ps >= 5 && ps <= 20) ? ps : 10;
-    settings.roundHalf = $('set-round-half').checked;
+    nextSettings.partSizeG = (ps >= 5 && ps <= 20) ? ps : 10;
+    nextSettings.roundHalf = $('set-round-half').checked;
+    nextSettings.experimentalDepth = !!($('set-experimental') && $('set-experimental').checked);
 
+    var hadRemind = !!settings.remindEnabled;
+    var wantsRemind = Native.isApp && $('set-remind').checked;
     if (Native.isApp) {
-      var wantsRemind = $('set-remind').checked;
-      settings.remindDelayMin = parseInt($('set-remind-delay').value, 10) || 0;
-      // On demande l'autorisation système au moment où l'utilisateur active
-      // l'option, pas au premier lancement : le motif est alors évident.
-      if (wantsRemind && !settings.remindEnabled) {
-        Native.notify.permission().then(function (ok) {
-          settings.remindEnabled = ok;
-          Storage.saveSettings(settings);
-          if (!ok) toast('Notifications refusées : active-les dans les réglages Android.');
-        });
-      }
-      settings.remindEnabled = wantsRemind;
+      nextSettings.remindDelayMin = parseInt($('set-remind-delay').value, 10) || 0;
     }
 
-    Storage.saveSettings(settings);
-    $('settings-modal').hidden = true;
-    updateCompareToggle();
-    toast('Réglages enregistrés.');
+    var permission = (wantsRemind && !hadRemind)
+      ? Native.notify.permission()
+      : Promise.resolve(wantsRemind);
+    var saveBtn = $('save-settings');
+    saveBtn.disabled = true;
+    permission.then(function (allowed) {
+      nextSettings.remindEnabled = wantsRemind && !!allowed;
+      if (wantsRemind && !allowed) {
+        toast('Notifications refusées : active-les dans les réglages Android.');
+      }
+      return Storage.saveSettings(nextSettings);
+    }).then(function (savedSettings) {
+      if (!savedSettings) throw new Error('Le téléphone a refusé d’enregistrer les réglages.');
+      settings = savedSettings;
+      $('settings-modal').hidden = true;
+      updateCompareToggle();
+      var depthBtn = $('btn-depth');
+      if (depthBtn) depthBtn.hidden = !(depthSupported && settings.experimentalDepth);
+      toast('Réglages enregistrés.');
+    }).catch(function (e) {
+      toast('Réglages non enregistrés : ' + ((e && e.message) || 'erreur de stockage'));
+    }).then(function () { saveBtn.disabled = false; });
   }
 
   // En mode « sur demande », affiche une seule case près de l'action principale.
@@ -3498,7 +4082,12 @@
     btn.onclick = function () {
       btn.disabled = true;
       btn.textContent = 'Mise à jour…';
-      apply();
+      Promise.resolve().then(apply).catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = 'Actualiser';
+        setUpdateStatus('❌ Mise à jour non appliquée : ' +
+          escapeHtml((err && err.message) || 'erreur inconnue') + '.', 'warn');
+      });
     };
   }
 
@@ -3506,34 +4095,34 @@
      Sans ça, chaque version imposerait de retélécharger et réinstaller l'APK.
      Seul un changement de plugin NATIF impose encore un nouvel APK. */
   var OTA_MANIFEST =
-    'https://github.com/rachid598/Diab-te/releases/download/ota-stable/latest.json';
+    'https://github.com/rachid598/Diab-te/releases/download/ota-codex/latest.json';
+  var APK_DOWNLOAD =
+    'https://github.com/rachid598/Diab-te/releases/download/apk-codex/glucovision.apk';
+
+  function showApkRequired(info, installedBuild) {
+    var el = $('native-outdated');
+    if (!el) return;
+    el.hidden = false;
+    el.innerHTML = '⚠️ <strong>Nouvel APK nécessaire</strong> — la version ' +
+      escapeHtml(String((info && info.appVersion) || '')) + ' exige le build ' +
+      escapeHtml(String((info && info.minNativeBuild) || '')) + ', tu as le ' +
+      escapeHtml(String(installedBuild || 0)) + '. ' +
+      '<a href="' + APK_DOWNLOAD + '">Télécharger l\'APK codex signé</a>.';
+  }
 
   function initNativeUpdate() {
     if (!Native.isApp) return;
     var run = function () {
-      Native.update.check(OTA_MANIFEST, APP_VERSION).then(function (info) {
-        /* Un bundle qui exige un natif plus récent que l'APK installé ne doit
-           pas s'appliquer : il afficherait sa version tout en s'exécutant sur
-           un Java qui ne sait pas la servir. */
-        if (info && info.minNativeBuild && nativeBuild != null &&
-            nativeBuild < parseInt(info.minNativeBuild, 10)) {
-          var el = $('native-outdated');
-          if (el) {
-            el.hidden = false;
-            el.innerHTML = '⚠️ <strong>Mise à jour bloquée</strong> — la version ' +
-              (info.appVersion || '') + ' exige l\'APK ' + info.minNativeBuild +
-              ', tu as le ' + nativeBuild + '. ' +
-              '<a href="https://github.com/rachid598/Diab-te/releases/download/apk-stable/glucovision.apk">' +
-              'Réinstalle l\'APK</a> pour l\'obtenir.';
-          }
+      Native.update.check(OTA_MANIFEST, APP_VERSION).then(function (status) {
+        if (!status) return null;
+        if (status.kind === 'apk-required') {
+          showApkRequired(status.info, status.nativeBuild);
           return null;
         }
-        return info;
-      }).then(function (info) {
-        if (!info) return null;
-        return Native.update.download(info);
+        if (status.kind !== 'available') return null;
+        return Native.update.download(status);
       }).then(function (bundle) {
-        if (bundle) showUpdate(function () { Native.update.apply(bundle); });
+        if (bundle) showUpdate(function () { return Native.update.apply(bundle); });
       }).catch(function () { /* hors ligne : on retentera */ });
     };
     run();
@@ -3561,11 +4150,14 @@
      par opposition à ce que le cache du navigateur veut bien montrer. */
   function fetchPublishedVersion() {
     if (Native.isApp) {
-      return Native.httpJson(OTA_MANIFEST + '?t=' + Date.now(), 10000)
-        .then(function (res) {
-          var info = res && res.data;
-          if (!info || !info.appVersion) throw new Error('Manifeste illisible.');
-          return { version: String(info.appVersion), info: info };
+      /* currentVersion=0 demande le manifeste validé même si l'app est déjà à
+         jour ; le bouton manuel peut ainsi distinguer « à jour » de « APK natif
+         trop ancien » sans dupliquer le validateur de native.js. */
+      return Native.update.check(OTA_MANIFEST, 0)
+        .then(function (status) {
+          if (!status || !status.info) throw new Error('Manifeste illisible.');
+          return { version: String(status.info.appVersion), info: status.info,
+                   nativeStatus: status };
         });
     }
     return fetch('js/app.js?maj=' + Date.now(), { cache: 'no-store' })
@@ -3622,6 +4214,14 @@
         var local = parseInt(APP_VERSION, 10);
         var online = parseInt(pub.version, 10);
 
+        if (Native.isApp && pub.nativeStatus && pub.nativeStatus.kind === 'apk-required') {
+          btn.disabled = false;
+          showApkRequired(pub.nativeStatus.info, pub.nativeStatus.nativeBuild);
+          setUpdateStatus('⚠️ La version ' + pub.version +
+            ' nécessite un nouvel APK signé ; une actualisation du contenu ne suffit pas.', 'warn');
+          return;
+        }
+
         if (online <= local) {
           setUpdateStatus('✅ Tu es à jour — version ' + APP_VERSION +
             ', et c\'est bien la dernière publiée.', 'ok');
@@ -3641,7 +4241,7 @@
               return;
             }
             setUpdateStatus('✅ Version ' + pub.version + ' prête.', 'ok');
-            showUpdate(function () { Native.update.apply(bundle); });
+            showUpdate(function () { return Native.update.apply(bundle); });
           });
         }
 
@@ -3742,8 +4342,7 @@
       el.innerHTML = '⚠️ <strong>Application Android trop ancienne</strong> — build ' + build +
         ', minimum requis ' + MIN_NATIVE_BUILD + '. Le contenu web s\'est mis à jour, ' +
         'mais le code natif non : certaines fonctions sont indisponibles. ' +
-        '<a href="https://github.com/rachid598/Diab-te/releases/download/apk-stable/glucovision.apk">' +
-        'Réinstalle l\'APK</a>.';
+        '<a href="' + APK_DOWNLOAD + '">Réinstalle l\'APK codex signé</a>.';
     });
   }
 
@@ -3759,6 +4358,7 @@
     initPhotos();
     initModeSwitch();
     initExtras();
+    initDepth();
     initEstimate();
     initManual();
     initHistory();
@@ -3775,6 +4375,11 @@
     /* En dernier : si une comparaison n'avait pas été tranchée, on la remet à
        l'écran. Après tout le reste, pour ne pas être écrasée par un rendu. */
     restaurerEnCours();
+    if (Native.markReady) {
+      Native.markReady().catch(function () {
+        toast('La mise à jour n’a pas pu être validée ; l’APK gardera la version précédente.');
+      });
+    }
   }
 
   /* On attend que le pont natif soit prêt AVANT le premier rendu : les clés API

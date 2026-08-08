@@ -17,7 +17,7 @@ application Android.
 | | |
 |---|---|
 | **Web (PWA)** | **[rachid598.github.io/Diab-te](https://rachid598.github.io/Diab-te/)** — installable depuis le navigateur |
-| **Android (APK)** | **[glucovision.apk](https://github.com/rachid598/Diab-te/releases/download/apk-latest/glucovision.apk)** — lien permanent, toujours le dernier build |
+| **Android (APK de test ARCore)** | **[glucovision.apk](https://github.com/rachid598/Diab-te/releases/download/apk-codex/glucovision.apk)** — canal `codex`, signé comme l'application existante |
 
 L'APK se met à jour **tout seul** : il vérifie au lancement s'il existe une version plus
 récente du contenu web, la télécharge et propose « Actualiser ». Une réinstallation n'est
@@ -28,11 +28,16 @@ nécessaire que si une capacité **native** est ajoutée. Un bouton
 
 ## Trois façons d'estimer
 
-**📷 Photo** — une à six vues du repas. Un **objet-repère de taille connue** posé à côté de
-l'assiette (par défaut la pompe MiniMed 780G, 96,8 × 53,6 × 24,9 mm) permet au modèle de
-calibrer l'échelle et de *mesurer* les portions au lieu de les deviner. Les trois dimensions
-sont données, pas seulement deux : posée à plat, la pompe est aussi la seule **règle
-verticale** de l'image, et la hauteur est justement ce qu'une photo de dessus ne montre pas.
+**📷 Photo** — une à six vues du repas. Aucun repère n'est sélectionné par défaut. Un
+**objet-repère de taille connue** peut être posé à côté de l'assiette, mais il ne réduit pas
+à lui seul la fourchette d'incertitude : le modèle doit d'abord déclarer qu'il l'a réellement
+retrouvé, et l'échelle reste une aide visuelle, pas une mesure certifiée.
+
+Dans l'APK Android compatible, le bouton optionnel **Photo mesurée** utilise ARCore Depth
+après un balayage du téléphone. Il transmet au modèle l'échelle métrique du champ
+photographié seulement si plusieurs observations fraîches et stables concordent. Le relief
+et le volume restent expérimentaux et ne sont jamais convertis directement en masse ou en
+glucides.
 
 **✍️ Description** — aucune photo : tu écris ce que tu manges. Le modèle interprète les
 portions courantes françaises. La marge d'erreur est structurellement plus large, et l'app
@@ -47,7 +52,8 @@ repas fréquents enregistrés. Fonctionne sans réseau et sans clé API.
 La difficulté n'est pas de reconnaître l'aliment, c'est d'**estimer la portion**. La méthode
 est imposée au modèle comme consigne :
 
-1. **Calibrer l'échelle** sur l'objet-repère, puis mesurer chaque aliment en centimètres.
+1. **Chercher une échelle exploitable** (repère visible ou mesure ARCore acceptée), sinon
+   annoncer honnêtement que la portion reste estimée à vue.
 2. **Croiser les angles** pour la hauteur, invisible sur une vue de dessus seule.
 3. **Volume → masse** via la densité et la consistance (riz aéré ou tassé, mie dense, friture).
 4. **Masse × densité glucidique**, sans oublier les glucides cachés (sauces, panure, sucre).
@@ -68,9 +74,10 @@ vue, au moment où l'on peut encore agir.
 l'objet-repère. Sinon la marge d'erreur reste large et un bandeau le signale — plutôt
 qu'une fausse précision affichée au moment exact où une dose se calcule.
 
-**Contrôle de vraisemblance.** Recoupement arithmétique local de chaque aliment : densité
-hors bornes, glucides incohérents avec masse × densité, glucides supérieurs au poids de
-l'aliment, total absurde. Aucun appel réseau, aucun coût.
+**Contrôle de vraisemblance.** Le total brut, sa fourchette et la somme des aliments sont
+validés avant affichage. Une réponse incohérente ou supérieure à 400 g est bloquée au lieu
+d'être proposée. La fourchette affichée vient des erreurs observées au banc d'essai, pas de
+la confiance que le modèle s'attribue. Aucun appel réseau, aucun coût.
 
 **Vérification croisée, aliment par aliment.** Un second modèle estime le même repas en
 parallèle. L'app compare les totaux **et le contenu** : deux modèles peuvent tomber sur
@@ -179,6 +186,8 @@ L'APK n'est pas qu'un habillage : il lève des limites réelles du navigateur.
 - **File d'attente hors-ligne** — au restaurant sans réseau, le repas est gardé et analysé
   au retour de la connexion.
 - **Raccourcis** — appui long sur l'icône pour ouvrir directement l'appareil photo.
+- **ARCore Depth expérimental** — échelle métrique acceptée uniquement avec profondeur
+  fraîche, confiance suffisante, déplacement réel et plusieurs observations concordantes.
 
 ## Suivi de la consommation
 
@@ -192,14 +201,16 @@ Tout reste sur l'appareil : réglages, historique, photos, aliments personnalis�
 ne partent que vers le fournisseur d'IA choisi, le temps de l'estimation. Aucun compte,
 aucune télémétrie, aucun serveur intermédiaire.
 
-⚠️ L'**export de sauvegarde contient les clés API** en clair, pour qu'une restauration soit
-immédiate lors d'un changement d'appareil. Le fichier est nommé
-`glucovision-sauvegarde-PRIVEE-<date>.json` : il ne doit pas être partagé.
+L'**export de sauvegarde exclut toujours les clés API**. Sur Android, elles restent dans le
+Keystore du téléphone ; après un changement d'appareil, il faut donc les renseigner de
+nouveau. L'historique reste personnel et peut contenir des informations de santé : garde
+quand même le fichier de sauvegarde dans un emplacement privé.
 
 ## Développement
 
 ```bash
-npm install                       # dépendances Capacitor + esbuild
+npm ci                            # dépendances Capacitor + esbuild verrouillées
+npm test                          # garde-fous JS, stockage et géométrie ARCore
 npx http-server -p 8080           # servir en local ; aucune étape de build pour le web
 bash scripts/build-plugins.sh     # après un changement de version de plugin Capacitor
 bash scripts/build-www.sh         # prépare www/ pour l'APK
@@ -208,7 +219,9 @@ node scripts/render-icons.mjs     # régénère les PNG d'icônes depuis icons/*
 
 JavaScript sans dépendance à l'exécution (modules IIFE exposant des globales), aucun
 transpileur, aucun framework. L'APK est produit par GitHub Actions (Capacitor 8, Node 22) :
-l'APK est publié sous le tag `apk-latest`, le bundle de mise à jour sous `ota-latest`.
+sur la branche `codex`, l'APK est publié sous `apk-codex` et le manifeste web sous
+`ota-codex`. Chaque archive OTA versionnée (`ota-v73`, etc.) est immuable et vérifiée par
+SHA-256 avant installation.
 
 | Fichier | Rôle |
 |---|---|

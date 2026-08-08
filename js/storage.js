@@ -156,6 +156,7 @@
     roundHalf: true,     // arrondir les parts au 0,5
     remindEnabled: false, // rappel de contrôle après repas (APK uniquement)
     remindDelayMin: 0,    // 0 = délai calé sur la vitesse d'absorption estimée
+    experimentalDepth: false, // échelle ARCore expérimentale, opt-in explicite
     /* Vérification croisée automatique. Un 2ᵉ modèle bon marché tourne en
        parallèle à chaque estimation ; on n'alerte que si l'écart dépasse le
        seuil. C'est le seul garde-fou capable de rattraper une erreur grossière
@@ -209,6 +210,10 @@
      l'appel. La lecture chiffrée, elle, n'a lieu qu'une fois, avant le premier
      rendu (voir Storage.hydrate). */
   var secureKeys = null;
+  /* Sur l'APK, aucun enregistrement de réglages ne doit être possible avant
+     une lecture réussie du Keystore. Sinon une erreur biométrique/système au
+     démarrage pourrait être confondue avec quatre clés absentes et les effacer. */
+  var secureReady = !native;
 
   // Limite d'historique. Sur l'APK les photos sont des fichiers, pas du base64
   // dans localStorage : on peut garder beaucoup plus de repas.
@@ -254,6 +259,120 @@
     return (best && byCat[best] > 0) ? best : null;
   }
 
+  function isConfirmedMeal(e) {
+    return !!e && e.draft !== true && e.confirmed !== false && e.blocked !== true &&
+      !(e.blocking && e.blocking.length) && finite(e.totalCarbsG) > 0 &&
+      finite(e.totalCarbsG) <= 400 &&
+      !(e.dominantRequired === true && e.dominantConfirmed !== true);
+  }
+
+  var BIAS_MIN_RATIO = 0.5;
+  var BIAS_MAX_RATIO = 1.5;
+  function robustRatio(raw) {
+    if (!raw.length) return { count: 0, meanRatio: 1, medianRatio: 1, pct: 0 };
+    var ratios = raw.map(function (r) {
+      return Math.max(BIAS_MIN_RATIO, Math.min(BIAS_MAX_RATIO, r));
+    }).sort(function (a, b) { return a - b; });
+    var mid = Math.floor(ratios.length / 2);
+    var median = ratios.length % 2 ? ratios[mid] : (ratios[mid - 1] + ratios[mid]) / 2;
+    return {
+      count: ratios.length,
+      // Nom historique conservé pour les appelants existants ; la statistique
+      // est désormais la médiane bornée, robuste aux corrections aberrantes.
+      meanRatio: median,
+      medianRatio: median,
+      pct: Math.round((median - 1) * 100)
+    };
+  }
+
+  var FOOD_STOP = {
+    de: 1, du: 1, des: 1, la: 1, le: 1, les: 1, un: 1, une: 1, au: 1, aux: 1,
+    et: 1, avec: 1, sans: 1, dans: 1, portion: 1, part: 1, tranche: 1, morceaux: 1,
+    morceau: 1, demi: 1, demie: 1, entier: 1, entiere: 1, petit: 1, petite: 1,
+    grand: 1, grande: 1, maison: 1, frais: 1, fraiche: 1, cuit: 1, cuite: 1,
+    grille: 1, grillee: 1, roti: 1, rotie: 1, vapeur: 1, blanc: 1, blanche: 1,
+    complet: 1, complete: 1, long: 1, grain: 1, nature: 1, sauce: 1,
+    assiette: 1, bol: 1, verre: 1, tasse: 1, environ: 1, filet: 1, pave: 1,
+    basmati: 1
+  };
+  var FOOD_ALIASES = {
+    patate: 'pomme_de_terre', patates: 'pomme_de_terre',
+    potato: 'pomme_de_terre', potatoes: 'pomme_de_terre',
+    frites: 'pomme_de_terre', frite: 'pomme_de_terre',
+    pommes: 'pomme', apples: 'pomme', apple: 'pomme',
+    pates: 'pate', pasta: 'pate', spaghettis: 'pate', spaghetti: 'pate',
+    riz: 'riz', rice: 'riz', baguettes: 'baguette', pains: 'pain',
+    bananes: 'banane', oranges: 'orange', tomates: 'tomate',
+    poulets: 'poulet', chicken: 'poulet', saumons: 'saumon', salmon: 'saumon',
+    yaourts: 'yaourt', yogourt: 'yaourt', yogourts: 'yaourt',
+    oeufs: 'oeuf', eggs: 'oeuf', lentilles: 'lentille'
+  };
+
+  function normalizeFoodText(value) {
+    var s = (value || '').toString().toLowerCase()
+      .replace(/œ/g, 'oe').replace(/æ/g, 'ae');
+    if (s.normalize) s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return s.replace(/\bpommes?\s+de\s+terre\b/g, ' pomme_de_terre ')
+      .replace(/\bpois\s+chiches?\b/g, ' pois_chiche ')
+      .replace(/\bharicots?\s+verts?\b/g, ' haricot_vert ')
+      .replace(/[^a-z0-9_]+/g, ' ').trim();
+  }
+
+  function foodKey(value) {
+    var tokens = normalizeFoodText(value).split(/\s+/).filter(Boolean).map(function (token) {
+      if (FOOD_STOP[token]) return '';
+      if (FOOD_ALIASES[token]) return FOOD_ALIASES[token];
+      if (token.length > 5 && /s$/.test(token) && !/pois|mais/.test(token)) token = token.slice(0, -1);
+      if (FOOD_STOP[token]) return '';
+      if (FOOD_ALIASES[token]) return FOOD_ALIASES[token];
+      return token.length >= 3 ? token : '';
+    }).filter(Boolean);
+    var unique = {};
+    tokens.forEach(function (token) { unique[token] = true; });
+    return Object.keys(unique).sort().join('|');
+  }
+
+  function sameFood(a, b) {
+    var ka = foodKey(typeof a === 'string' ? a : a && a.name);
+    var kb = foodKey(typeof b === 'string' ? b : b && b.name);
+    return !!ka && ka === kb;
+  }
+
+  /* Appariement un-à-un : un même « riz » ne peut pas valider deux lignes et
+     les non-appariés restent visibles pour la comparaison des avis. */
+  function matchFoods(a, b) {
+    var left = (Array.isArray(a) ? a : []).map(function (it, index) {
+      return { item: it, index: index };
+    }).filter(function (x) { return x.item && x.item.carbsG > 0; });
+    var right = (Array.isArray(b) ? b : []).map(function (it, index) {
+      return { item: it, index: index };
+    }).filter(function (x) { return x.item && x.item.carbsG > 0; });
+    var used = {};
+    var pairs = [];
+    var onlyA = [];
+    left.forEach(function (leftEntry) {
+      var found = -1;
+      for (var j = 0; j < right.length; j++) {
+        if (!used[j] && sameFood(leftEntry.item, right[j].item)) { found = j; break; }
+      }
+      if (found < 0) onlyA.push(leftEntry.item);
+      else {
+        used[found] = true;
+        pairs.push({ aIndex: leftEntry.index, bIndex: right[found].index,
+          a: leftEntry.item, b: right[found].item });
+      }
+    });
+    var onlyB = right.filter(function (_, index) { return !used[index]; })
+      .map(function (entry) { return entry.item; });
+    return {
+      pairs: pairs,
+      onlyA: onlyA,
+      onlyB: onlyB,
+      coverageA: left.length ? pairs.length / left.length : 0,
+      coverageB: right.length ? pairs.length / right.length : 0
+    };
+  }
+
   function read(key, fallback) {
     try {
       var raw = localStorage.getItem(key);
@@ -267,12 +386,141 @@
     catch (e) { return false; }
   }
 
+  function isObject(v) {
+    return !!v && Object.prototype.toString.call(v) === '[object Object]';
+  }
+  function finite(v) {
+    return typeof v === 'number' && isFinite(v) ? v : null;
+  }
+  function bounded(v, min, max, fallback) {
+    v = finite(v);
+    return v == null ? fallback : Math.max(min, Math.min(max, v));
+  }
+  function cleanProvider(v, fallback, allowEmpty) {
+    if (allowEmpty && v === '') return '';
+    return PROVIDERS.indexOf(v) !== -1 ? v : fallback;
+  }
+  function cleanModel(v, fallback) {
+    return typeof v === 'string' && /^[a-zA-Z0-9._:/-]{1,120}$/.test(v) ? v : fallback;
+  }
+  function cleanKey(v) {
+    return typeof v === 'string' ? v.trim().slice(0, 2048) : '';
+  }
+
+  /* Ne conserve que les réglages connus. En plus d'éviter les types impossibles
+     dans l'UI, cette copie explicite empêche qu'un import contenant __proto__ ou
+     des objets arbitraires ne contamine les objets utilisés par l'application. */
+  function sanitizeSettings(raw) {
+    raw = isObject(raw) ? raw : {};
+    var out = Object.assign({}, DEFAULT_SETTINGS);
+    out.provider = cleanProvider(raw.provider, DEFAULT_SETTINGS.provider, false);
+    out.fallbackProvider = cleanProvider(raw.fallbackProvider,
+      DEFAULT_SETTINGS.fallbackProvider, true);
+    out.compareProvider = cleanProvider(raw.compareProvider, '', true);
+    out.verifyProvider = cleanProvider(raw.verifyProvider,
+      DEFAULT_SETTINGS.verifyProvider, true);
+    out.doubtProvider = cleanProvider(raw.doubtProvider,
+      DEFAULT_SETTINGS.doubtProvider, true);
+
+    var rawModels = isObject(raw.models) ? raw.models : {};
+    out.models = {};
+    PROVIDERS.forEach(function (p) {
+      out.models[p] = cleanModel(rawModels[p], DEFAULT_MODELS[p]);
+    });
+    out.doubtModel = cleanModel(raw.doubtModel, DEFAULT_SETTINGS.doubtModel);
+
+    var rawKeys = isObject(raw.apiKeys) ? raw.apiKeys : {};
+    out.apiKeys = {};
+    PROVIDERS.forEach(function (p) { out.apiKeys[p] = cleanKey(rawKeys[p]); });
+
+    out.partSizeG = bounded(raw.partSizeG, 1, 100, DEFAULT_SETTINGS.partSizeG);
+    out.roundHalf = raw.roundHalf == null ? DEFAULT_SETTINGS.roundHalf : raw.roundHalf === true;
+    out.remindEnabled = raw.remindEnabled === true;
+    out.remindDelayMin = bounded(raw.remindDelayMin, 0, 1440, DEFAULT_SETTINGS.remindDelayMin);
+    out.experimentalDepth = raw.experimentalDepth === true;
+    out.verificationMode = /^(off|ask|auto)$/.test(raw.verificationMode || '')
+      ? raw.verificationMode : DEFAULT_SETTINGS.verificationMode;
+    out.verifyEnabled = raw.verifyEnabled === true;
+    out.verifyThresholdPct = bounded(raw.verifyThresholdPct, 1, 100,
+      DEFAULT_SETTINGS.verifyThresholdPct);
+    out.mergeVerification = raw.mergeVerification === true && out.verificationMode === 'auto';
+    out.rolesV66 = raw.rolesV66 === true;
+    return out;
+  }
+
+  function safeClone(value, depth) {
+    depth = depth || 0;
+    if (depth > 10) return null;
+    if (value == null || typeof value === 'boolean') return value;
+    if (typeof value === 'number') return isFinite(value) ? value : null;
+    if (typeof value === 'string') return value.slice(0, 5 * 1024 * 1024);
+    if (Array.isArray(value)) {
+      return value.slice(0, 2000).map(function (v) { return safeClone(v, depth + 1); });
+    }
+    if (!isObject(value)) return null;
+    var out = {};
+    Object.keys(value).slice(0, 250).forEach(function (key) {
+      if (key === '__proto__' || key === 'prototype' || key === 'constructor') return;
+      out[key] = safeClone(value[key], depth + 1);
+    });
+    return out;
+  }
+
+  /* Une fusion sauvegardée est redondante exprès : le total affiché, ses deux
+     sources, le snapshot et le second avis doivent tous raconter la même
+     histoire. Cette fonction pure permet de vérifier cette cohérence avant de
+     réafficher une moyenne après un redémarrage. */
+  function validateStoredMerge(entry, snapshot, result, verification) {
+    if (!isObject(entry) || !isObject(snapshot) || !isObject(result) ||
+        !isObject(verification) || verification.ok !== true ||
+        !Array.isArray(entry.mergedFrom) || entry.mergedFrom.length !== 2) return null;
+    var primary = finite(entry.mergedFrom[0]);
+    var verify = finite(entry.mergedFrom[1]);
+    var snapshotMerged = finite(snapshot.mergedTotalCarbsG);
+    var snapshotVerify = finite(snapshot.verifyTotalCarbsG);
+    var entryTotal = finite(entry.totalCarbsG);
+    var resultTotal = finite(result.totalCarbsG);
+    var verificationTotal = finite(verification.total);
+    var numbers = [primary, verify, snapshotMerged, snapshotVerify,
+                   entryTotal, resultTotal, verificationTotal];
+    if (numbers.some(function (n) { return n == null || n !== Math.round(n); }) ||
+        !(primary > 0 && primary <= 400 && verify > 0 && verify <= 400)) return null;
+    var merged = Math.round((primary + verify) / 2);
+    if (resultTotal !== primary || snapshotMerged !== merged || snapshotVerify !== verify ||
+        entryTotal !== merged || verificationTotal !== verify) return null;
+    return { primaryTotal: primary, verifyTotal: verify, mergedTotal: merged };
+  }
+
+  function sanitizeHistoryList(value) {
+    if (!Array.isArray(value)) return [];
+    return value.slice(0, MAX_HISTORY).map(function (raw) {
+      if (!isObject(raw)) return null;
+      var e = safeClone(raw);
+      var date = finite(e.date);
+      if (!(date > 0)) return null;
+      e.date = date;
+      if (e.totalCarbsG != null) e.totalCarbsG = finite(e.totalCarbsG);
+      if (e.realCarbsG != null) e.realCarbsG = finite(e.realCarbsG);
+      if (!Array.isArray(e.items)) e.items = [];
+      else e.items = e.items.slice(0, 80).filter(isObject);
+      e.blocked = e.blocked === true || !!(e.blocking && e.blocking.length);
+      if (e.draft != null) e.draft = e.draft === true;
+      if (e.dominantRequired != null) e.dominantRequired = e.dominantRequired === true;
+      if (e.dominantConfirmed != null) e.dominantConfirmed = e.dominantConfirmed === true;
+      if (!isObject(e.resultSnapshot)) delete e.resultSnapshot;
+      if (!isObject(e.input)) delete e.input;
+      if (!isObject(e.verification)) delete e.verification;
+      return e;
+    }).filter(Boolean);
+  }
+
   /* Écriture de l'historique avec gestion du quota. Les vignettes de repas pèsent
      lourd : quand le navigateur refuse d'écrire, on abandonne les plus anciennes
      images (pas les données) et on réessaie, plutôt que de perdre l'enregistrement. */
   function writeHistory(h) {
+    h = sanitizeHistoryList(h);
     if (write(KEYS.history, h)) return h;
-    var trimmed = h.map(function (e) { return e; });
+    var trimmed = h.map(function (e) { return Object.assign({}, e); });
     for (var i = trimmed.length - 1; i >= 0; i--) {
       if (trimmed[i].thumb) {
         trimmed[i] = Object.assign({}, trimmed[i]);
@@ -285,7 +533,7 @@
       trimmed = trimmed.slice(0, Math.floor(trimmed.length / 2));
       if (write(KEYS.history, trimmed)) return trimmed;
     }
-    return trimmed;
+    return null;
   }
 
   var Storage = {
@@ -294,37 +542,70 @@
 
     PROVIDERS: PROVIDERS,
     categoryOf: categoryOf,
+    isConfirmedMeal: isConfirmedMeal,
+    validateStoredMerge: validateStoredMerge,
 
     /* Relit les clés API chiffrées et, au premier lancement de l'APK, y déplace
        celles qui étaient encore en clair dans localStorage. À appeler AVANT le
        premier rendu ; sur le web c'est un no-op immédiat. */
     hydrate: function () {
-      if (!native || !window.Native) return Promise.resolve(false);
-      return window.Native.secure.load(PROVIDERS).then(function (stored) {
-        var plain = (read(KEYS.settings, {}) || {}).apiKeys || {};
+      if (!native || !window.Native) {
+        secureReady = true;
+        return Promise.resolve(false);
+      }
+      secureReady = false;
+      return Promise.resolve().then(function () {
+        return window.Native.secure.load(PROVIDERS);
+      }).then(function (stored) {
+        stored = isObject(stored) ? stored : {};
+        var plainSettings = read(KEYS.settings, {}) || {};
+        var plain = isObject(plainSettings.apiKeys) ? plainSettings.apiKeys : {};
         var merged = {};
         var needsMigration = false;
+        var hasPlaintext = false;
         PROVIDERS.forEach(function (p) {
-          var fromSecure = (stored && stored[p]) || '';
-          merged[p] = fromSecure || plain[p] || '';
-          if (!fromSecure && plain[p]) needsMigration = true;
+          var fromSecure = cleanKey(stored[p]);
+          var fromPlain = cleanKey(plain[p]);
+          merged[p] = fromSecure || fromPlain;
+          if (!fromSecure && fromPlain) needsMigration = true;
+          if (fromPlain) hasPlaintext = true;
         });
-        secureKeys = merged;
-        if (needsMigration) {
-          // Migration : on chiffre, puis on efface la copie en clair.
-          return window.Native.secure.save(merged).then(function () {
+        if (hasPlaintext) {
+          /* Migration : on chiffre si nécessaire, puis on efface toujours la
+             copie en clair. Si une tentative précédente avait chiffré avant
+             d'échouer sur localStorage, le lancement suivant retente donc bien
+             le nettoyage au lieu de laisser le secret en clair indéfiniment. */
+          var secureWrite = needsMigration
+            ? Promise.resolve(window.Native.secure.save(merged))
+            : Promise.resolve(true);
+          return secureWrite.then(function (ok) {
+            if (ok === false) throw new Error('Keystore indisponible.');
             var s = read(KEYS.settings, {}) || {};
+            if (!isObject(s)) s = {};
             s.apiKeys = { claude: '', gemini: '', openai: '', openrouter: '' };
-            write(KEYS.settings, s);
+            if (!write(KEYS.settings, s)) {
+              throw new Error('Impossible d\'effacer la copie locale des clés API.');
+            }
+            secureKeys = merged;
+            secureReady = true;
             return true;
           });
         }
+        secureKeys = merged;
+        secureReady = true;
         return true;
-      }).catch(function () { return false; });
+      }).catch(function () {
+        // APK : si le Keystore est illisible, aucune ancienne clé en clair ne
+        // doit redevenir active par accident.
+        secureKeys = { claude: '', gemini: '', openai: '', openrouter: '' };
+        secureReady = false;
+        return false;
+      });
     },
 
     getSettings: function () {
-      var s = read(KEYS.settings, {}) || {};
+      var raw = read(KEYS.settings, {}) || {};
+      var s = isObject(raw) ? safeClone(raw) : {};
       var merged = Object.assign({}, DEFAULT_SETTINGS, s);
       // Objets complets (sans muter les valeurs par défaut).
       merged.apiKeys = Object.assign({}, DEFAULT_SETTINGS.apiKeys, s.apiKeys || {});
@@ -335,7 +616,7 @@
       // APK : les clés font autorité depuis le Keystore, pas depuis localStorage.
       if (secureKeys) {
         PROVIDERS.forEach(function (p) {
-          if (secureKeys[p]) merged.apiKeys[p] = secureKeys[p];
+          merged.apiKeys[p] = cleanKey(secureKeys[p]);
         });
       }
       // Remplace les modèles retirés par leur équivalent actuel.
@@ -380,7 +661,7 @@
         merged.doubtModel = DEFAULT_SETTINGS.doubtModel;
         merged.rolesV66 = true;
         var brut = read(KEYS.settings, {}) || {};
-        if (brut && typeof brut === 'object' && Object.keys(brut).length) {
+        if (isObject(brut) && Object.keys(brut).length) {
           brut.rolesV66 = true;
           brut.verificationMode = 'ask';
           brut.verifyProvider = 'openrouter';
@@ -395,23 +676,57 @@
       /* La fusion n'a de sens que si un second avis tourne à chaque estimation.
          En mode 'ask' ou 'off', il n'y a rien à moyenner. */
       merged.mergeVerification = !!merged.mergeVerification && merged.verificationMode === 'auto';
-      return merged;
+      return sanitizeSettings(merged);
     },
     saveSettings: function (s) {
+      var normalized = sanitizeSettings(s);
       if (native && window.Native) {
-        secureKeys = Object.assign({}, s.apiKeys || {});
-        window.Native.secure.save(secureKeys);
+        if (!secureReady) {
+          return Promise.reject(new Error(
+            'Keystore illisible : déverrouille le téléphone puis relance l’application avant d’enregistrer.'));
+        }
+        var nextKeys = Object.assign({}, normalized.apiKeys);
+        var previousKeys = secureKeys
+          ? Object.assign({}, secureKeys)
+          : { claude: '', gemini: '', openai: '', openrouter: '' };
         // Le blob localStorage ne garde aucune clé en clair sur l'APK.
-        var copy = Object.assign({}, s, {
+        var copy = Object.assign({}, normalized, {
           apiKeys: { claude: '', gemini: '', openai: '', openrouter: '' } });
-        write(KEYS.settings, copy);
-        return;
+        return Promise.resolve().then(function () {
+          return window.Native.secure.save(nextKeys);
+        }).then(function (ok) {
+          if (ok === false) throw new Error('Keystore indisponible.');
+          if (!write(KEYS.settings, copy)) {
+            throw new Error('Impossible d\'enregistrer les réglages locaux.');
+          }
+          secureKeys = nextKeys;
+          return normalized;
+        }).catch(function (err) {
+          // Promise.all peut rejeter après avoir déjà écrit une partie des
+          // fournisseurs : on restaure donc toujours le snapshot précédent,
+          // même si l'appel initial n'a jamais résolu avec succès.
+          return Promise.resolve().then(function () {
+            return window.Native.secure.save(previousKeys);
+          }).then(function (ok) {
+            if (ok === false) throw new Error('Restauration du Keystore refusée.');
+            secureKeys = previousKeys;
+            throw err;
+          }, function () {
+            secureKeys = { claude: '', gemini: '', openai: '', openrouter: '' };
+            secureReady = false;
+            throw new Error((err && err.message ? err.message : 'Échec des réglages') +
+              ' (et restauration du Keystore impossible).');
+          });
+        });
       }
-      write(KEYS.settings, s);
+      if (!write(KEYS.settings, normalized)) {
+        return Promise.reject(new Error('Impossible d\'enregistrer les réglages.'));
+      }
+      return Promise.resolve(normalized);
     },
 
     getHistory: function () {
-      return read(KEYS.history, []);
+      return sanitizeHistoryList(read(KEYS.history, []));
     },
     addHistory: function (entry) {
       return this.upsertHistory(entry);
@@ -432,7 +747,7 @@
         h.forEach(function (e, i) { if (i >= 40 && e.thumb) delete e.thumb; });
       }
       var saved = writeHistory(h);
-      if (native) this.prunePhotos(saved);
+      if (saved && native) this.prunePhotos(saved);
       return saved;
     },
     updateHistory: function (date, patch) {
@@ -443,31 +758,35 @@
         changed = true;
         return Object.assign({}, e, patch || {});
       });
-      if (!changed) return h;
+      if (!changed) return null;
       var saved = writeHistory(h);
-      if (native) this.prunePhotos(saved);
+      if (saved && native) this.prunePhotos(saved);
       return saved;
     },
     clearHistory: function () {
-      write(KEYS.history, []);
+      if (!write(KEYS.history, [])) return null;
       if (native) this.prunePhotos([]);
+      return [];
     },
     // Réécrit l'historique tel quel (utilisé pour retirer les images en masse).
     replaceHistory: function (h) {
-      return writeHistory(h || []);
+      var saved = writeHistory(h || []);
+      if (saved && native) this.prunePhotos(saved);
+      return saved;
     },
     deleteHistory: function (date) {
       var h = this.getHistory().filter(function (e) { return e.date !== date; });
-      write(KEYS.history, h);
-      if (native) this.prunePhotos(h);
-      return h;
+      var saved = writeHistory(h);
+      if (!saved) return null;
+      if (native) this.prunePhotos(saved);
+      return saved;
     },
 
     /* Supprime les fichiers image qu'aucune entrée ne référence plus. Se rattrape
        aussi toute seule si une écriture d'historique a échoué en cours de route. */
     prunePhotos: function (history) {
       if (!native || !window.Native) return Promise.resolve(0);
-      var keep = (history || this.getHistory())
+      var keep = (Array.isArray(history) ? history : this.getHistory())
         .map(function (e) { return e.photo; })
         .filter(Boolean);
       return window.Native.photos.prune(keep);
@@ -488,39 +807,41 @@
     // Une estimation personnelle ne sert pas d'arbitre : ni pour le biais, ni
     // pour le banc d'essai.
     isReliableReal: function (e) {
-      return !!e && e.realSource !== 'estimation';
+      return !!e && (!e.realSource || e.realSource === 'pesee' ||
+        e.realSource === 'etiquette' || e.realSource === 'recette');
     },
 
     setHistoryReal: function (date, realCarbsG, source) {
       var h = this.getHistory();
+      var changed = false;
       h.forEach(function (e) {
         if (e.date === date) {
+          changed = true;
           if (realCarbsG == null || realCarbsG === '') {
             delete e.realCarbsG;
             delete e.realSource;
           } else {
             e.realCarbsG = Math.max(0, Math.round(realCarbsG));
             e.realSource = source || e.realSource || 'estimation';
-            e.draft = false;
           }
         }
       });
+      if (!changed) return null;
       return writeHistory(h);
     },
     // Calcule le biais personnel : compare estimé vs réel sur les repas corrigés.
     // Renvoie { count, meanRatio, pct } (pct > 0 = tendance à SOUS-estimer).
     getBias: function () {
       var self = this;
-      var h = this.getHistory().filter(function (e) { return self.isReliableReal(e); });
+      var h = this.getHistory().filter(function (e) {
+        return isConfirmedMeal(e) && self.isReliableReal(e);
+      });
       var ratios = [];
       h.forEach(function (e) {
-        if (e.draft) return;
         var est = e.totalCarbsG, real = e.realCarbsG;
-        if (est > 0 && real != null && real > 0) ratios.push(real / est);
+        if (est > 0 && finite(real) > 0 && real <= 400) ratios.push(real / est);
       });
-      if (!ratios.length) return { count: 0, meanRatio: 1, pct: 0 };
-      var mean = ratios.reduce(function (s, r) { return s + r; }, 0) / ratios.length;
-      return { count: ratios.length, meanRatio: mean, pct: Math.round((mean - 1) * 100) };
+      return robustRatio(ratios);
     },
 
     /* Biais par catégorie d'aliment. La valeur réelle est saisie pour le REPAS
@@ -533,8 +854,8 @@
       var groups = {};
       var self = this;
       this.getHistory().forEach(function (e) {
-        if (e.draft) return;
-        if (!(e.totalCarbsG > 0) || e.realCarbsG == null || !(e.realCarbsG > 0)) return;
+        if (!isConfirmedMeal(e)) return;
+        if (finite(e.realCarbsG) == null || !(e.realCarbsG > 0) || e.realCarbsG > 400) return;
         if (!self.isReliableReal(e)) return;
         var cat = dominantCategory(e.items);
         if (!cat) return;
@@ -542,8 +863,9 @@
       });
       return Object.keys(groups).map(function (cat) {
         var r = groups[cat];
-        var mean = r.reduce(function (s, x) { return s + x; }, 0) / r.length;
-        return { category: cat, count: r.length, meanRatio: mean, pct: Math.round((mean - 1) * 100) };
+        var stat = robustRatio(r);
+        return { category: cat, count: stat.count, meanRatio: stat.meanRatio,
+          medianRatio: stat.medianRatio, pct: stat.pct };
       }).filter(function (g) {
         return g.count >= minMeals;
       }).sort(function (a, b) {
@@ -551,46 +873,36 @@
       });
     },
 
+    foodKey: foodKey,
+    sameFood: sameFood,
+    matchFoods: matchFoods,
+
     /* ----- Retrouver un repas déjà mangé -----
        Un repas passé dont la valeur RÉELLE a été relevée vaut mieux que
        n'importe quelle estimation : c'est une mesure, sur ce plat précis, avec
        tes portions habituelles. Le biais moyen, lui, mélange tous les repas.
 
-       Comparaison volontairement simple, et locale : recouvrement des mots des
-       noms d'aliments (indice de Jaccard) plus proximité du total. Pas
-       d'empreinte d'image ni d'appel réseau — on cherche « le même plat »,
-       pas « la même photo ». */
+       Comparaison locale et volontairement stricte : identité canonique des
+       aliments, appariement un-à-un et proximité du total. « Pomme » ne peut
+       donc plus correspondre à « pomme de terre », ni une ligne à deux lignes. */
     findSimilarMeal: function (items, totalCarbsG) {
-      var mots = function (list) {
-        var set = {};
-        (list || []).forEach(function (it) {
-          if (!(it.carbsG > 0)) return;   // un aliment sans glucides ne caractérise pas le plat
-          (it.name || '').toLowerCase()
-            .replace(/[^a-zà-ÿ ]/g, ' ')
-            .split(/\s+/)
-            .forEach(function (w) { if (w.length >= 4) set[w] = true; });
-        });
-        return Object.keys(set);
-      };
-
-      var ref = mots(items);
-      if (ref.length < 1 || !(totalCarbsG > 0)) return null;
+      var ref = (items || []).filter(function (it) { return it && it.carbsG > 0; });
+      if (!ref.length || !(finite(totalCarbsG) > 0) || totalCarbsG > 400) return null;
 
       var best = null;
+      var self = this;
       this.getHistory().forEach(function (e) {
-        if (!(e.realCarbsG > 0) || !(e.totalCarbsG > 0)) return;
-        var autres = mots(e.items);
-        if (!autres.length) return;
-        var communs = ref.filter(function (w) { return autres.indexOf(w) !== -1; }).length;
-        var union = ref.length + autres.length - communs;
-        var jaccard = union ? communs / union : 0;
+        if (!isConfirmedMeal(e) || !self.isReliableReal(e) ||
+            !(finite(e.realCarbsG) > 0) || e.realCarbsG > 400) return;
+        var match = matchFoods(ref, e.items);
+        if (!match.pairs.length || match.onlyA.length || match.onlyB.length) return;
         // Totaux trop éloignés : ce n'est pas la même assiette, même si les
         // aliments se ressemblent.
         var ecart = Math.abs(e.totalCarbsG - totalCarbsG) / totalCarbsG;
-        if (jaccard < 0.5 || ecart > 0.4) return;
-        var score = jaccard - ecart * 0.5;
+        if (ecart > 0.35) return;
+        var score = 1 - ecart;
         if (!best || score > best.score) {
-          best = { score: score, jaccard: jaccard, entry: e };
+          best = { score: score, entry: e };
         }
       });
       if (!best) return null;
@@ -657,17 +969,16 @@
     },
 
     // ----- Sauvegarde / restauration -----
-    /* L'export inclut les clés API : c'est ce qui rend une bascule PWA -> APK
-       (ou un changement de téléphone) réellement transparente. En contrepartie
-       le fichier contient des secrets facturables — il est marqué comme tel, et
-       l'app le signale au moment de l'export pour qu'on ne le partage pas. */
+    /* Les clés API ne sortent jamais de leur support de stockage. Une ancienne
+       sauvegarde qui en contenait peut encore être importée, mais tout nouvel
+       export est partageable sans secret facturable. */
     exportAll: function () {
       var out = {
         app: 'GlucoVision',
-        formatVersion: 2,
+        formatVersion: 3,
         exportedAt: new Date().toISOString(),
         containsApiKeys: false,
-        warning: 'Fichier personnel : il peut contenir tes clés API. Ne le partage pas.',
+        warning: 'Fichier personnel sans clés API : il contient ton historique de repas.',
         data: {}
       };
       Object.keys(KEYS).forEach(function (name) {
@@ -675,48 +986,89 @@
         try { raw = localStorage.getItem(KEYS[name]); } catch (e) {}
         if (raw != null) { try { out.data[name] = JSON.parse(raw); } catch (e) {} }
       });
-      /* Sur l'APK les clés ne sont plus dans le blob localStorage mais dans le
-         Keystore : on les réinjecte ici, sinon la sauvegarde partirait sans
-         elles et une restauration sur un autre appareil serait incomplète. */
       if (out.data.settings) {
-        out.data.settings.apiKeys = Object.assign({}, this.getSettings().apiKeys);
-      }
-      var keys = out.data.settings && out.data.settings.apiKeys;
-      if (keys) {
-        out.containsApiKeys = Object.keys(keys).some(function (k) { return !!keys[k]; });
+        out.data.settings = safeClone(out.data.settings);
+        delete out.data.settings.apiKeys;
+        delete out.data.settings.apiKey;
       }
       return out;
     },
     importAll: function (obj) {
-      if (!obj || obj.app !== 'GlucoVision' || !obj.data) {
-        throw new Error('Fichier non reconnu : ce n\'est pas une sauvegarde GlucoVision.');
+      if (!obj || obj.app !== 'GlucoVision' || !isObject(obj.data)) {
+        return Promise.reject(new Error('Fichier non reconnu : ce n\'est pas une sauvegarde GlucoVision.'));
       }
-      var restored = [];
+
+      var staged = {};
       Object.keys(KEYS).forEach(function (name) {
-        if (!(name in obj.data)) return;
+        if (!Object.prototype.hasOwnProperty.call(obj.data, name)) return;
         var value = obj.data[name];
-        /* Clés API : une sauvegarde faite sans clé (ou depuis un appareil où
-           l'une d'elles était vide) ne doit pas effacer celles déjà en place.
-           On ne remplace donc que les clés réellement renseignées dans le
-           fichier, et on conserve les autres. */
-        if (name === 'settings' && value) {
+        if (name === 'settings') {
+          var incoming = isObject(value) ? safeClone(value) : {};
           var current = Storage.getSettings();
-          var merged = Object.assign({}, current.apiKeys || {});
-          var incoming = value.apiKeys || {};
-          Object.keys(incoming).forEach(function (p) {
-            if (incoming[p]) merged[p] = incoming[p];
+          var keys = Object.assign({}, current.apiKeys);
+          var importedKeys = isObject(incoming.apiKeys) ? incoming.apiKeys : {};
+          PROVIDERS.forEach(function (p) {
+            var candidate = cleanKey(importedKeys[p]);
+            if (candidate) keys[p] = candidate;
           });
-          value = Object.assign({}, value, { apiKeys: merged });
-          // Sur l'APK, saveSettings redirige les clés vers le Keystore.
-          Storage.saveSettings(value);
-          restored.push(name);
-          return;
+          // Compatibilité des sauvegardes très anciennes à clé unique.
+          if (incoming.apiKey) {
+            var legacyProvider = cleanProvider(incoming.provider, current.provider, false);
+            keys[legacyProvider] = cleanKey(incoming.apiKey) || keys[legacyProvider];
+          }
+          incoming.apiKeys = keys;
+          delete incoming.apiKey;
+          staged[name] = sanitizeSettings(incoming);
+        } else if (name === 'history') {
+          staged[name] = sanitizeHistoryList(value);
+        } else if (name === 'disclaimer') {
+          staged[name] = value === true;
+        } else if (name === 'usage') {
+          staged[name] = isObject(value) ? safeClone(value) : {};
+        } else {
+          staged[name] = Array.isArray(value) ? safeClone(value).slice(0, 500) : [];
         }
-        write(KEYS[name], value);
-        restored.push(name);
       });
-      if (!restored.length) throw new Error('Sauvegarde vide : rien à restaurer.');
-      return restored;
+
+      var names = Object.keys(staged);
+      if (!names.length) return Promise.reject(new Error('Sauvegarde vide : rien à restaurer.'));
+
+      var snapshots = {};
+      names.forEach(function (name) {
+        try { snapshots[name] = localStorage.getItem(KEYS[name]); }
+        catch (e) { snapshots[name] = null; }
+      });
+      function rollbackLocal() {
+        names.forEach(function (name) {
+          try {
+            if (snapshots[name] == null) localStorage.removeItem(KEYS[name]);
+            else localStorage.setItem(KEYS[name], snapshots[name]);
+          } catch (e) {}
+        });
+      }
+
+      var restored = [];
+      try {
+        names.forEach(function (name) {
+          if (name === 'settings') return;
+          if (!write(KEYS[name], staged[name])) {
+            throw new Error('Restauration interrompue : impossible d\'écrire « ' + name + ' ».');
+          }
+          restored.push(name);
+        });
+      } catch (err) {
+        rollbackLocal();
+        return Promise.reject(err);
+      }
+
+      if (!staged.settings) return Promise.resolve(restored);
+      return Storage.saveSettings(staged.settings).then(function () {
+        restored.push('settings');
+        return restored;
+      }).catch(function (err) {
+        rollbackLocal();
+        throw err;
+      });
     },
 
     // ----- Aliments récents (mode manuel) -----

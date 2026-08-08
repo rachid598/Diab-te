@@ -29,8 +29,13 @@
   function cases(limit) {
     var out = [];
     (Storage.getHistory() || []).forEach(function (e) {
+      if (Storage.isConfirmedMeal ? !Storage.isConfirmedMeal(e)
+          : (e.draft || e.blocked || (e.blocking && e.blocking.length) ||
+             (e.dominantRequired && !e.dominantConfirmed))) return;
       if (!(e.realCarbsG > 0) || !(e.totalCarbsG > 0)) return;
-      if (e.realSource && !SOURCES_FIABLES[e.realSource]) return;
+      if (Storage.isReliableReal ? !Storage.isReliableReal(e)
+          : (e.realSource && !SOURCES_FIABLES[e.realSource])) return;
+      if (e.realCarbsG > 400 || e.totalCarbsG > 400) return;
       var img = (e.photo && window.Native && Native.isApp) ? Native.photos.src(e.photo)
               : (e.thumb || null);
       if (!img) return;
@@ -38,7 +43,7 @@
         date: e.date, real: e.realCarbsG, previous: e.totalCarbsG,
         img: img, isThumb: !e.photo,
         // Le contexte d'origine, pour rejouer dans les mêmes conditions.
-        ctx: e.ctx || null,
+        ctx: e.input || e.ctx || null,
         names: (e.items || []).filter(function (it) { return it.carbsG > 0; })
                  .map(function (it) { return it.name; }).slice(0, 3)
       });
@@ -88,11 +93,16 @@
             referenceObject: ctx.referenceObject || 'none',
             plateDiameterCm: ctx.plateDiameterCm || null,
             notes: ctx.notes || '',
-            extras: '',
+            extras: ctx.extras || '',
+            depth: ctx.depth || null,
             imageCount: imgs.length
           }, forced);
         })
         .then(function (r) {
+          if (!r || (r.blocking && r.blocking.length) || !(r.totalCarbsG > 0) ||
+              r.totalCarbsG > 400) {
+            throw new Error('Résultat bloqué ou total invalide.');
+          }
           results.push({ date: c.date, real: c.real, got: r.totalCarbsG,
                          err: Math.abs(r.totalCarbsG - c.real) });
         })

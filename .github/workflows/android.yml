@@ -1,16 +1,17 @@
 name: Build APK Android
 
-# Déclenchement manuel depuis l'onglet Actions, ou automatique quand le code
-# de l'app change sur la branche de développement.
 on:
   workflow_dispatch:
-  push:
+  pull_request:
     branches:
-      - claude/meal-carb-estimator-app-twxpqp
+      - codex
       - sans-relief
       - avec-relief
+      - claude/meal-carb-estimator-app-twxpqp
     paths:
+      - 'README.md'
       - 'index.html'
+      - 'service-worker.js'
       - 'css/**'
       - 'js/**'
       - 'src/**'
@@ -19,128 +20,188 @@ on:
       - 'manifest.webmanifest'
       - 'capacitor.config.json'
       - 'package.json'
+      - 'package-lock.json'
+      - 'android-src/**'
+      - 'native-tests/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'signing/**'
+      - '.github/workflows/android.yml'
+  push:
+    branches:
+      - codex
+      - sans-relief
+      - avec-relief
+      - claude/meal-carb-estimator-app-twxpqp
+    paths:
+      - 'README.md'
+      - 'index.html'
+      - 'service-worker.js'
+      - 'css/**'
+      - 'js/**'
+      - 'src/**'
+      - 'vendor/**'
+      - 'icons/**'
+      - 'manifest.webmanifest'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'android-src/**'
+      - 'native-tests/**'
+      - 'tests/**'
       - 'scripts/**'
       - 'signing/**'
       - '.github/workflows/android.yml'
 
-# Nécessaire pour publier l'APK et le bundle de mise à jour dans des releases.
+# Le build et les PR n'ont aucun droit d'écriture. Seul le job de publication,
+# absent des PR et des lancements manuels, reçoit contents:write.
 permissions:
-  contents: write
+  contents: read
 
-# Les exécutions s'enchaînent au lieu de s'annuler. Avec cancel-in-progress,
-# pousser une version pendant que la précédente compilait annulait son build ET
-# la publication de son bundle : la version disparaissait purement et
-# simplement, l'app restant bloquée sur la dernière réellement publiée.
 concurrency:
   group: android-apk-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # Empreinte du certificat déjà installé sur le téléphone. Ce contrôle est
+  # bloquant avant le build puis répété sur l'APK produit.
+  EXPECTED_CERT_SHA256: 6fbba12e3103b5919940ab0de529f900b3ce085c90195f898c9b4ee5265a4a8b
+
 jobs:
   build:
+    name: Vérifier et compiler
     runs-on: ubuntu-latest
+    outputs:
+      app_version: ${{ steps.version.outputs.app }}
+      bundle_version: ${{ steps.version.outputs.bundle }}
+      artifact: ${{ steps.variant.outputs.artifact }}
+      apk_tag: ${{ steps.variant.outputs.apk_tag }}
+      ota_tag: ${{ steps.variant.outputs.ota_tag }}
+      ota_version_tag: ${{ steps.ota.outputs.version_tag }}
+      title: ${{ steps.variant.outputs.title }}
     steps:
       - uses: actions/checkout@v4
 
-      # ---- Variante ----------------------------------------------------------
-      # Deux versions coexistent volontairement :
-      #
-      #   sans-relief  → la version stable, celle qu'on utilise tous les jours.
-      #                  Elle GARDE le paquet d'origine, donc l'historique des
-      #                  repas déjà enregistré sur le téléphone est conservé.
-      #   avec-relief  → la version expérimentale (LiDAR iOS, ARCore Android).
-      #                  Paquet distinct : elle s'installe À CÔTÉ de la stable
-      #                  au lieu de la remplacer, avec ses propres données.
-      #
-      # Chacune a ses propres tags de release. Sans ça les deux builds
-      # écraseraient le même APK, et surtout la stable se serait mise à jour
-      # toute seule vers le contenu web de l'expérimentale : l'OTA pointe sur un
-      # tag fixe, et un tag partagé aurait suffi à annuler toute la séparation.
       - name: Déterminer la variante
         id: variant
+        shell: bash
         run: |
-          case "${GITHUB_REF_NAME}" in
-            sans-relief)
-              echo "apk_tag=apk-stable"        >> "$GITHUB_OUTPUT"
-              echo "ota_tag=ota-stable"        >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          # Sur une PR, GITHUB_REF_NAME vaut « 123/merge » : c'est la branche
+          # cible qui détermine l'identité Android à valider.
+          BRANCH="${GITHUB_BASE_REF:-$GITHUB_REF_NAME}"
+          case "$BRANCH" in
+            codex)
+              echo "apk_tag=apk-codex" >> "$GITHUB_OUTPUT"
+              echo "ota_tag=ota-codex" >> "$GITHUB_OUTPUT"
               echo "app_id=io.github.rachid598.glucovision" >> "$GITHUB_OUTPUT"
-              echo "label=GlucoVision"         >> "$GITHUB_OUTPUT"
+              echo "label=GlucoVision Codex" >> "$GITHUB_OUTPUT"
+              echo "artifact=glucovision-apk-codex" >> "$GITHUB_OUTPUT"
+              echo "code_offset=2000" >> "$GITHUB_OUTPUT"
+              echo "has_depth=true" >> "$GITHUB_OUTPUT"
+              echo "minimum_native_floor=2073" >> "$GITHUB_OUTPUT"
+              echo "ota_version_prefix=ota-v" >> "$GITHUB_OUTPUT"
+              echo "title=GlucoVision — APK Codex avec relief" >> "$GITHUB_OUTPUT"
+              ;;
+            sans-relief)
+              echo "apk_tag=apk-stable" >> "$GITHUB_OUTPUT"
+              echo "ota_tag=ota-stable" >> "$GITHUB_OUTPUT"
+              echo "app_id=io.github.rachid598.glucovision" >> "$GITHUB_OUTPUT"
+              echo "label=GlucoVision" >> "$GITHUB_OUTPUT"
               echo "artifact=glucovision-apk-stable" >> "$GITHUB_OUTPUT"
-              # Décalage de 1000 : l'APK déjà installé vient de la branche de
-              # développement et porte un versionCode supérieur (64+). Android
-              # refuse toute réinstallation par-dessus un versionCode plus
-              # grand — « app not installed », sans autre explication. Le
-              # décalage garantit que la stable s'installe par-dessus n'importe
-              # quel build de développement passé, en gardant les données.
-              echo "code_offset=2000"          >> "$GITHUB_OUTPUT"
-              echo "titre=GlucoVision — APK stable (sans relief)" >> "$GITHUB_OUTPUT"
+              echo "code_offset=2000" >> "$GITHUB_OUTPUT"
+              echo "has_depth=false" >> "$GITHUB_OUTPUT"
+              echo "minimum_native_floor=57" >> "$GITHUB_OUTPUT"
+              echo "ota_version_prefix=ota-stable-v" >> "$GITHUB_OUTPUT"
+              echo "title=GlucoVision — APK stable sans relief" >> "$GITHUB_OUTPUT"
               ;;
             avec-relief)
-              echo "apk_tag=apk-relief"        >> "$GITHUB_OUTPUT"
-              echo "ota_tag=ota-relief"        >> "$GITHUB_OUTPUT"
+              echo "apk_tag=apk-relief" >> "$GITHUB_OUTPUT"
+              echo "ota_tag=ota-relief" >> "$GITHUB_OUTPUT"
               echo "app_id=io.github.rachid598.glucovision.relief" >> "$GITHUB_OUTPUT"
-              echo "label=GlucoVision Relief"  >> "$GITHUB_OUTPUT"
+              echo "label=GlucoVision Relief" >> "$GITHUB_OUTPUT"
               echo "artifact=glucovision-apk-relief" >> "$GITHUB_OUTPUT"
-              echo "code_offset=0"             >> "$GITHUB_OUTPUT"
-              echo "titre=GlucoVision — APK relief (expérimental)" >> "$GITHUB_OUTPUT"
+              echo "code_offset=0" >> "$GITHUB_OUTPUT"
+              echo "has_depth=true" >> "$GITHUB_OUTPUT"
+              echo "minimum_native_floor=57" >> "$GITHUB_OUTPUT"
+              echo "ota_version_prefix=ota-relief-v" >> "$GITHUB_OUTPUT"
+              echo "title=GlucoVision — APK relief expérimental" >> "$GITHUB_OUTPUT"
               ;;
             *)
-              echo "apk_tag=apk-latest"        >> "$GITHUB_OUTPUT"
-              echo "ota_tag=ota-latest"        >> "$GITHUB_OUTPUT"
+              echo "apk_tag=apk-latest" >> "$GITHUB_OUTPUT"
+              echo "ota_tag=ota-latest" >> "$GITHUB_OUTPUT"
               echo "app_id=io.github.rachid598.glucovision" >> "$GITHUB_OUTPUT"
-              echo "label=GlucoVision"         >> "$GITHUB_OUTPUT"
-              echo "artifact=glucovision-apk"  >> "$GITHUB_OUTPUT"
-              echo "code_offset=0"             >> "$GITHUB_OUTPUT"
-              echo "titre=GlucoVision — APK Android (dernier build)" >> "$GITHUB_OUTPUT"
+              echo "label=GlucoVision" >> "$GITHUB_OUTPUT"
+              echo "artifact=glucovision-apk" >> "$GITHUB_OUTPUT"
+              echo "code_offset=0" >> "$GITHUB_OUTPUT"
+              echo "has_depth=true" >> "$GITHUB_OUTPUT"
+              echo "minimum_native_floor=57" >> "$GITHUB_OUTPUT"
+              echo "ota_version_prefix=ota-v" >> "$GITHUB_OUTPUT"
+              echo "title=GlucoVision — APK Android" >> "$GITHUB_OUTPUT"
               ;;
           esac
-          cat "$GITHUB_OUTPUT"
 
-      # Capacitor 8 exige Node >= 22 : un Node plus ancien fait échouer « cap » net.
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Installer Capacitor
-        run: npm install --no-audit --no-fund
+      - name: Installer les dépendances verrouillées
+        run: npm ci --no-audit --no-fund
 
-      # APP_VERSION dans js/app.js fait autorité pour tout : nom de version
-      # Android, version du bundle OTA, et comparaison faite par l'app au
-      # démarrage. Une seule source de vérité, donc pas de dérive possible.
-      - name: Lire la version de l'app
+      - name: Exécuter les tests
+        run: npm test
+
+      - name: Lire et contrôler la version de l'app
         id: version
+        shell: bash
+        env:
+          MINIMUM_NATIVE_FLOOR: ${{ steps.variant.outputs.minimum_native_floor }}
+          CODE_OFFSET: ${{ steps.variant.outputs.code_offset }}
         run: |
+          set -euo pipefail
           APP_VERSION=$(grep -oP "APP_VERSION = '\K[0-9]+" js/app.js)
-          test -n "$APP_VERSION" || { echo "APP_VERSION introuvable dans js/app.js"; exit 1; }
+          MIN_NATIVE=$(grep -oP "MIN_NATIVE_BUILD = \K[0-9]+" js/app.js)
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          test -n "$APP_VERSION" || { echo "::error::APP_VERSION introuvable"; exit 1; }
+          test -n "$MIN_NATIVE" || { echo "::error::MIN_NATIVE_BUILD introuvable"; exit 1; }
+          test "$PACKAGE_VERSION" = "1.$APP_VERSION.0" || {
+            echo "::error::package.json=$PACKAGE_VERSION, attendu 1.$APP_VERSION.0"
+            exit 1
+          }
+          NATIVE_CODE=$(( APP_VERSION + CODE_OFFSET ))
+          test "$MIN_NATIVE" -le "$NATIVE_CODE" || {
+            echo "::error::MIN_NATIVE_BUILD ($MIN_NATIVE) dépasse le versionCode natif ($NATIVE_CODE)"
+            exit 1
+          }
+          test "$MIN_NATIVE" -ge "$MINIMUM_NATIVE_FLOOR" || {
+            echo "::error::Cette variante exige MIN_NATIVE_BUILD >= $MINIMUM_NATIVE_FLOOR (trouvé $MIN_NATIVE)"
+            exit 1
+          }
           echo "app=$APP_VERSION" >> "$GITHUB_OUTPUT"
           echo "bundle=1.$APP_VERSION.0" >> "$GITHUB_OUTPUT"
-          echo "Version de l'app : $APP_VERSION (bundle 1.$APP_VERSION.0)"
+          echo "min_native=$MIN_NATIVE" >> "$GITHUB_OUTPUT"
 
-      # Garde-fou : le bundle de plugins est committé, il doit correspondre aux
-      # versions déclarées dans package.json. S'il a changé, c'est qu'on a oublié
-      # de relancer scripts/build-plugins.sh — l'APK partirait alors avec des
-      # plugins JS désaccordés du natif.
-      - name: Vérifier vendor/capacitor-plugins.js
+      - name: Vérifier le bundle JavaScript des plugins
+        shell: bash
         run: |
-          cp vendor/capacitor-plugins.js /tmp/committed.js
+          set -euo pipefail
+          cp vendor/capacitor-plugins.js "$RUNNER_TEMP/capacitor-plugins.committed.js"
           bash scripts/build-plugins.sh
-          if ! cmp -s /tmp/committed.js vendor/capacitor-plugins.js; then
-            echo "::error::vendor/capacitor-plugins.js n'est pas à jour."
-            echo "Lance scripts/build-plugins.sh et committe le résultat."
+          cmp "$RUNNER_TEMP/capacitor-plugins.committed.js" vendor/capacitor-plugins.js || {
+            echo "::error::vendor/capacitor-plugins.js n'est pas synchronisé"
             exit 1
-          fi
-          echo "Bundle de plugins conforme."
+          }
 
-      # Gradle refuse de compiler si une licence du SDK n'est pas acceptée.
-      # Sans effet si elles le sont déjà, et ne doit jamais faire échouer le job.
       - name: Accepter les licences du SDK Android
         run: yes | "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
 
-      - name: Préparer les fichiers web (www/)
+      - name: Préparer les fichiers web
         run: bash scripts/build-www.sh
 
       - name: Générer le projet Android
@@ -148,24 +209,8 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      # getUserMedia (scan de code-barres) exige la permission CAMERA déclarée.
-      # Capacitor ne l'ajoute pas par défaut : on l'insère avant <application>.
-      # Les autres permissions (notifications, démarrage) viennent des manifestes
-      # des plugins et sont fusionnées automatiquement par Gradle.
-      - name: Déclarer la permission caméra
-        run: |
-          MANIFEST=android/app/src/main/AndroidManifest.xml
-          if ! grep -q 'android.permission.CAMERA' "$MANIFEST"; then
-            perl -0pi -e 's{(<application)}{<uses-permission android:name="android.permission.CAMERA" />\n\n    $1}' "$MANIFEST"
-          fi
-          grep -n 'uses-permission' "$MANIFEST"
-
-      # La version native doit suivre APP_VERSION. Le plugin de mise à jour
-      # compare la version d'un bundle téléchargé à celle de l'APK : si l'APK
-      # restait figé à « 1.0 », l'installation d'un APK plus récent n'effacerait
-      # pas les anciens bundles. versionCode doit aussi croître pour qu'Android
-      # accepte la réinstallation par-dessus.
-      - name: Aligner la version Android
+      - name: Configurer le manifeste et la version Android
+        shell: bash
         env:
           APP_VERSION: ${{ steps.version.outputs.app }}
           BUNDLE_VERSION: ${{ steps.version.outputs.bundle }}
@@ -173,73 +218,61 @@ jobs:
           LABEL: ${{ steps.variant.outputs.label }}
           CODE_OFFSET: ${{ steps.variant.outputs.code_offset }}
         run: |
+          set -euo pipefail
+          MANIFEST=android/app/src/main/AndroidManifest.xml
           GRADLE=android/app/build.gradle
           CODE=$(( APP_VERSION + CODE_OFFSET ))
+
+          if ! grep -q 'android.permission.CAMERA' "$MANIFEST"; then
+            perl -0pi -e 's{(<application)}{<uses-permission android:name="android.permission.CAMERA" />\n\n    $1}' "$MANIFEST"
+          fi
           sed -i "s/versionCode [0-9]\+/versionCode $CODE/" "$GRADLE"
           sed -i "s/versionName \"[^\"]*\"/versionName \"$BUNDLE_VERSION\"/" "$GRADLE"
-
-          # applicationId, PAS namespace : le paquet Java des sources reste
-          # io.github.rachid598.glucovision (c'est lui qui donne l'arborescence
-          # et le nom des classes), seule l'identité de l'application installée
-          # change. C'est ce qui permet aux deux variantes de cohabiter sur le
-          # téléphone sans dupliquer une ligne de code.
           sed -i "s/applicationId \"[^\"]*\"/applicationId \"$APP_ID\"/" "$GRADLE"
-          grep -n 'versionCode\|versionName\|applicationId' "$GRADLE"
 
-          # Nom affiché sous l'icône, pour ne pas confondre les deux à l'écran.
-          STRINGS=android/app/src/main/res/values/strings.xml
-          python3 - "$STRINGS" "$LABEL" <<'PY'
+          python3 - "$LABEL" <<'PY'
           import re, sys
-          path, label = sys.argv[1], sys.argv[2]
-          s = open(path, encoding='utf-8').read()
+          path = 'android/app/src/main/res/values/strings.xml'
+          label = sys.argv[1]
+          text = open(path, encoding='utf-8').read()
           for name in ('app_name', 'title_activity_main'):
-              s = re.sub(r'(<string name="%s">)[^<]*(</string>)' % name,
-                         lambda m: m.group(1) + label + m.group(2), s)
-          open(path, 'w', encoding='utf-8').write(s)
-          print(s)
+              text = re.sub(r'(<string name="%s">)[^<]*(</string>)' % name,
+                            lambda m: m.group(1) + label + m.group(2), text)
+          open(path, 'w', encoding='utf-8').write(text)
           PY
 
-      # Raccourcis d'appui long sur l'icône + schéma glucovision:// qui les porte.
-      # Au restaurant, ça évite d'ouvrir l'app puis de chercher le bouton Photo.
-      - name: Ajouter les raccourcis d'écran d'accueil
+          echo "version_code=$CODE" >> "$GITHUB_ENV"
+          grep -n 'versionCode\|versionName\|applicationId' "$GRADLE"
+
+      - name: Ajouter les raccourcis Android
+        shell: bash
         env:
-          # targetPackage doit être l'applicationId RÉEL de la variante, sinon le
-          # raccourci pointe vers l'autre application — ou vers rien du tout si
-          # elle n'est pas installée. targetClass, lui, reste le paquet des
-          # sources : c'est le nom de la classe, pas l'identité de l'app.
           APP_ID: ${{ steps.variant.outputs.app_id }}
         run: |
+          set -euo pipefail
           MANIFEST=android/app/src/main/AndroidManifest.xml
           mkdir -p android/app/src/main/res/xml android/app/src/main/res/values
-
           cat > android/app/src/main/res/xml/shortcuts.xml <<XML
           <?xml version="1.0" encoding="utf-8"?>
           <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
-            <shortcut
-              android:shortcutId="photo"
-              android:enabled="true"
+            <shortcut android:shortcutId="photo" android:enabled="true"
               android:shortcutShortLabel="@string/shortcut_photo_short"
               android:shortcutLongLabel="@string/shortcut_photo_long">
-              <intent
-                android:action="android.intent.action.VIEW"
+              <intent android:action="android.intent.action.VIEW"
                 android:targetPackage="${APP_ID}"
                 android:targetClass="io.github.rachid598.glucovision.MainActivity"
                 android:data="glucovision://photo" />
             </shortcut>
-            <shortcut
-              android:shortcutId="manuel"
-              android:enabled="true"
+            <shortcut android:shortcutId="manuel" android:enabled="true"
               android:shortcutShortLabel="@string/shortcut_manuel_short"
               android:shortcutLongLabel="@string/shortcut_manuel_long">
-              <intent
-                android:action="android.intent.action.VIEW"
+              <intent android:action="android.intent.action.VIEW"
                 android:targetPackage="${APP_ID}"
                 android:targetClass="io.github.rachid598.glucovision.MainActivity"
                 android:data="glucovision://manuel" />
             </shortcut>
           </shortcuts>
           XML
-
           cat > android/app/src/main/res/values/shortcuts_strings.xml <<'XML'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -249,61 +282,120 @@ jobs:
             <string name="shortcut_manuel_long">Saisie manuelle</string>
           </resources>
           XML
-
-          # Seule la meta-data est nécessaire : les intentions des raccourcis sont
-          # EXPLICITES (targetPackage + targetClass), elles n'ont donc pas besoin
-          # d'un filtre. On évite ainsi d'exposer glucovision:// au navigateur,
-          # ce qui laisserait n'importe quelle page web ouvrir l'appareil photo.
           python3 - "$MANIFEST" <<'PY'
           import re, sys
           path = sys.argv[1]
-          s = open(path, encoding='utf-8').read()
-          if 'android.app.shortcuts' in s:
-              print('deja present')
-              sys.exit(0)
-          extra = ('\n            <meta-data android:name="android.app.shortcuts"\n'
-                   '                android:resource="@xml/shortcuts" />\n')
-          m = re.search(r'(<activity\b[^>]*MainActivity.*?)(\n\s*</activity>)', s, re.S)
-          if not m:
-              sys.exit('MainActivity introuvable dans le manifeste')
-          s = s[:m.end(1)] + extra + s[m.end(1):]
-          open(path, 'w', encoding='utf-8').write(s)
-          print('raccourcis declares')
+          text = open(path, encoding='utf-8').read()
+          if 'android.app.shortcuts' not in text:
+              extra = ('\n            <meta-data android:name="android.app.shortcuts"\n'
+                       '                android:resource="@xml/shortcuts" />\n')
+              match = re.search(r'(<activity\b[^>]*MainActivity.*?)(\n\s*</activity>)', text, re.S)
+              if not match:
+                  raise SystemExit('MainActivity introuvable dans le manifeste')
+              text = text[:match.end(1)] + extra + text[match.end(1):]
+              open(path, 'w', encoding='utf-8').write(text)
           PY
-          grep -n 'android.app.shortcuts' "$MANIFEST"
 
-      # Android refuse une mise à jour signée d'une autre clé que l'application
-      # déjà installée (« le package est en conflit avec un package déjà
-      # présent »). Or le runner fabrique un debug.keystore NEUF à chaque
-      # exécution : chaque build partait donc avec une signature différente, et
-      # aucune mise à jour d'APK ne pouvait s'installer par-dessus la
-      # précédente — il fallait désinstaller, donc tout perdre.
-      # On impose ici une clé stable. Les secrets de dépôt sont prioritaires ;
-      # à défaut on prend celle committée dans signing/ (voir signing/README.md).
-      - name: Installer la clé de signature stable
+      - name: Injecter le plugin de profondeur ARCore
+        if: steps.variant.outputs.has_depth == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d android-src || { echo "::error::android-src/ absent"; exit 1; }
+          test -f android-src/MainActivity.java || { echo "::error::MainActivity ARCore absent"; exit 1; }
+          PKG=android/app/src/main/java/io/github/rachid598/glucovision
+          test -d "$PKG" || { echo "::error::Paquet Java introuvable : $PKG"; exit 1; }
+          cp android-src/*.java "$PKG"/
+
+          GRADLE=android/app/build.gradle
+          if ! grep -q 'com.google.ar:core' "$GRADLE"; then
+            perl -0pi -e 's{(dependencies \{)}{$1\n    implementation "com.google.ar:core:1.54.0"}' "$GRADLE"
+          fi
+
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          python3 - "$MANIFEST" <<'PY'
+          import re, sys
+          path = sys.argv[1]
+          text = open(path, encoding='utf-8').read()
+          if 'android.hardware.camera.ar' not in text:
+              feature = ('\n    <uses-feature android:name="android.hardware.camera.ar" '
+                         'android:required="false" />\n')
+              app = re.search(r'<application\b', text)
+              if not app:
+                  raise SystemExit('balise <application> introuvable')
+              text = text[:app.start()] + feature + text[app.start():]
+          if 'android:name="com.google.ar.core"' not in text:
+              metadata = ('\n        <meta-data android:name="com.google.ar.core" '
+                          'android:value="optional" />\n')
+              app = re.search(r'<application\b[^>]*>', text)
+              if not app:
+                  raise SystemExit('balise <application> introuvable')
+              text = text[:app.end()] + metadata + text[app.end():]
+          if 'android:name=".DepthScanActivity"' not in text:
+              activity = ('\n        <activity\n'
+                          '            android:name=".DepthScanActivity"\n'
+                          '            android:exported="false"\n'
+                          '            android:screenOrientation="portrait"\n'
+                          '            android:configChanges="orientation|screenSize|keyboardHidden" />\n')
+              end = text.find('</application>')
+              if end < 0:
+                  raise SystemExit('fin de <application> introuvable')
+              text = text[:end] + activity + text[end:]
+          open(path, 'w', encoding='utf-8').write(text)
+          PY
+          grep -n 'com.google.ar:core' "$GRADLE"
+          grep -n 'android.hardware.camera.ar\|com.google.ar.core\|DepthScanActivity' "$MANIFEST"
+
+      - name: Vérifier les contrats Java ARCore
+        if: steps.variant.outputs.has_depth == 'true'
+        run: bash scripts/check-java.sh
+
+      - name: Installer et vérifier la clé de signature historique
+        shell: bash
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
           KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
         run: |
+          set -euo pipefail
+          fingerprint() {
+            local store="$1" password="$2" out="$RUNNER_TEMP/cert-$RANDOM.der"
+            keytool -exportcert -alias glucovision -keystore "$store" \
+              -storepass "$password" -file "$out" >/dev/null
+            sha256sum "$out" | cut -d' ' -f1
+          }
+
+          COMMITTED=$(fingerprint signing/glucovision-signing.jks glucovision)
+          test "$COMMITTED" = "$EXPECTED_CERT_SHA256" || {
+            echo "::error::La clé committée n'est plus la clé historique ($COMMITTED)"
+            exit 1
+          }
+
           DEST=android/app/glucovision-signing.jks
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$DEST"
+          if [[ -n "$KEYSTORE_B64" || -n "$KEYSTORE_PASS" ]]; then
+            [[ -n "$KEYSTORE_B64" && -n "$KEYSTORE_PASS" ]] || {
+              echo "::error::Les deux secrets de signature doivent être définis ensemble"
+              exit 1
+            }
+            printf '%s' "$KEYSTORE_B64" | base64 --decode > "$DEST"
             PASS="$KEYSTORE_PASS"
-            echo "Clé de signature issue des secrets du dépôt."
+            echo "Clé chargée depuis les secrets GitHub."
           else
             cp signing/glucovision-signing.jks "$DEST"
             PASS=glucovision
-            echo "Clé de signature issue de signing/ (committée)."
+            echo "Clé historique committée utilisée."
           fi
-          keytool -list -keystore "$DEST" -storepass "$PASS" | grep -i 'fingerprint\|empreinte' || true
+          ACTUAL=$(fingerprint "$DEST" "$PASS")
+          test "$ACTUAL" = "$EXPECTED_CERT_SHA256" || {
+            echo "::error::Le certificat sélectionné ne correspond pas au téléphone ($ACTUAL)"
+            exit 1
+          }
+          echo "Empreinte vérifiée : $ACTUAL"
 
           python3 - "$PASS" <<'PY'
           import re, sys
-          pwd = sys.argv[1]
+          password = sys.argv[1]
           path = 'android/app/build.gradle'
-          s = open(path, encoding='utf-8').read()
-          if 'glucovisionStable' in s:
-              print('deja configure'); sys.exit(0)
+          text = open(path, encoding='utf-8').read()
           block = (
               '    signingConfigs {\n'
               '        glucovisionStable {\n'
@@ -312,118 +404,262 @@ jobs:
               '            keyAlias "glucovision"\n'
               '            keyPassword "%s"\n'
               '        }\n'
-              '    }\n' % (pwd, pwd)
+              '    }\n' % (password, password)
           )
-          m = re.search(r'(android\s*\{\n)', s)
-          if not m:
-              sys.exit("bloc android { introuvable dans build.gradle")
-          s = s[:m.end(1)] + block + s[m.end(1):]
-
-          # Le build « debug » reste celui qu'on publie (installable sans compte
-          # développeur) : on lui substitue simplement notre clé.
-          m2 = re.search(r'(buildTypes\s*\{\s*\n)', s)
-          if not m2:
-              sys.exit('bloc buildTypes { introuvable dans build.gradle')
-          s = s[:m2.end(1)] + '        debug {\n            signingConfig signingConfigs.glucovisionStable\n        }\n' + s[m2.end(1):]
-          open(path, 'w', encoding='utf-8').write(s)
-          print('signingConfig applique')
+          match = re.search(r'android\s*\{\n', text)
+          if not match:
+              raise SystemExit('bloc android introuvable')
+          text = text[:match.end()] + block + text[match.end():]
+          release = re.search(r'(buildTypes\s*\{.*?\brelease\s*\{\s*\n)', text, re.S)
+          if not release:
+              raise SystemExit('bloc buildTypes.release introuvable')
+          signing = '            signingConfig signingConfigs.glucovisionStable\n'
+          text = text[:release.end()] + signing + text[release.end():]
+          open(path, 'w', encoding='utf-8').write(text)
           PY
-          grep -n 'glucovisionStable' android/app/build.gradle
 
-      - name: Compiler l'APK
+      - name: Compiler l'APK release
+        working-directory: android
         run: |
-          cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
-      - name: Renommer l'APK
+      - name: Vérifier l'APK signé et son identité
         id: apk
+        shell: bash
+        env:
+          APP_VERSION: ${{ steps.version.outputs.app }}
+          APP_ID: ${{ steps.variant.outputs.app_id }}
         run: |
-          SRC=android/app/build/outputs/apk/debug/app-debug.apk
-          test -f "$SRC" || { echo "APK introuvable"; find android -name '*.apk'; exit 1; }
+          set -euo pipefail
+          SRC=android/app/build/outputs/apk/release/app-release.apk
+          test -f "$SRC" || { echo "::error::APK release introuvable"; find android -name '*.apk'; exit 1; }
           mkdir -p dist
           cp "$SRC" dist/glucovision.apk
-          echo "size=$(du -h dist/glucovision.apk | cut -f1)" >> "$GITHUB_OUTPUT"
-          echo "APK : $(du -h dist/glucovision.apk)"
 
-      # Bundle de mise à jour OTA : les mêmes fichiers web que l'APK, en archive.
-      # C'est ce qui évite de réinstaller l'APK à chaque version — l'app le
-      # télécharge et remplace son contenu web toute seule.
-      - name: Préparer le bundle de mise à jour
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          AAPT="$BUILD_TOOLS/aapt"
+          test -x "$APKSIGNER" && test -x "$AAPT"
+          "$APKSIGNER" verify --verbose --print-certs dist/glucovision.apk | tee "$RUNNER_TEMP/apksigner.txt"
+          APK_CERT=$(awk -F': ' '/Signer #1 certificate SHA-256 digest/ { print tolower($2); exit }' "$RUNNER_TEMP/apksigner.txt")
+          test "$APK_CERT" = "$EXPECTED_CERT_SHA256" || {
+            echo "::error::Mauvais certificat dans l'APK ($APK_CERT)"
+            exit 1
+          }
+
+          BADGING=$("$AAPT" dump badging dist/glucovision.apk | head -1)
+          echo "$BADGING"
+          grep -Fq "name='$APP_ID'" <<< "$BADGING"
+          grep -Fq "versionCode='$version_code'" <<< "$BADGING"
+          grep -Fq "versionName='1.$APP_VERSION.0'" <<< "$BADGING"
+
+          APK_SHA=$(sha256sum dist/glucovision.apk | cut -d' ' -f1)
+          printf '%s  glucovision.apk\n' "$APK_SHA" > dist/glucovision.apk.sha256
+          printf '{\n  "appId": "%s",\n  "appVersion": %s,\n  "versionCode": %s,\n  "versionName": "1.%s.0",\n  "sha256": "%s",\n  "certificateSha256": "%s"\n}\n' \
+            "$APP_ID" "$APP_VERSION" "$version_code" "$APP_VERSION" "$APK_SHA" \
+            "$EXPECTED_CERT_SHA256" > dist/apk.json
+          echo "size=$(du -h dist/glucovision.apk | cut -f1)" >> "$GITHUB_OUTPUT"
+          echo "sha256=$APK_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Préparer et valider le bundle OTA
+        id: ota
+        shell: bash
         env:
           APP_VERSION: ${{ steps.version.outputs.app }}
           BUNDLE_VERSION: ${{ steps.version.outputs.bundle }}
-          REPO: ${{ github.repository }}
+          MIN_NATIVE: ${{ steps.version.outputs.min_native }}
           OTA_TAG: ${{ steps.variant.outputs.ota_tag }}
+          OTA_VERSION_PREFIX: ${{ steps.variant.outputs.ota_version_prefix }}
+          REPO: ${{ github.repository }}
         run: |
-          # index.html doit être à la RACINE de l'archive.
-          (cd www && zip -qr ../dist/www.zip .)
-          # MIN_NATIVE_BUILD est déclaré dans js/app.js : le bundle publie ainsi
-          # lui-même le build natif dont il a besoin, et l'app refuse de
-          # l'appliquer sur un APK plus ancien.
-          MIN_NATIVE=$(grep -oP "MIN_NATIVE_BUILD = \K[0-9]+" js/app.js)
-          test -n "$MIN_NATIVE" || { echo "MIN_NATIVE_BUILD introuvable dans js/app.js"; exit 1; }
-          cat > dist/latest.json <<EOF
-          {
-            "appVersion": "$APP_VERSION",
-            "version": "$BUNDLE_VERSION",
-            "minNativeBuild": $MIN_NATIVE,
-            "url": "https://github.com/$REPO/releases/download/$OTA_TAG/www.zip"
+          set -euo pipefail
+          find www -exec touch -t 198001010000 {} +
+          (
+            cd www
+            find . -type f -print0 | LC_ALL=C sort -z | xargs -0 zip -q -X ../dist/www.zip
+          )
+          OTA_SHA=$(sha256sum dist/www.zip | cut -d' ' -f1)
+          printf '%s  www.zip\n' "$OTA_SHA" > dist/www.zip.sha256
+          OTA_VERSION_TAG="${OTA_VERSION_PREFIX}${APP_VERSION}"
+          OTA_URL="https://github.com/${REPO}/releases/download/${OTA_VERSION_TAG}/www.zip"
+          python3 - "$APP_VERSION" "$BUNDLE_VERSION" "$MIN_NATIVE" "$OTA_URL" "$OTA_SHA" <<'PY'
+          import json, re, sys
+          app, version, minimum, url, checksum = sys.argv[1:]
+          manifest = {
+              'appVersion': int(app),
+              'version': version,
+              'minNativeBuild': int(minimum),
+              'url': url,
+              'checksum': checksum,
           }
-          EOF
+          expected = f'1.{app}.0'
+          if version != expected:
+              raise SystemExit(f'version OTA invalide: {version} != {expected}')
+          if not re.fullmatch(r'[0-9a-f]{64}', checksum):
+              raise SystemExit('SHA-256 OTA invalide')
+          with open('dist/latest.json', 'w', encoding='utf-8') as fh:
+              json.dump(manifest, fh, ensure_ascii=False, indent=2, sort_keys=True)
+              fh.write('\n')
+          PY
+          python3 - "$APP_VERSION" "$BUNDLE_VERSION" "$MIN_NATIVE" "$OTA_URL" "$OTA_SHA" <<'PY'
+          import json, sys
+          app, version, minimum, url, checksum = sys.argv[1:]
+          data = json.load(open('dist/latest.json', encoding='utf-8'))
+          assert set(data) == {'appVersion', 'version', 'minNativeBuild', 'url', 'checksum'}
+          assert data['appVersion'] == int(app)
+          assert data['version'] == version
+          assert data['minNativeBuild'] == int(minimum)
+          assert data['url'] == url
+          assert data['checksum'] == checksum
+          PY
+          sha256sum dist/latest.json | sed 's#dist/##' > dist/latest.json.sha256
+          echo "sha256=$OTA_SHA" >> "$GITHUB_OUTPUT"
+          echo "version_tag=$OTA_VERSION_TAG" >> "$GITHUB_OUTPUT"
           cat dist/latest.json
-          echo "Archive : $(du -h dist/www.zip)"
+
+      - name: Créer le manifeste de sommes de contrôle
+        run: |
+          (cd dist && sha256sum glucovision.apk www.zip latest.json apk.json > SHA256SUMS)
+          (cd dist && sha256sum --check SHA256SUMS)
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.variant.outputs.artifact }}
-          path: dist/glucovision.apk
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
 
-      # Releases aux tags fixes : les liens de téléchargement ne changent jamais,
-      # seuls les fichiers derrière sont remplacés à chaque build.
-      - name: Publier l'APK
+  publish:
+    name: Publier les releases
+    needs: build
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/codex' ||
+       github.ref == 'refs/heads/sans-relief' ||
+       github.ref == 'refs/heads/avec-relief' ||
+       github.ref == 'refs/heads/claude/meal-carb-estimator-app-twxpqp')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: dist
+
+      - name: Vérifier les artefacts transférés
+        run: (cd dist && sha256sum --check SHA256SUMS)
+
+      - name: Publier les versions immuables
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          COMMIT: ${{ github.sha }}
-          APK_SIZE: ${{ steps.apk.outputs.size }}
-          APP_VERSION: ${{ steps.version.outputs.app }}
-          APK_TAG: ${{ steps.variant.outputs.apk_tag }}
-          TITRE: ${{ steps.variant.outputs.titre }}
+          REPO: ${{ github.repository }}
+          APP_VERSION: ${{ needs.build.outputs.app_version }}
+          APK_TAG: ${{ needs.build.outputs.apk_tag }}
+          OTA_TAG: ${{ needs.build.outputs.ota_tag }}
+          OTA_VERSION_TAG: ${{ needs.build.outputs.ota_version_tag }}
+          TITLE: ${{ needs.build.outputs.title }}
         run: |
-          {
-            echo "**GlucoVision v$APP_VERSION** — APK signé avec la clé de debug Android :"
-            echo "installable directement, sans compte développeur ni Play Store."
-            echo
-            echo "**Installation** — télécharge \`glucovision.apk\` sur ton téléphone,"
-            echo "ouvre-le, et autorise l'installation depuis cette source quand"
-            echo "Android le demande."
-            echo
-            echo "**Mises à jour** — cet APK se met à jour tout seul : il vérifie au"
-            echo "lancement s'il existe une version plus récente du contenu web, la"
-            echo "télécharge, et propose « Actualiser ». Tu n'as à réinstaller un APK"
-            echo "que si une fonctionnalité NATIVE est ajoutée."
-            echo
-            echo "Build : commit \`$COMMIT\` · taille $APK_SIZE"
-          } > notes.md
-          gh release delete "$APK_TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$APK_TAG" dist/glucovision.apk \
-            --title "$TITRE" \
-            --notes-file notes.md
+          set -euo pipefail
+          APK_VERSION_TAG="${APK_TAG}-v${APP_VERSION}"
+          ensure_release() {
+            local tag="$1" title="$2" notes="$3"
+            shift 3
+            if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+              local tag_commit
+              tag_commit=$(gh api "repos/$REPO/commits/$tag" --jq .sha)
+              test "$tag_commit" = "$GITHUB_SHA" || {
+                echo "::error::Le tag immuable $tag existe sur un autre commit ($tag_commit)"
+                exit 1
+              }
+              # Un rerun réutilise les octets déjà publiés : un APK signé peut
+              # ne pas être reproductible bit à bit, mais la release reste, elle,
+              # strictement immuable et rattachée au même commit.
+              local file name tmp
+              for file in "$@"; do
+                name=$(basename "$file")
+                gh release view "$tag" --repo "$REPO" --json assets \
+                  --jq '.assets[].name' | grep -Fxq "$name" || {
+                    echo "::error::La release immuable $tag est incomplète ($name absent)"
+                    exit 1
+                  }
+                tmp="$RUNNER_TEMP/$tag-$name"
+                mkdir -p "$tmp"
+                gh release download "$tag" --repo "$REPO" --pattern "$name" --dir "$tmp"
+                cp "$tmp/$name" "$file"
+              done
+            else
+              gh release create "$tag" "$@" --repo "$REPO" --target "$GITHUB_SHA" \
+                --title "$title" --notes "$notes"
+            fi
+          }
 
-      - name: Publier le bundle de mise à jour
+          ensure_release "$APK_VERSION_TAG" "$TITLE v$APP_VERSION" \
+            "APK immuable issu du commit $GITHUB_SHA." \
+            dist/glucovision.apk dist/glucovision.apk.sha256 dist/apk.json
+          # Si le bloc précédent a réutilisé un APK déjà publié, la somme globale
+          # doit suivre cet APK avant de créer la release OTA correspondante.
+          (cd dist && sha256sum glucovision.apk www.zip latest.json apk.json > SHA256SUMS)
+          ensure_release "$OTA_VERSION_TAG" "$TITLE — contenu web v$APP_VERSION" \
+            "Bundle OTA immuable issu du commit $GITHUB_SHA." \
+            dist/www.zip dist/www.zip.sha256 dist/latest.json \
+            dist/latest.json.sha256 dist/SHA256SUMS
+          (cd dist && sha256sum --check glucovision.apk.sha256)
+          (cd dist && sha256sum --check www.zip.sha256)
+          (cd dist && sha256sum --check latest.json.sha256)
+          (cd dist && sha256sum --check SHA256SUMS)
+          python3 - "$APP_VERSION" "$OTA_VERSION_TAG" "$REPO" "$EXPECTED_CERT_SHA256" <<'PY'
+          import hashlib, json, sys
+          app_version, ota_tag, repo, expected_cert = sys.argv[1:]
+          digest = lambda path: hashlib.sha256(open(path, 'rb').read()).hexdigest()
+          apk = json.load(open('dist/apk.json', encoding='utf-8'))
+          ota = json.load(open('dist/latest.json', encoding='utf-8'))
+          assert apk['appVersion'] == int(app_version)
+          assert apk['sha256'] == digest('dist/glucovision.apk')
+          assert apk['certificateSha256'] == expected_cert
+          assert ota['appVersion'] == int(app_version)
+          assert ota['checksum'] == digest('dist/www.zip')
+          assert ota['url'] == f'https://github.com/{repo}/releases/download/{ota_tag}/www.zip'
+          PY
+
+      - name: Mettre à jour les canaux permanents sans supprimer leur release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APP_VERSION: ${{ steps.version.outputs.app }}
-          OTA_TAG: ${{ steps.variant.outputs.ota_tag }}
-          TITRE: ${{ steps.variant.outputs.titre }}
+          REPO: ${{ github.repository }}
+          APP_VERSION: ${{ needs.build.outputs.app_version }}
+          APK_TAG: ${{ needs.build.outputs.apk_tag }}
+          OTA_TAG: ${{ needs.build.outputs.ota_tag }}
+          OTA_VERSION_TAG: ${{ needs.build.outputs.ota_version_tag }}
+          TITLE: ${{ needs.build.outputs.title }}
         run: |
-          {
-            echo "Contenu web de GlucoVision v$APP_VERSION, téléchargé automatiquement"
-            echo "par l'application Android installée."
-            echo
-            echo "Rien à télécharger à la main ici."
-          } > ota-notes.md
-          gh release delete "$OTA_TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$OTA_TAG" dist/www.zip dist/latest.json \
-            --title "$TITRE — contenu web (v$APP_VERSION)" \
-            --notes-file ota-notes.md
+          set -euo pipefail
+          ensure_channel() {
+            local tag="$1" title="$2"
+            if ! gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+              gh release create "$tag" --repo "$REPO" --target "$GITHUB_SHA" \
+                --title "$title" --notes "Canal permanent. La provenance exacte est dans les releases versionnées."
+            fi
+          }
+
+          ensure_channel "$APK_TAG" "$TITLE — dernier APK vérifié"
+          ensure_channel "$OTA_TAG" "$TITLE — dernier manifeste OTA vérifié"
+
+          # Aucun « release delete » : les releases versionnées restent toujours
+          # disponibles. Le manifeste OTA est publié en dernier et pointe vers un
+          # zip immuable déjà présent, évitant tout couple JSON/zip incohérent.
+          gh release upload "$APK_TAG" --repo "$REPO" --clobber \
+            dist/glucovision.apk dist/glucovision.apk.sha256 dist/apk.json
+          gh release upload "$OTA_TAG" --repo "$REPO" --clobber \
+            dist/latest.json.sha256
+          gh release upload "$OTA_TAG" --repo "$REPO" --clobber \
+            dist/latest.json
+
+          gh release edit "$APK_TAG" --repo "$REPO" \
+            --title "$TITLE — APK v$APP_VERSION" \
+            --notes "Dernier APK vérifié : v$APP_VERSION, commit $GITHUB_SHA. La release immuable est ${APK_TAG}-v${APP_VERSION}."
+          gh release edit "$OTA_TAG" --repo "$REPO" \
+            --title "$TITLE — OTA v$APP_VERSION" \
+            --notes "Dernier manifeste OTA : v$APP_VERSION, commit $GITHUB_SHA. Le zip est immuable dans ${OTA_VERSION_TAG}."

@@ -1019,6 +1019,28 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 }
 #rerun-timer { color: var(--muted); font-variant-numeric: tabular-nums; }
 
+/* Mesure de profondeur ARCore. Le résultat reste distinct de l'estimation IA :
+   il décrit la qualité géométrique de la photo, jamais une dose ni un total. */
+.depth-result {
+  margin-top: 12px; border-radius: var(--r); padding: 12px 14px;
+  font-size: 13.5px; line-height: 1.45;
+  border: 1px solid var(--border); background: var(--surface-2);
+}
+.depth-result.d-ok {
+  border-color: #14b8a6;
+  background: color-mix(in srgb, #14b8a6 10%, var(--surface-2));
+}
+.depth-result.d-warn {
+  border-color: #f59e0b;
+  background: color-mix(in srgb, #f59e0b 12%, var(--surface-2));
+}
+.depth-result .tiny { font-size: 12px; color: var(--muted); }
+.depth-result .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; opacity: .8;
+}
+.item-name-edit { width: min(100%, 260px); font-weight: 700; padding: 6px 8px; }
+
 /* Résultat retiré pour incohérence bloquante. Le rouge n'est pas décoratif :
    c'est le seul cas où l'app refuse de montrer un nombre de glucides. */
 .blocked-box {
