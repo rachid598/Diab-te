@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '71'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '72'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -524,6 +524,7 @@
     var verify = startVerification(sent, ctx);
 
     lastCompare = null;
+    oublierEnCours();
     lastCompareRun = null;
     lastRunProvider = settings.provider;
     lastRunModel = (settings.models || {})[settings.provider] || null;
@@ -728,6 +729,36 @@
   }
 
   // Affiche les deux avis côte à côte, avec un bouton « Utiliser cet avis ».
+  /* Sauvegarde de l'écran de comparaison lui-même.
+
+     Le brouillon d'historique sauve le repas ; il ne rend pas les DEUX avis,
+     qui sont précisément ce qu'on était en train de comparer. Les résultats
+     sont du JSON de quelques kilo-octets — les photos, elles, ne sont pas
+     reprises : elles ne tiendraient pas dans le quota du navigateur, et sur
+     l'APK elles sont déjà rattachées au brouillon d'historique. */
+  var CLE_EN_COURS = 'diabete.encours.v1';
+  var MAX_AGE_EN_COURS = 12 * 3600000;
+
+  function sauverEnCours(avis) {
+    try {
+      localStorage.setItem(CLE_EN_COURS, JSON.stringify({
+        ts: Date.now(), date: currentHistoryDate, avis: avis
+      }));
+    } catch (e) { /* quota : le brouillon d'historique reste, lui */ }
+  }
+  function oublierEnCours() {
+    try { localStorage.removeItem(CLE_EN_COURS); } catch (e) {}
+  }
+  function restaurerEnCours() {
+    var d = null;
+    try { d = JSON.parse(localStorage.getItem(CLE_EN_COURS)); } catch (e) { return; }
+    if (!d || !d.avis || d.avis.length < 2) return;
+    if (Date.now() - (d.ts || 0) > MAX_AGE_EN_COURS) { oublierEnCours(); return; }
+    currentHistoryDate = d.date || null;
+    renderCompare(d.avis);
+    toast('Estimation retrouvée — elle n\'avait pas encore été validée.');
+  }
+
   /* Les avis actuellement affichés côte à côte. Conservé pour qu'une relance
      AJOUTE une colonne au lieu de remplacer l'écran : après avoir demandé un
      troisième avis pour départager les deux premiers, les faire disparaître
@@ -841,6 +872,26 @@
     el.hidden = false;
     initRerun();
 
+    /* RIEN NE DOIT SE PERDRE ICI. Avant la double analyse, toute estimation
+       finissait dans renderResults, qui enregistre un brouillon d'historique
+       avec sa photo. Depuis que deux avis s'affichent par défaut, le flux
+       s'arrête sur cet écran — et tout vivait en mémoire. Verrouiller le
+       téléphone à ce moment suffisait à tout perdre : Android récupère la
+       WebView, la page se recharge, et il ne restait rien sur le disque.
+
+       On enregistre donc dès l'affichage, sans attendre le choix : le premier
+       avis abouti sert de brouillon. Retenir l'autre ensuite met simplement à
+       jour la MÊME entrée, puisque currentHistoryDate ne change pas. */
+    if (ok.length) {
+      lastResult = ok[0].result;
+      var second = ok[1];
+      lastVerification = second
+        ? { ok: true, provider: second.provider, total: second.result.totalCarbsG, checkedAt: Date.now() }
+        : lastVerification;
+      autoSaveCurrentResult();
+      sauverEnCours(avis);
+    }
+
     el.querySelectorAll('.cmp-use').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var choisi = null, autres = [];
@@ -856,6 +907,7 @@
           ? { ok: true, provider: autre.provider, total: autre.result.totalCarbsG, checkedAt: Date.now() }
           : { ok: false, provider: autre.provider, error: autre.error, checkedAt: Date.now() });
         lastCompare = null;          // on quitte la comparaison pour le détail
+        oublierEnCours();
         renderResults(lastResult);
       });
     });
@@ -1910,6 +1962,7 @@
       return;
     }
     autoSaveCurrentResult();
+    oublierEnCours();
     if (currentHistoryConfirmed) return;
     currentHistoryConfirmed = true;
     var entry = currentResultEntry(currentHistoryDate);
@@ -3719,6 +3772,9 @@
     initShortcuts();
     // Rattrape les images orphelines laissées par un enregistrement interrompu.
     if (Native.isApp) Storage.prunePhotos();
+    /* En dernier : si une comparaison n'avait pas été tranchée, on la remet à
+       l'écran. Après tout le reste, pour ne pas être écrasée par un rendu. */
+    restaurerEnCours();
   }
 
   /* On attend que le pont natif soit prêt AVANT le premier rendu : les clés API
