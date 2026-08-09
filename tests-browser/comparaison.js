@@ -153,6 +153,97 @@ async function ecran(page, liste) {
   verifie(/1\.99\.0/.test(etat), 'la version publiée est lue et affichée : ' + etat.slice(0, 80));
   verifie(/abcdef012345/.test(etat), 'l’empreinte SHA-256 est montrée pour vérification');
 
+  /* Calcul de portion. Le chiffre produit ici finit dans une pompe à insuline :
+     il ne suffit pas que l'arithmétique soit juste dans portion.js, il faut que
+     ce soit bien elle qui soit branchée aux champs et au bouton. */
+  console.log('\nCalcul de portion :');
+  await page.route('**/world.openfoodfacts.org/**', function (route) {
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({
+        products: [{
+          code: '7622210449283', product_name_fr: 'Biscuits test', brands: 'Marque',
+          quantity: '500 g e', product_quantity: 500, product_quantity_unit: 'g',
+          nutriments: { carbohydrates_100g: 70 }
+        }]
+      })
+    });
+  });
+  await page.goto('http://localhost:' + PORT + '/');
+  await page.click('.tab[data-tab="manual"]');
+  await page.click('.mode-btn[data-mode="produit"]');
+  await page.fill('#off-search', 'biscuits');
+  await page.click('#off-search-btn');
+  await page.waitForSelector('.off-item', { timeout: 5000 });
+  await page.click('.off-item .food-label');
+  await page.waitForSelector('#portion-card:not([hidden])', { timeout: 5000 });
+
+  const poids = await page.inputValue('#portion-total');
+  verifie(poids === '500', 'le poids du paquet est prérempli depuis la base : ' + poids);
+  verifie(await page.isDisabled('#portion-add'),
+    'sans nombre d’unités, on ne peut rien ajouter');
+
+  await page.fill('#portion-units', '12');
+  await page.fill('#portion-label', 'biscuits');
+  await page.fill('#portion-eat', '2');
+  const calcul = await page.textContent('#portion-result');
+  /* 500/12 = 41,666… g par biscuit ; 2 biscuits = 83,3 g ; à 70 g/100 g → 58 g.
+     L'affichage arrondit au dixième comme partout ailleurs dans l'app, mais le
+     calcul, lui, garde la valeur exacte — d'où 58 et non 59. */
+  verifie(/41,7 g/.test(calcul), 'le poids d’une unité est calculé : ' + calcul.replace(/\s+/g, ' '));
+  verifie(/58 g de glucides/.test(calcul), 'et les glucides des 2 unités aussi');
+  verifie(/1 biscuit =/.test(calcul) && /2 biscuits =/.test(calcul),
+    'le singulier et le pluriel sont corrects');
+
+  await page.click('#portion-add');
+  await page.waitForSelector('.manual-row', { timeout: 5000 });
+  const ligne = await page.textContent('.manual-row');
+  verifie(/58 g/.test(ligne), 'la ligne du repas porte les mêmes glucides : ' + ligne.replace(/\s+/g, ' '));
+  verifie(await page.isHidden('#portion-card'), 'la carte se referme après ajout');
+
+  // Le second scan du même produit doit déjà connaître le nombre d'unités.
+  await page.click('.off-item .food-label');
+  await page.waitForSelector('#portion-card:not([hidden])', { timeout: 5000 });
+  const memoire = await page.inputValue('#portion-units');
+  verifie(memoire === '12', 'le nombre d’unités est retenu pour ce code-barres : ' + memoire);
+
+  /* Code-barres inconnu. Jusqu'ici c'était un cul-de-sac : « introuvable », et
+     débrouille-toi. Le produit recopié une fois doit être reconnu ensuite. */
+  console.log('\nCode-barres inconnu :');
+  await page.unroute('**/world.openfoodfacts.org/**');
+  await page.route('**/api/v2/product/**', function (route) {
+    return route.fulfill({ status: 404, contentType: 'application/json',
+                           body: JSON.stringify({ status: 0 }) });
+  });
+  await page.goto('http://localhost:' + PORT + '/');
+  await page.click('.tab[data-tab="manual"]');
+  await page.click('.mode-btn[data-mode="produit"]');
+  await page.click('#barcode-btn');
+  await page.fill('#barcode-manual', '9999999999999');
+  await page.click('#barcode-manual-go');
+  await page.waitForSelector('#barcode-unknown:not([hidden])', { timeout: 5000 });
+  verifie(true, 'un code absent d’OpenFoodFacts propose la saisie de l’étiquette');
+
+  await page.fill('#bu-name', 'Gâteau de mamie');
+  await page.fill('#bu-carb', '60');
+  await page.fill('#bu-pack', '400');
+  await page.click('#bu-save');
+  await page.waitForSelector('#portion-card:not([hidden])', { timeout: 5000 });
+  const saisi = await page.textContent('#portion-name');
+  verifie(/Gâteau de mamie/.test(saisi), 'le produit saisi ouvre le calcul de portion : ' + saisi);
+  verifie(await page.inputValue('#portion-total') === '400',
+    'le poids du paquet saisi est repris');
+
+  // Second scan du même code : plus aucune question, alors que le réseau dit toujours 404.
+  await page.click('#barcode-btn');
+  await page.fill('#barcode-manual', '9999999999999');
+  await page.click('#barcode-manual-go');
+  await page.waitForSelector('#portion-card:not([hidden])', { timeout: 5000 });
+  verifie(await page.isHidden('#barcode-unknown'),
+    'au second scan, le produit est reconnu sans rien redemander');
+  verifie(/Gâteau de mamie/.test(await page.textContent('#portion-name')),
+    'et c’est bien le produit enregistré');
+
   verifie(erreursJs.length === 0, 'aucune erreur JavaScript : ' + (erreursJs[0] || '—'));
 
   await nav.close();

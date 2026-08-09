@@ -1074,3 +1074,45 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
   border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
   background: color-mix(in srgb, var(--ok) 9%, var(--surface));
 }
+
+/* ---------- Calcul de portion à l'unité ----------
+   Trois lignes « libellé → champs », alignées sur une colonne d'étiquettes de
+   largeur fixe : la phrase « Le paquet fait 500 g et contient 12 biscuits, j'en
+   mange 2 » doit se lire d'un trait, pas comme un formulaire.
+
+   La grille passe en une seule colonne sous 360 px, où deux colonnes
+   forceraient les champs numériques à 40 px de large. */
+.portion-card { margin-top: 12px; border: 1px solid var(--brand);
+  box-shadow: var(--shadow-sm); }
+.portion-head { display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; }
+.portion-head h2 { margin: 0; font-size: 16px; line-height: 1.3;
+  overflow-wrap: anywhere; }
+
+.portion-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px;
+  align-items: center; margin: 12px 0 4px; }
+.portion-grid label { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.portion-field { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.portion-field .input.small { width: 5.5em; min-width: 0; }
+.portion-name-field { flex: 1 1 auto; width: auto !important; min-width: 0; }
+.portion-unit { font-size: 13px; color: var(--muted); white-space: nowrap; }
+
+.portion-result { margin: 10px 0 12px; padding: 10px 12px; border-radius: var(--r);
+  font-size: 13.5px; line-height: 1.6; background: var(--surface-2);
+  border: 1px solid var(--border); color: var(--muted); }
+.portion-result.ok { background: color-mix(in srgb, var(--ok) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); color: var(--text); }
+.portion-result strong { color: var(--brand-700); }
+
+@media (max-width: 360px) {
+  .portion-grid { grid-template-columns: 1fr; gap: 4px; }
+  .portion-grid label { margin-top: 6px; }
+}
+
+/* Saisie d'un produit absent d'OpenFoodFacts, dans la modale de scan. */
+.barcode-unknown { margin-top: 12px; padding: 12px; border-radius: var(--r);
+  background: var(--surface-2); border: 1px solid var(--border-strong); }
+.barcode-unknown label { display: block; margin: 8px 0 3px; font-size: 13px;
+  color: var(--muted); }
+.barcode-unknown .input { width: 100%; }
+.barcode-unknown .input.small { width: 8em; }

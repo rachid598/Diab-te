@@ -16,7 +16,13 @@
   'use strict';
 
   var BASE = 'https://world.openfoodfacts.org';
-  var FIELDS = 'code,product_name,product_name_fr,brands,nutriments,serving_quantity';
+  /* quantity / product_quantity servent au calcul de portion : ils disent ce que
+     PÈSE le paquet, ce qu'aucune photo ne peut donner. serving_size n'est PAS
+     repris : il est saisi par les contributeurs et souvent absurde (le Prince au
+     chocolat annonce une portion de 250 g, soit la moitié du paquet). Un chiffre
+     faux qui a l'air officiel est pire que pas de chiffre. */
+  var FIELDS = 'code,product_name,product_name_fr,brands,nutriments,serving_quantity,' +
+    'quantity,product_quantity,product_quantity_unit';
   var native = window.Native && window.Native.isApp;
 
   var SEARCH_URLS = [
@@ -123,7 +129,33 @@
       brand: (brand || '').trim(),
       carb: Math.round(carb * 10) / 10,
       code: p.code || '',
-      serving: (isFinite(serving) && serving > 0) ? Math.round(serving) : null
+      serving: (isFinite(serving) && serving > 0) ? Math.round(serving) : null,
+      pack: readPack(p)
+    };
+  }
+
+  /* Ce que pèse le paquet, et — quand l'emballage l'annonce lui-même sous la
+     forme « 12 x 25 g » — combien d'unités il contient.
+
+     Deux sources, dans cet ordre : le champ numérique product_quantity, propre
+     mais qui ne dit jamais le nombre d'unités ; puis le texte libre quantity,
+     moins sûr mais seul à porter parfois le multipack. On garde le nombre
+     d'unités du texte même quand le poids vient du champ numérique. */
+  function readPack(p) {
+    var libre = window.Portion ? window.Portion.parseQuantity(p.quantity) : null;
+    var total = parseFloat(p.product_quantity);
+    var unite = String(p.product_quantity_unit || '').toLowerCase();
+    if (!(isFinite(total) && total > 0)) {
+      if (!libre) return null;
+      return { total: libre.total, unites: libre.unites, unite: libre.unite };
+    }
+    return {
+      total: Math.round(total * 100) / 100,
+      unites: (libre && libre.unites) || null,
+      // Le champ d'unité est parfois vide : on retombe sur ce que dit le texte.
+      unite: (unite === 'ml' || unite === 'l' || unite === 'cl') ? 'ml'
+             : (unite === 'g' || unite === 'kg') ? 'g'
+             : (libre ? libre.unite : 'g')
     };
   }
 
