@@ -102,9 +102,28 @@ case "$LIGNE" in
   *) echo "::error::Rapport de démarrage illisible."; exit 1 ;;
 esac
 
+# Deux pannes distinctes, deux champs distincts.
+# manques= : le module JS du plugin n'est pas dans vendor/capacitor-plugins.js.
+#            Le bundle est un artefact de compilation : il peut être incomplet.
+# natif=   : le module est là, mais le plugin ne s'est pas enregistré côté
+#            Android. L'app s'ouvre, l'écran s'affiche, et l'appui sur le bouton
+#            ne fait rien. C'est la panne que rien d'autre ne voit.
 MANQUES=$(sed -n 's/.*manques=\([^ ]*\).*/\1/p' <<< "$LIGNE")
 if [ "$MANQUES" != aucun ]; then
-  echo "::error::L'app démarre mais des plugins natifs requis manquent : $MANQUES"
+  echo "::error::L'app démarre mais des modules de plugin manquent au bundle : $MANQUES"
+  exit 1
+fi
+
+ENTETES=$(sed -n 's/.*entetes=\([^ ]*\).*/\1/p' <<< "$LIGNE")
+if [ "$ENTETES" != lues ]; then
+  echo "::error::Capacitor.PluginHeaders illisible : impossible de vérifier l'enregistrement natif."
+  echo "Sans cette liste, un « natif=ok » ne voudrait rien dire."
+  exit 1
+fi
+
+NATIF=$(sed -n 's/.*natif=\([^ ]*\).*/\1/p' <<< "$LIGNE")
+if [ "$NATIF" != ok ]; then
+  echo "::error::Plugins présents dans le bundle mais NON enregistrés côté Android : $NATIF"
   exit 1
 fi
 
