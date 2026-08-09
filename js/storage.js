@@ -17,7 +17,9 @@
     disclaimer: 'diabete.disclaimer.v1',
     customFoods: 'diabete.customfoods.v1',
     recentFoods: 'diabete.recentfoods.v1',
-    savedMeals: 'diabete.savedmeals.v1'
+    savedMeals: 'diabete.savedmeals.v1',
+    packaging: 'diabete.emballages.v1',
+    products: 'diabete.produits.v1'
   };
 
   /* Catalogue de modèles par fournisseur.
@@ -388,6 +390,18 @@
 
   function isObject(v) {
     return !!v && Object.prototype.toString.call(v) === '[object Object]';
+  }
+  /* Sans ça, « pâtes » ne trouve pas « pates » et l'utilisateur conclut à tort
+     que son produit n'est pas là. \u0300-\u036f est le bloc des accents
+     combinants isolés par la décomposition NFD.
+
+     Volontairement distinct de normalizeFoodText, qui sert à RECONNAÎTRE un
+     aliment : celui-là mappe des synonymes et efface la ponctuation, ce qui
+     déformerait un nom de marque. Ici on cherche une sous-chaîne dans un nom
+     commercial. */
+  function sansAccents(t) {
+    var s = String(t == null ? '' : t).trim().toLowerCase();
+    return s.normalize ? s.normalize('NFD').replace(/[\u0300-\u036f]/g, '') : s;
   }
   function finite(v) {
     return typeof v === 'number' && isFinite(v) ? v : null;
@@ -1110,6 +1124,150 @@
       var list = this.getCustomFoods().filter(function (f) { return f.id !== id; });
       write(KEYS.customFoods, list);
       return list;
+    },
+
+    /* ----- Emballages connus, par code-barres -----
+       OpenFoodFacts sait presque toujours ce que pèse un paquet, presque jamais
+       combien d'unités il contient : personne ne saisit « 12 biscuits ». C'est
+       donc à toi de le dire, mais une seule fois — au second scan du même
+       produit, la réponse est déjà là.
+
+       Ce que la base publique donne (le poids) reste relu à chaque fois ; seul
+       ce qu'elle ignore (le nombre d'unités et leur nom) est mémorisé ici. */
+    getPackaging: function (code) {
+      var c = String(code || '').replace(/\D/g, '');
+      if (!c) return null;
+      var p = read(KEYS.packaging, {})[c];
+      if (!isObject(p)) return null;
+      var total = finite(p.total), unites = finite(p.unites);
+      if (!(total > 0) || !(unites > 0)) return null;
+      return {
+        total: total,
+        unites: unites,
+        label: typeof p.label === 'string' ? p.label.slice(0, 24) : '',
+        unite: p.unite === 'ml' ? 'ml' : 'g'
+      };
+    },
+    setPackaging: function (code, info) {
+      var c = String(code || '').replace(/\D/g, '');
+      if (!c || !isObject(info)) return false;
+      var total = finite(info.total), unites = finite(info.unites);
+      if (!(total > 0) || !(unites > 0)) return false;
+      var tous = read(KEYS.packaging, {});
+      if (!isObject(tous)) tous = {};
+      tous[c] = {
+        total: total,
+        unites: unites,
+        label: typeof info.label === 'string' ? info.label.slice(0, 24) : '',
+        unite: info.unite === 'ml' ? 'ml' : 'g',
+        ts: Date.now()
+      };
+      /* Borne volontairement basse : ce sont les produits que TU achètes, pas un
+         catalogue. Au-delà, on oublie les plus anciens plutôt que de faire
+         grossir indéfiniment un stockage partagé avec les photos. */
+      var codes = Object.keys(tous);
+      if (codes.length > 300) {
+        codes.sort(function (a, b) { return (tous[b].ts || 0) - (tous[a].ts || 0); });
+        var garde = {};
+        codes.slice(0, 300).forEach(function (k) { garde[k] = tous[k]; });
+        tous = garde;
+      }
+      return write(KEYS.packaging, tous);
+    },
+
+    /* ----- Produits connus, par code-barres -----
+       Deux manques que la base publique ne comblera pas :
+
+       — OpenFoodFacts a des coupures régulières, et une cuisine n'a pas toujours
+         de réseau. Sans cache, un produit scanné dix fois échoue dix fois.
+       — Aucun catalogue n'est complet. Un produit absent n'était jusqu'ici qu'un
+         cul-de-sac : « introuvable », et débrouille-toi.
+
+       Un produit recopié une fois depuis l'étiquette devient donc permanent. La
+       base utile n'est pas la plus grosse, c'est celle qui contient ce que tu
+       achètes — et celle-là, seule ton usage peut la construire.
+
+       source distingue ce qui vient d'OpenFoodFacts de ce que tu as saisi : on
+       rafraîchit le premier quand le réseau répond, jamais le second, qui vient
+       de l'emballage que tu avais sous les yeux. */
+    getProduct: function (code) {
+      var c = String(code || '').replace(/\D/g, '');
+      if (!c) return null;
+      var p = read(KEYS.products, {})[c];
+      if (!isObject(p)) return null;
+      var carb = finite(p.carb);
+      if (carb == null || carb < 0 || carb > 100) return null;
+      if (typeof p.n !== 'string' || !p.n) return null;
+      return {
+        n: p.n, brand: typeof p.brand === 'string' ? p.brand : '',
+        carb: carb, code: c,
+        serving: finite(p.serving),
+        pack: isObject(p.pack) ? p.pack : null,
+        source: p.source === 'perso' ? 'perso' : 'off',
+        ts: finite(p.ts) || 0
+      };
+    },
+    setProduct: function (code, food, source) {
+      var c = String(code || '').replace(/\D/g, '');
+      if (!c || !isObject(food)) return false;
+      var carb = finite(food.carb);
+      if (carb == null || carb < 0 || carb > 100) return false;
+      if (typeof food.n !== 'string' || !food.n.trim()) return false;
+
+      var tous = read(KEYS.products, {});
+      if (!isObject(tous)) tous = {};
+      var ancien = tous[c];
+      /* Une réponse d'OpenFoodFacts n'écrase pas une saisie personnelle : tu as
+         lu l'emballage, la base a été remplie par un inconnu. */
+      if (isObject(ancien) && ancien.source === 'perso' && source !== 'perso') return false;
+
+      tous[c] = {
+        n: food.n.trim().slice(0, 120),
+        brand: typeof food.brand === 'string' ? food.brand.slice(0, 60) : '',
+        carb: carb,
+        serving: finite(food.serving),
+        pack: isObject(food.pack) ? food.pack : null,
+        source: source === 'perso' ? 'perso' : 'off',
+        ts: Date.now()
+      };
+
+      /* Purge par ancienneté, mais les saisies personnelles passent en dernier :
+         une réponse d'OpenFoodFacts se retrouve d'un scan, ce que tu as recopié
+         à la main serait perdu pour de bon. */
+      var codes = Object.keys(tous);
+      if (codes.length > 500) {
+        codes.sort(function (a, b) {
+          var pa = tous[a].source === 'perso' ? 1 : 0;
+          var pb = tous[b].source === 'perso' ? 1 : 0;
+          if (pa !== pb) return pb - pa;
+          return (tous[b].ts || 0) - (tous[a].ts || 0);
+        });
+        var garde = {};
+        codes.slice(0, 500).forEach(function (k) { garde[k] = tous[k]; });
+        tous = garde;
+      }
+      return write(KEYS.products, tous);
+    },
+    countProducts: function () {
+      var tous = read(KEYS.products, {});
+      return isObject(tous) ? Object.keys(tous).length : 0;
+    },
+    /* Recherche par nom dans les produits déjà rencontrés. Sert quand
+       OpenFoodFacts ne répond pas : les produits qu'on rachète chaque semaine
+       restent trouvables sans réseau. Comparaison sans accents ni casse, sinon
+       « pâtes » ne trouverait pas « pates ». */
+    searchProducts: function (query) {
+      var q = sansAccents(query);
+      if (q.length < 2) return [];
+      var tous = read(KEYS.products, {});
+      if (!isObject(tous)) return [];
+      var self = this;
+      return Object.keys(tous).map(function (c) { return self.getProduct(c); })
+        .filter(function (p) {
+          return p && sansAccents(p.n + ' ' + p.brand).indexOf(q) !== -1;
+        })
+        .sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); })
+        .slice(0, 20);
     }
   };
 

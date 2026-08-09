@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '77'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '78'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -2509,6 +2509,9 @@
     search.addEventListener('input', function () { renderFoodResults(search.value); });
     initCustomFoodForm();
     initOnlineTools();
+    initPortionCard();
+    initUnknownProduct();
+    renderLocalNote();
     renderChips();
     renderFoodResults('');
     renderSavedMeals();
@@ -2548,18 +2551,29 @@
       renderOffResults(list);
     }).catch(function (e) {
       status.hidden = true;
+      /* OpenFoodFacts injoignable ou en panne. Les produits déjà rencontrés
+         restent trouvables : c'est le seul moment où ce repli sert vraiment,
+         et c'est aussi le moment où on est devant son frigo sans réseau. */
+      var locaux = Storage.searchProducts ? Storage.searchProducts(query) : [];
+      if (locaux.length) {
+        renderOffResults(locaux, 'hors ligne');
+        toast('OpenFoodFacts injoignable — ' + locaux.length +
+              ' produit(s) trouvé(s) dans ta base locale.');
+        return;
+      }
       toast(e.message);
     });
   }
 
-  function renderOffResults(list) {
+  function renderOffResults(list, origine) {
     var box = $('off-results');
     box.hidden = false;
     if (!list.length) {
       box.innerHTML = '<p class="empty">Aucun produit trouvé en ligne. Essaie un autre mot, ou un code-barres.</p>';
       return;
     }
-    box.innerHTML = '<div class="off-head">' + list.length + ' produit(s) en ligne :</div>';
+    box.innerHTML = '<div class="off-head">' + list.length + ' produit(s) ' +
+      (origine === 'hors ligne' ? 'dans ta base locale' : 'en ligne') + ' :</div>';
     list.forEach(function (f) {
       var el = document.createElement('div');
       el.className = 'food-item off-item';
@@ -2568,7 +2582,7 @@
         '<span class="food-label">' + escapeHtml(f.n) + brand +
         ' <span class="item-detail">(' + fr(f.carb) + ' g/100 g)</span></span>' +
         '<span class="food-actions"><span class="food-add">＋</span></span>';
-      var add = function () { addOffFood(f); };
+      var add = function () { showPortionCard(f); };
       el.querySelector('.food-label').addEventListener('click', add);
       el.querySelector('.food-add').addEventListener('click', function (e) { e.stopPropagation(); add(); });
       box.appendChild(el);
@@ -2578,14 +2592,174 @@
   // Ajoute un produit OFF au repas (portion = taille de service si connue).
   function addOffFood(f) {
     var portions = f.serving ? [['1 portion', f.serving]] : [];
-    var name = f.n + (f.brand ? ' (' + f.brand + ')' : '');
-    addFoodToMeal({ n: name, carb: f.carb, portions: portions, custom: false });
+    addFoodToMeal({ n: offName(f), carb: f.carb, portions: portions, custom: false });
+  }
+
+  function offName(f) {
+    return f.n + (f.brand ? ' (' + f.brand + ')' : '');
+  }
+
+  /* ---------- Calcul de portion à l'unité ----------
+     L'emballage donne des glucides pour 100 g. On ne mange pas 100 g : on mange
+     deux biscuits. Faire la conversion de tête suppose de connaître le poids du
+     paquet, de le diviser par le nombre d'unités, puis de multiplier — pendant
+     qu'on est en train de se servir.
+
+     OpenFoodFacts sait presque toujours ce que pèse le paquet, et presque jamais
+     combien d'unités il contient : personne ne saisit « 12 biscuits ». Ce
+     dernier chiffre vient donc de toi, mais une seule fois par code-barres.
+
+     serving_size n'est volontairement pas utilisé comme raccourci : il est
+     saisi par les contributeurs et régulièrement faux (le Prince au chocolat y
+     annonce une portion de 250 g, soit la moitié du paquet). */
+  var portionProduit = null;
+
+  function showPortionCard(f) {
+    var carte = $('portion-card');
+    if (!carte) { addOffFood(f); return; }
+    portionProduit = f;
+
+    /* Tout produit qui arrive jusqu'ici est gardé : c'est ce qui rend l'app
+       utilisable quand OpenFoodFacts est en panne ou qu'il n'y a pas de réseau.
+       setProduct refuse d'écraser une saisie personnelle par une réponse de la
+       base publique, la source est donc sûre. */
+    if (f.code && Storage.setProduct) Storage.setProduct(f.code, f, f.source || 'off');
+    renderLocalNote();
+
+    var memoire = (f.code && Storage.getPackaging) ? Storage.getPackaging(f.code) : null;
+    var pack = f.pack || null;
+    // La mémoire l'emporte : c'est TOI qui as compté, la base publique a deviné.
+    var total = (memoire && memoire.total) || (pack && pack.total) || '';
+    var unites = (memoire && memoire.unites) || (pack && pack.unites) || '';
+    var unite = (memoire && memoire.unite) || (pack && pack.unite) || 'g';
+
+    $('portion-name').textContent = offName(f);
+    $('portion-carb').textContent = fr(f.carb) + ' g de glucides pour 100 ' + unite +
+      (f.code ? ' · code ' + f.code : '');
+    $('portion-total').value = total;
+    $('portion-units').value = unites;
+    $('portion-label').value = (memoire && memoire.label) || '';
+    $('portion-eat').value = 1;
+    $('portion-unite').textContent = unite;
+
+    carte.hidden = false;
+    updatePortion();
+    /* Le champ manquant reçoit le curseur : après un scan, c'est presque
+       toujours le nombre d'unités, la seule chose que la base ignore. */
+    var vide = !total ? $('portion-total') : (!unites ? $('portion-units') : $('portion-eat'));
+    carte.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    try { vide.focus(); } catch (e) {}
+  }
+
+  function hidePortionCard() {
+    var carte = $('portion-card');
+    if (carte) carte.hidden = true;
+    portionProduit = null;
+  }
+
+  function portionSaisie() {
+    return {
+      total: parseFloat(($('portion-total').value || '').replace(',', '.')),
+      unites: parseFloat(($('portion-units').value || '').replace(',', '.')),
+      mange: parseFloat(($('portion-eat').value || '').replace(',', '.')),
+      label: ($('portion-label').value || '').trim()
+    };
+  }
+
+  /* Singulier/pluriel du nom d'unité. Sans ça on lit « 1 biscuits », et une
+     interface qui écrit mal un nombre inspire moins confiance dans le nombre. */
+  function nomUnite(label, n) {
+    var base = label || 'unité';
+    if (n <= 1) return base.replace(/s$/, '');
+    return /s$/.test(base) ? base : base + 's';
+  }
+
+  function updatePortion() {
+    if (!portionProduit) return;
+    var s = portionSaisie();
+    var unite = $('portion-unite').textContent || 'g';
+    var res = $('portion-result');
+    var btn = $('portion-add');
+    $('portion-eat-unit').textContent = nomUnite(s.label, s.mange || 1) + '(s)';
+
+    var r = Portion.calcule(s.total, s.unites, s.mange, portionProduit.carb);
+    if (!r) {
+      btn.disabled = true;
+      res.className = 'portion-result';
+      res.textContent = !(s.total > 0)
+        ? 'Indique le poids du paquet (il est écrit sur l’emballage).'
+        : !(s.unites > 0)
+          ? 'Combien d’unités contient le paquet ? Compte-les une fois, c’est retenu.'
+          : 'Indique combien tu en manges.';
+      return;
+    }
+    btn.disabled = false;
+    res.className = 'portion-result ok';
+    res.innerHTML =
+      '1 ' + escapeHtml(nomUnite(s.label, 1)) + ' = <strong>' + fr(r.parUnite) + ' ' + unite + '</strong><br>' +
+      fr(s.mange) + ' ' + escapeHtml(nomUnite(s.label, s.mange)) + ' = <strong>' +
+      fr(r.quantite) + ' ' + unite + '</strong> → <strong>' + Math.round(r.glucides) +
+      ' g de glucides</strong>';
+  }
+
+  function ajouterPortion() {
+    if (!portionProduit) return;
+    var s = portionSaisie();
+    var r = Portion.calcule(s.total, s.unites, s.mange, portionProduit.carb);
+    if (!r) return;
+
+    if (portionProduit.code && Storage.setPackaging) {
+      Storage.setPackaging(portionProduit.code, {
+        total: s.total, unites: s.unites, label: s.label,
+        unite: $('portion-unite').textContent
+      });
+    }
+
+    /* On enregistre l'unité comme PORTION, pas comme un poids figé : la ligne du
+       repas garde ainsi son sélecteur et son compteur, et corriger « finalement
+       j'en ai pris trois » reste un seul appui. */
+    var nom = offName(portionProduit);
+    addFoodToMeal({
+      n: nom, carb: portionProduit.carb, custom: false,
+      portions: [['1 ' + nomUnite(s.label, 1), r.parUnite]],
+      qty: s.mange
+    });
+    hidePortionCard();
+  }
+
+  /* Le nombre de produits gardés localement. Ce n'est pas de la décoration : il
+     dit combien de produits restent utilisables quand OpenFoodFacts tombe ou
+     qu'il n'y a pas de réseau — et il grandit à chaque scan. */
+  function renderLocalNote() {
+    var el = $('off-local-note');
+    if (!el || !Storage.countProducts) return;
+    var n = Storage.countProducts();
+    el.textContent = n
+      ? 'Nécessite une connexion — sauf pour les ' + n +
+        ' produit(s) déjà scannés, gardés sur le téléphone.'
+      : 'Nécessite une connexion. Chaque produit scanné est ensuite gardé sur le téléphone.';
+  }
+
+  function initPortionCard() {
+    if (!$('portion-card')) return;
+    ['portion-total', 'portion-units', 'portion-eat', 'portion-label'].forEach(function (id) {
+      $(id).addEventListener('input', updatePortion);
+    });
+    $('portion-add').addEventListener('click', ajouterPortion);
+    $('portion-close').addEventListener('click', hidePortionCard);
+    // Sortie de secours : un produit qu'on pèse (pâte à tartiner, riz) n'a pas
+    // d'unités, et forcer un nombre d'unités n'aurait aucun sens.
+    $('portion-whole').addEventListener('click', function () {
+      if (portionProduit) addOffFood(portionProduit);
+      hidePortionCard();
+    });
   }
 
   function openBarcode() {
     $('barcode-manual').value = '';
     scanBusy = false; lastScanCode = null; lastScanAt = 0;
     $('barcode-status').hidden = true;
+    $('barcode-unknown').hidden = true;
     $('barcode-modal').hidden = false;
     var video = $('barcode-video');
     if (Barcode.supported()) {
@@ -2615,22 +2789,83 @@
     s.innerHTML = msg;
   }
 
+  /* Recherche d'un code-barres.
+
+     OpenFoodFacts d'abord, parce que c'est la source la plus complète. Mais deux
+     situations le rendaient inutilisable et n'étaient pas traitées :
+
+     — le service est en panne ou il n'y a pas de réseau (une cuisine n'est pas
+       toujours couverte) : un produit déjà scanné échouait quand même ;
+     — le produit n'est dans aucun catalogue : c'était un cul-de-sac.
+
+     Désormais tout produit trouvé est conservé, et un produit inconnu peut être
+     recopié une fois depuis son étiquette. La base qui compte n'est pas la plus
+     grosse, c'est celle qui contient ce que tu achètes. */
+  var codeEnCours = null;
+
   function processBarcode(code) {
     scanBusy = true;
+    codeEnCours = code;
+    $('barcode-unknown').hidden = true;
     showBarcodeStatus('<div class="spinner"></div>Recherche du produit ' + escapeHtml(code) + '…');
+
+    var connu = Storage.getProduct ? Storage.getProduct(code) : null;
+
     return OFF.lookupBarcode(code).then(function (f) {
-      if (!f) {
-        showBarcodeStatus('Produit introuvable ou sans glucides connus pour ' + escapeHtml(code) +
-          '. Vise à nouveau, ou saisis un autre code.');
-        scanBusy = false;
+      if (f) {
+        closeBarcode();
+        showPortionCard(f);
         return;
       }
-      closeBarcode();
-      addOffFood(f);
-      toast(f.n + ' ajouté (' + fr(f.carb) + ' g/100 g).');
+      // Réseau bon, produit réellement absent d'OpenFoodFacts.
+      if (connu) { closeBarcode(); showPortionCard(connu); return; }
+      demanderProduit(code, 'Ce produit n’est pas dans OpenFoodFacts.');
     }).catch(function (e) {
-      showBarcodeStatus(e.message);
-      scanBusy = false;
+      /* Réseau en panne. Un produit déjà connu localement doit continuer à
+         marcher : c'est tout l'intérêt de l'avoir gardé. */
+      if (connu) {
+        closeBarcode();
+        showPortionCard(connu);
+        toast('Hors ligne : ' + connu.n + ' repris de ta base locale.');
+        return;
+      }
+      demanderProduit(code, e.message);
+    });
+  }
+
+  function demanderProduit(code, raison) {
+    scanBusy = false;
+    showBarcodeStatus(escapeHtml(raison));
+    var bloc = $('barcode-unknown');
+    if (!bloc) return;
+    bloc.hidden = false;
+    $('bu-name').value = '';
+    $('bu-carb').value = '';
+    $('bu-pack').value = '';
+    try { $('bu-name').focus(); } catch (e) {}
+  }
+
+  function initUnknownProduct() {
+    var save = $('bu-save');
+    if (!save) return;
+    save.addEventListener('click', function () {
+      var nom = ($('bu-name').value || '').trim();
+      var carb = parseFloat(($('bu-carb').value || '').replace(',', '.'));
+      var pack = parseFloat(($('bu-pack').value || '').replace(',', '.'));
+      if (!nom) { toast('Donne un nom au produit.'); return; }
+      if (!(carb >= 0 && carb <= 100 && isFinite(carb))) {
+        toast('Indique les glucides pour 100 g, entre 0 et 100.');
+        return;
+      }
+      var f = {
+        n: nom, brand: '', carb: Math.round(carb * 10) / 10,
+        code: codeEnCours || '', serving: null, source: 'perso',
+        pack: (pack > 0 && isFinite(pack)) ? { total: pack, unites: null, unite: 'g' } : null
+      };
+      if (codeEnCours && Storage.setProduct) Storage.setProduct(codeEnCours, f, 'perso');
+      closeBarcode();
+      showPortionCard(f);
+      toast(nom + ' enregistré : ce code-barres est maintenant reconnu.');
     });
   }
 
@@ -2707,7 +2942,8 @@
       portions: portions,
       mode: portions.length ? 'preset' : 'grams',
       portionIndex: 0,
-      qty: 1,
+      // qty vient du calcul de portion (« j'en mange 2 ») ; 1 partout ailleurs.
+      qty: (portions.length && f.qty > 0) ? f.qty : 1,
       grams: portions.length ? 0 : 100
     });
     Storage.addRecentFood(f); // mémorise pour la catégorie « Récents »
@@ -2755,7 +2991,12 @@
       // Sélecteur de portion : chaque mesure courante + « Grammes… »
       var opts = it.portions.map(function (p, i) {
         var sel = (it.mode === 'preset' && it.portionIndex === i) ? ' selected' : '';
-        return '<option value="' + i + '"' + sel + '>' + escapeHtml(p[0]) + ' (' + p[1] + ' g)</option>';
+        /* fr() et non p[1] brut : depuis le calcul de portion, une portion peut
+           valoir 41,67 g. Sans mise en forme on lisait « 41.67 g », avec un
+           point, au milieu d'une interface qui écrit partout ailleurs « 41,7 ».
+           La valeur exacte reste utilisée pour le calcul — seul l'affichage est
+           arrondi, sinon 12 unités ne feraient plus le paquet. */
+        return '<option value="' + i + '"' + sel + '>' + escapeHtml(p[0]) + ' (' + fr(p[1]) + ' g)</option>';
       }).join('');
       opts += '<option value="g"' + (it.mode === 'grams' ? ' selected' : '') + '>Grammes…</option>';
 

@@ -12,7 +12,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=77" />
+  <link rel="stylesheet" href="css/styles.css?v=78" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -306,7 +306,47 @@
           </div>
           <div id="off-status" class="status" hidden></div>
           <div id="off-results" class="food-results off-results" hidden></div>
-          <p class="hint tiny">Nécessite une connexion. Hors ligne, utilise l'onglet Aliments.</p>
+          <p class="hint tiny" id="off-local-note">Nécessite une connexion. Hors ligne, utilise l'onglet Aliments.</p>
+        </div>
+
+        <!-- Calcul de portion. L'emballage donne des glucides pour 100 g, mais
+             on ne mange pas 100 g : on mange deux biscuits. La conversion
+             demande le poids du paquet, le nombre d'unités, une division et une
+             multiplication — au moment précis où on est en train de manger. -->
+        <div id="portion-card" class="card portion-card" hidden>
+          <div class="portion-head">
+            <h2 id="portion-name">Produit</h2>
+            <button id="portion-close" class="icon-btn" aria-label="Fermer">✕</button>
+          </div>
+          <p id="portion-carb" class="hint tiny"></p>
+
+          <div class="portion-grid">
+            <label for="portion-total">Le paquet fait</label>
+            <span class="portion-field">
+              <input id="portion-total" class="input small" type="number" inputmode="decimal" min="1" step="1" />
+              <span id="portion-unite" class="portion-unit">g</span>
+            </span>
+
+            <label for="portion-units">et contient</label>
+            <span class="portion-field">
+              <input id="portion-units" class="input small" type="number" inputmode="numeric" min="1" step="1" />
+              <input id="portion-label" class="input small portion-name-field" type="text" placeholder="biscuits" maxlength="24" />
+            </span>
+
+            <label for="portion-eat">J'en mange</label>
+            <span class="portion-field">
+              <input id="portion-eat" class="input small" type="number" inputmode="decimal" min="0" step="1" value="1" />
+              <span id="portion-eat-unit" class="portion-unit">unité(s)</span>
+            </span>
+          </div>
+
+          <p id="portion-result" class="portion-result">Indique le poids du paquet et le nombre d'unités.</p>
+
+          <div class="btn-row">
+            <button id="portion-add" class="btn btn-primary" disabled>Ajouter au repas</button>
+            <button id="portion-whole" class="btn btn-ghost">Saisir en grammes</button>
+          </div>
+          <p class="hint tiny">Le nombre d'unités est retenu pour ce code-barres : au prochain scan, il sera déjà rempli.</p>
         </div>
       </div>
 
@@ -655,6 +695,23 @@
         <button id="barcode-manual-go" class="btn btn-primary">OK</button>
       </div>
       <div id="barcode-status" class="status" hidden></div>
+
+      <!-- Produit absent d'OpenFoodFacts. Recopier l'étiquette une fois vaut
+           mieux que de renoncer : au scan suivant, le produit est reconnu, y
+           compris sans réseau. C'est ce qui fait grandir la base utile — celle
+           des produits que TU achètes. -->
+      <div id="barcode-unknown" class="barcode-unknown" hidden>
+        <p class="hint tiny">Recopie l'étiquette une seule fois : ce code-barres sera reconnu ensuite, même hors ligne.</p>
+        <label for="bu-name">Nom du produit</label>
+        <input id="bu-name" class="input" type="text" placeholder="ex. Biscuits sablés" maxlength="80" />
+        <label for="bu-carb">Glucides pour 100 g</label>
+        <input id="bu-carb" class="input small" type="number" inputmode="decimal" min="0" max="100" step="0.1" placeholder="g / 100 g" />
+        <label for="bu-pack">Poids du paquet <span class="tag">optionnel</span></label>
+        <input id="bu-pack" class="input small" type="number" inputmode="decimal" min="1" step="1" placeholder="ex. 500" />
+        <div class="btn-row">
+          <button id="bu-save" class="btn btn-primary">Enregistrer ce produit</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -664,19 +721,20 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=77"></script>
-  <script src="js/native.js?v=77"></script>
-  <script src="js/storage.js?v=77"></script>
-  <script src="js/foods.js?v=77"></script>
-  <script src="js/gi.js?v=77"></script>
-  <script src="js/queue.js?v=77"></script>
-  <script src="js/report.js?v=77"></script>
-  <script src="js/bench.js?v=77"></script>
-  <script src="js/estimator.js?v=77"></script>
-  <script src="js/camera.js?v=77"></script>
-  <script src="js/off.js?v=77"></script>
-  <script src="vendor/zxing.min.js?v=77"></script>
-  <script src="js/barcode.js?v=77"></script>
-  <script src="js/app.js?v=77"></script>
+  <script src="vendor/capacitor-plugins.js?v=78"></script>
+  <script src="js/native.js?v=78"></script>
+  <script src="js/storage.js?v=78"></script>
+  <script src="js/foods.js?v=78"></script>
+  <script src="js/gi.js?v=78"></script>
+  <script src="js/queue.js?v=78"></script>
+  <script src="js/report.js?v=78"></script>
+  <script src="js/bench.js?v=78"></script>
+  <script src="js/estimator.js?v=78"></script>
+  <script src="js/camera.js?v=78"></script>
+  <script src="js/portion.js?v=78"></script>
+  <script src="js/off.js?v=78"></script>
+  <script src="vendor/zxing.min.js?v=78"></script>
+  <script src="js/barcode.js?v=78"></script>
+  <script src="js/app.js?v=78"></script>
 </body>
 </html>
