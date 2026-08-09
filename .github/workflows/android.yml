@@ -79,6 +79,7 @@ jobs:
       ota_tag: ${{ steps.variant.outputs.ota_tag }}
       ota_version_tag: ${{ steps.ota.outputs.version_tag }}
       title: ${{ steps.variant.outputs.title }}
+      app_id: ${{ steps.variant.outputs.app_id }}
     steps:
       - uses: actions/checkout@v4
 
@@ -540,9 +541,79 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # ---------------------------------------------------------------------------
+  # Le job « build » vérifie abondamment que l'APK est le BON FICHIER : signature,
+  # certificat, applicationId, versionCode et versionName relus dans le badging,
+  # sommes SHA-256 recoupées entre apk.json, latest.json et les fichiers réels.
+  # Il ne vérifie nulle part qu'il DÉMARRE. Or un artefact parfaitement conforme
+  # peut s'ouvrir sur un écran blanc, ou sans son plugin d'appareil photo.
+  #
+  # Ici on installe l'APK signé — celui qui sera publié, pas une variante debug —
+  # sur un émulateur, on le lance, et on attend la ligne que l'app écrit une fois
+  # réellement démarrée. Son absence EST le résultat : un APK qui plante au
+  # lancement ne l'écrit jamais.
+  #
+  # Ce job bloque la publication. Un test de démarrage qu'on peut ignorer ne dit
+  # rien de plus que pas de test du tout.
+  #
+  # Ce qu'il ne prouve PAS : l'émulateur n'a ni ARCore, ni capteur de profondeur,
+  # ni vrai appareil photo. Un vert ici veut dire « ça démarre et le pont natif
+  # répond », jamais « la mesure est juste ».
+  emulateur:
+    name: Lancer l'APK sur un émulateur
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: dist
+
+      - name: Vérifier l'artefact transféré
+        run: (cd dist && sha256sum --check SHA256SUMS)
+
+      # Sans KVM l'émulateur retombe sur une émulation logicielle : plusieurs
+      # dizaines de minutes au lieu de quelques-unes.
+      - name: Activer KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Installer, lancer et observer
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          APP_ID: ${{ needs.build.outputs.app_id }}
+          APP_VERSION: ${{ needs.build.outputs.app_version }}
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          disable-animations: true
+          script: bash .github/scripts/smoke-apk.sh
+
+      - name: Journaux et capture d'écran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulateur-${{ needs.build.outputs.app_version }}
+          path: |
+            emulateur/
+          if-no-files-found: warn
+          retention-days: 14
+
   publish:
     name: Publier les releases
-    needs: build
+    needs: [build, emulateur]
     if: >-
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/codex' ||

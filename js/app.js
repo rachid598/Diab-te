@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '76'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '77'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -4368,7 +4368,37 @@
       .then(valide);
   }
 
+  /* Le même auto-diagnostic que celui lu par la CI, mais à l'écran. L'émulateur
+     de CI n'a ni ARCore, ni capteur de profondeur, ni vrai appareil photo : il
+     prouve que l'app démarre, jamais qu'elle fonctionne SUR TON TÉLÉPHONE. Ici
+     tu as la réponse en cinq secondes, au lieu de la deviner. */
+  var DIAG_NOMS = {
+    camera: 'appareil photo', fichiers: 'fichiers', http: 'réseau natif',
+    maj: 'mises à jour', coffre: 'coffre à clés', notif: 'notifications',
+    partage: 'partage', app: 'infos app', profondeur: 'profondeur (LiDAR/ARCore)'
+  };
+
+  function renderDiagNatif() {
+    var el = $('diag-natif');
+    if (!el || !Native.selfCheck) return;
+    var d = Native.selfCheck();
+    if (!d.isApp) return;                 // dans le navigateur, rien à diagnostiquer
+    el.hidden = false;
+    var bouts = Object.keys(DIAG_NOMS).map(function (k) {
+      var v = d[k];
+      var marque = v === 'ok' ? '✅' : (v === 'ABSENT' ? '❌' : '—');
+      return marque + ' ' + escapeHtml(DIAG_NOMS[k]);
+    });
+    el.className = 'update-status' + (d.manques.length ? ' us-warn' : ' us-ok');
+    el.innerHTML = (d.manques.length
+      ? '<strong>Capacités natives incomplètes</strong> — ' +
+        escapeHtml(d.manques.join(', ')) + ' n\'ont pas répondu. Réinstalle l\'APK.<br>'
+      : '<strong>Capacités natives</strong> — tout ce qui est requis répond.<br>') +
+      '<span class="tiny">' + bouts.join(' · ') + '</span>';
+  }
+
   function initApkCheck() {
+    renderDiagNatif();
     var bloc = $('apk-block');
     if (!bloc) return;
     /* Sur iOS l'APK n'existe pas : l'app y est posée par Xcode, et proposer un
@@ -4535,6 +4565,31 @@
         toast('La mise à jour n’a pas pu être validée ; l’APK gardera la version précédente.');
       });
     }
+    annoncerDemarrage();
+  }
+
+  /* Dépose une ligne unique disant que l'app a fini de démarrer et quelles
+     capacités natives ont répondu. La CI installe l'APK sur un émulateur, le
+     lance, et lit cette ligne. Son ABSENCE est le signal recherché — un APK qui
+     plante au lancement ou qui reste sur un écran blanc ne l'écrit jamais, et
+     c'est précisément la panne que les contrôles d'intégrité de la chaîne de
+     publication (signature, empreintes, versionCode) ne peuvent pas voir.
+
+     Placée en toute fin d'init : elle n'est atteignable qu'une fois le pont
+     natif prêt, le stockage déchiffré et l'interface rendue.
+
+     Le numéro de build n'est connu qu'après appBuild(), d'où l'attente. */
+  function annoncerDemarrage() {
+    if (!Native.writeStartupReport) return;
+    var ecrire = function () {
+      Native.writeStartupReport(APP_VERSION).then(function (ligne) {
+        // Sans effet dans l'APK publié (Capacitor n'y relaie pas la console),
+        // mais c'est le seul canal disponible dans le navigateur.
+        try { console.log(ligne); } catch (e) {}
+      });
+    };
+    if (Native.isApp && Native.appBuild) Native.appBuild().then(ecrire, ecrire);
+    else ecrire();
   }
 
   /* On attend que le pont natif soit prêt AVANT le premier rendu : les clés API

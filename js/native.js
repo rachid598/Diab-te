@@ -86,6 +86,80 @@
     return markedReadyPromise;
   }
 
+  /* ---------- Auto-diagnostic ----------
+     Un APK peut être parfaitement signé, avoir le bon versionCode et la bonne
+     empreinte, et pourtant démarrer sans son plugin d'appareil photo : le
+     fichier est valide, le comportement ne l'est pas. La CI vérifiait jusqu'ici
+     l'identité de l'artefact, jamais son fonctionnement.
+
+     Cette liste dit, pour chaque capacité, si le plugin natif a réellement
+     RÉPONDU à l'enregistrement. Elle sert à deux endroits : la ligne écrite
+     dans les journaux au démarrage, que la CI lit sur un émulateur, et l'écran
+     de diagnostic des réglages, sur ton téléphone — le seul endroit où la
+     profondeur existe vraiment.
+
+     DepthScan est marqué « optionnel » : son absence est normale sur un
+     appareil sans ARCore, et la traiter comme une panne rendrait le diagnostic
+     inutilisable là où il sert le plus. */
+  var CAPACITES = [
+    { cle: 'camera', plugin: 'Camera', requis: true },
+    { cle: 'fichiers', plugin: 'Filesystem', requis: true },
+    { cle: 'http', plugin: 'CapacitorHttp', requis: true },
+    { cle: 'maj', plugin: 'CapacitorUpdater', requis: true },
+    { cle: 'coffre', plugin: 'SecureStorage', requis: true },
+    { cle: 'notif', plugin: 'LocalNotifications', requis: true },
+    { cle: 'partage', plugin: 'Share', requis: true },
+    { cle: 'app', plugin: 'App', requis: true },
+    { cle: 'profondeur', plugin: 'DepthScan', requis: false }
+  ];
+
+  function selfCheck() {
+    var out = { platform: platform, isApp: isApp, build: nativeBuild, manques: [] };
+    CAPACITES.forEach(function (c) {
+      var present = !!(Cap && Cap[c.plugin]);
+      out[c.cle] = !isApp ? 'web' : (present ? 'ok' : (c.requis ? 'ABSENT' : 'absent'));
+      if (isApp && !present && c.requis) out.manques.push(c.plugin);
+    });
+    return out;
+  }
+
+  // Une seule ligne, lisible par un humain comme par un grep de CI.
+  function selfCheckLine(version) {
+    var d = selfCheck();
+    var bouts = ['GLUCOVISION_READY',
+                 'platform=' + d.platform,
+                 'version=' + (version == null ? '?' : version),
+                 'build=' + (d.build == null ? '?' : d.build)];
+    CAPACITES.forEach(function (c) { bouts.push(c.cle + '=' + d[c.cle]); });
+    bouts.push('manques=' + (d.manques.length ? d.manques.join(',') : 'aucun'));
+    return bouts.join(' ');
+  }
+
+  /* La ligne est aussi ÉCRITE dans le cache privé de l'application.
+
+     Pourquoi pas simplement console.log : dans un APK release, Capacitor ne
+     relaie PAS les messages de console vers logcat. Son réglage loggingBehavior
+     vaut « debug » par défaut, c'est-à-dire actif uniquement sur une compilation
+     debuggable. S'appuyer sur les journaux aurait donc imposé d'activer la
+     journalisation dans l'APK publié — autrement dit de tester autre chose que
+     ce qu'on livre, et d'ouvrir au passage un canal de fuite permanent sur les
+     téléphones. Un fichier de cache ne change rien au comportement livré : il
+     est privé à l'app, jamais sauvegardé, et le système le nettoie. */
+  var RAPPORT = 'demarrage.txt';
+
+  function writeStartupReport(version) {
+    var ligne = selfCheckLine(version);
+    if (!isApp || !Cap.Filesystem) return resolved(ligne);
+    // Un échec d'écriture ne doit pas empêcher l'app de démarrer : la CI verra
+    // l'absence du fichier, ce qui est justement le signal recherché.
+    return Cap.Filesystem.writeFile({
+      path: RAPPORT,
+      data: ligne + '\n',
+      directory: Cap.Directory.Cache,
+      encoding: 'utf8'
+    }).then(function () { return ligne; }, function () { return ligne; });
+  }
+
   // ---------- HTTP natif (sans CORS) ----------
 
   /* Dans l'APK la requête part du code Java, pas du navigateur : la politique
@@ -587,6 +661,9 @@
     platform: platform,
     ready: ready,
     markReady: markReady,
+    selfCheck: selfCheck,
+    selfCheckLine: selfCheckLine,
+    writeStartupReport: writeStartupReport,
     httpJson: httpJson,
 
     camera: { capture: capture, pickMany: pickMany },
