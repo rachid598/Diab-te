@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '78'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '79'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -4627,15 +4627,31 @@
     el.hidden = false;
     var bouts = Object.keys(DIAG_NOMS).map(function (k) {
       var v = d[k];
-      var marque = v === 'ok' ? '✅' : (v === 'ABSENT' ? '❌' : '—');
+      // Majuscules = requis et cassé ; minuscules = optionnel et simplement absent.
+      var marque = v === 'ok' ? '✅'
+        : (v === 'ABSENT' || v === 'SANS-NATIF') ? '❌' : '—';
       return marque + ' ' + escapeHtml(DIAG_NOMS[k]);
     });
-    el.className = 'update-status' + (d.manques.length ? ' us-warn' : ' us-ok');
-    el.innerHTML = (d.manques.length
-      ? '<strong>Capacités natives incomplètes</strong> — ' +
-        escapeHtml(d.manques.join(', ')) + ' n\'ont pas répondu. Réinstalle l\'APK.<br>'
-      : '<strong>Capacités natives</strong> — tout ce qui est requis répond.<br>') +
-      '<span class="tiny">' + bouts.join(' · ') + '</span>';
+    /* Deux pannes différentes, deux messages différents : un module absent du
+       bundle et un plugin non enregistré côté Android ne se réparent pas de la
+       même façon, et les confondre enverrait réinstaller pour rien. */
+    var casse = d.manques.concat(d.manquesNatifs);
+    el.className = 'update-status' + (casse.length ? ' us-warn' : ' us-ok');
+    var tete;
+    if (d.manques.length) {
+      tete = '<strong>Application incomplète</strong> — ' +
+        escapeHtml(d.manques.join(', ')) + ' manque(nt) au contenu web. ' +
+        'Vérifie les mises à jour.';
+    } else if (d.manquesNatifs.length) {
+      tete = '<strong>Capacités natives absentes</strong> — ' +
+        escapeHtml(d.manquesNatifs.join(', ')) + ' n\'est pas enregistré dans ' +
+        'cet APK. Réinstalle-le.';
+    } else if (!d.entetes) {
+      tete = '<strong>Capacités natives</strong> — non vérifiables ici.';
+    } else {
+      tete = '<strong>Capacités natives</strong> — tout ce qui est requis répond.';
+    }
+    el.innerHTML = tete + '<br><span class="tiny">' + bouts.join(' · ') + '</span>';
   }
 
   function initApkCheck() {

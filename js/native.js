@@ -93,14 +93,30 @@
      l'identité de l'artefact, jamais son fonctionnement.
 
      Cette liste dit, pour chaque capacité, si le plugin natif a réellement
-     RÉPONDU à l'enregistrement. Elle sert à deux endroits : la ligne écrite
-     dans les journaux au démarrage, que la CI lit sur un émulateur, et l'écran
-     de diagnostic des réglages, sur ton téléphone — le seul endroit où la
-     profondeur existe vraiment.
+     RÉPONDU à l'enregistrement. Elle sert à deux endroits : le rapport écrit au
+     démarrage, que la CI lit sur un émulateur, et l'écran de diagnostic des
+     réglages, sur ton téléphone — le seul endroit où la profondeur existe
+     vraiment.
 
-     DepthScan est marqué « optionnel » : son absence est normale sur un
-     appareil sans ARCore, et la traiter comme une panne rendrait le diagnostic
-     inutilisable là où il sert le plus. */
+     ATTENTION au piège, sur lequel la première version de ce fichier est tombée :
+     tester window.Cap.Camera ne prouve RIEN sur le natif. registerPlugin() et les
+     modules des plugins renvoient toujours un objet mandataire, y compris dans un
+     navigateur où aucun code Android n'existe. Cette vérification-là ne dit que
+     « le module JS est bien dans le bundle » — utile, puisque vendor/ est un
+     artefact de compilation, mais très loin de ce qu'on veut savoir.
+
+     La vraie source est Capacitor.PluginHeaders : la liste que le pont ANDROID
+     injecte au démarrage, contenant les plugins effectivement enregistrés côté
+     natif. C'est elle qui distingue un plugin présent d'un plugin oublié dans
+     MainActivity.
+
+     Les deux signaux sont donc rapportés séparément, parce qu'ils décrivent deux
+     pannes différentes : bundle incomplet d'un côté, enregistrement natif raté de
+     l'autre.
+
+     DepthScan est marqué « optionnel » : son absence est normale sur un appareil
+     sans ARCore, et la traiter comme une panne rendrait le diagnostic inutilisable
+     là où il sert le plus. */
   var CAPACITES = [
     { cle: 'camera', plugin: 'Camera', requis: true },
     { cle: 'fichiers', plugin: 'Filesystem', requis: true },
@@ -113,12 +129,33 @@
     { cle: 'profondeur', plugin: 'DepthScan', requis: false }
   ];
 
+  /* Enregistré côté ANDROID, d'après la liste injectée par le pont. Renvoie null
+     — et non false — quand la liste n'existe pas : on ne sait pas, et on ne doit
+     pas transformer une ignorance en accusation. */
+  function natifEnregistre(nom) {
+    var entetes = C && C.PluginHeaders;
+    if (!entetes || typeof entetes.length !== 'number') return null;
+    for (var i = 0; i < entetes.length; i++) {
+      if (entetes[i] && entetes[i].name === nom) return true;
+    }
+    return false;
+  }
+
   function selfCheck() {
-    var out = { platform: platform, isApp: isApp, build: nativeBuild, manques: [] };
+    var out = { platform: platform, isApp: isApp, build: nativeBuild,
+                manques: [], manquesNatifs: [], entetes: natifEnregistre('App') !== null };
     CAPACITES.forEach(function (c) {
-      var present = !!(Cap && Cap[c.plugin]);
-      out[c.cle] = !isApp ? 'web' : (present ? 'ok' : (c.requis ? 'ABSENT' : 'absent'));
-      if (isApp && !present && c.requis) out.manques.push(c.plugin);
+      var dansBundle = !!(Cap && Cap[c.plugin]);
+      var enNatif = isApp ? natifEnregistre(c.plugin) : null;
+
+      out[c.cle] = !isApp ? 'web'
+        : !dansBundle ? (c.requis ? 'ABSENT' : 'absent')
+        : enNatif === false ? (c.requis ? 'SANS-NATIF' : 'sans-natif')
+        : 'ok';
+
+      if (!isApp || !c.requis) return;
+      if (!dansBundle) out.manques.push(c.plugin);
+      else if (enNatif === false) out.manquesNatifs.push(c.plugin);
     });
     return out;
   }
@@ -132,6 +169,12 @@
                  'build=' + (d.build == null ? '?' : d.build)];
     CAPACITES.forEach(function (c) { bouts.push(c.cle + '=' + d[c.cle]); });
     bouts.push('manques=' + (d.manques.length ? d.manques.join(',') : 'aucun'));
+    /* Champ distinct, et non fondu dans « manques » : la CI doit pouvoir dire
+       lequel des deux problèmes elle a rencontré. « entetes » signale si la liste
+       du pont natif était seulement lisible — sans elle, manquesNatifs ne veut
+       rien dire et l'annoncer vide serait un mensonge. */
+    bouts.push('natif=' + (d.manquesNatifs.length ? d.manquesNatifs.join(',') : 'ok'));
+    bouts.push('entetes=' + (d.entetes ? 'lues' : 'absentes'));
     return bouts.join(' ');
   }
 

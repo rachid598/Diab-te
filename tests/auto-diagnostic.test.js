@@ -14,16 +14,24 @@ const { loadScript, plain } = require('./test-env');
 const TOUS = ['Camera', 'Filesystem', 'CapacitorHttp', 'CapacitorUpdater',
               'SecureStorage', 'LocalNotifications', 'Share', 'App', 'DepthScan'];
 
-/* Un faux Capacitor : isNativePlatform() décide si on se croit dans l'APK, et
-   la présence d'une clé décide si le plugin s'est enregistré. */
-function natif(presents, plateforme) {
+/* Un faux Capacitor. Deux leviers INDÉPENDANTS, parce qu'ils décrivent deux
+   pannes différentes :
+     bundle  — le module JS est-il dans vendor/capacitor-plugins.js ;
+     natifs  — le plugin s'est-il enregistré côté Android (PluginHeaders).
+
+   Les confondre est exactement l'erreur que la première version du diagnostic
+   commettait : elle testait window.Cap.Camera, qui est un objet mandataire
+   toujours présent, y compris dans un navigateur sans une ligne de code Android. */
+function natif(bundle, natifs, plateforme) {
   const Cap = {
     Capacitor: {
       isNativePlatform: () => true,
-      getPlatform: () => plateforme || 'android'
+      getPlatform: () => plateforme || 'android',
+      PluginHeaders: (natifs === null ? undefined
+        : (natifs === undefined ? bundle : natifs).map((n) => ({ name: n })))
     }
   };
-  presents.forEach((p) => { Cap[p] = {}; });
+  bundle.forEach((p) => { Cap[p] = {}; });
   return loadScript('js/native.js', { Cap: Cap }).Native;
 }
 
@@ -56,6 +64,27 @@ test('plusieurs manques sont tous listés', () => {
      'SecureStorage', 'Share'].sort());
 });
 
+test('un plugin dans le bundle mais non enregistré côté Android est démasqué', () => {
+  /* LE cas qui compte : le module JS est là, l'objet mandataire répond, l'écran
+     s'affiche — et l'appui sur le bouton ne fait rien, parce que MainActivity
+     n'a jamais enregistré le plugin. Aucun contrôle d'intégrité de l'APK ne
+     peut voir ça. */
+  const d = natif(TOUS, TOUS.filter((p) => p !== 'Camera')).selfCheck();
+  assert.equal(d.camera, 'SANS-NATIF');
+  assert.deepEqual(plain(d.manques), [], 'le bundle, lui, est complet');
+  assert.deepEqual(plain(d.manquesNatifs), ['Camera']);
+});
+
+test('sans la liste du pont, on ne conclut pas à la place du natif', () => {
+  // PluginHeaders absente : on ne SAIT pas. Annoncer « natif=ok » serait un
+  // mensonge, et la CI doit pouvoir refuser plutôt que de croire un vert creux.
+  const d = natif(TOUS, null).selfCheck();
+  assert.equal(d.entetes, false);
+  assert.deepEqual(plain(d.manquesNatifs), [], 'aucune accusation sans preuve');
+  assert.equal(d.camera, 'ok');
+  assert.match(natif(TOUS, null).selfCheckLine('78'), /entetes=absentes/);
+});
+
 test('la ligne des journaux porte la version et l\'état de chaque capacité', () => {
   const ligne = natif(TOUS).selfCheckLine('76');
   assert.match(ligne, /^GLUCOVISION_READY /, 'le marqueur est en tête, greppable');
@@ -63,6 +92,27 @@ test('la ligne des journaux porte la version et l\'état de chaque capacité', (
   assert.match(ligne, /version=76/);
   assert.match(ligne, /camera=ok/);
   assert.match(ligne, /manques=aucun/);
+  assert.match(ligne, /natif=ok/);
+  assert.match(ligne, /entetes=lues/);
+});
+
+test('les deux pannes sont rapportées dans des champs distincts', () => {
+  // La CI doit pouvoir dire laquelle des deux elle a rencontrée.
+  const ligne = natif(TOUS.filter((p) => p !== 'Share'),
+                      TOUS.filter((p) => p !== 'App')).selfCheckLine('78');
+  assert.match(ligne, /manques=Share\b/);
+  assert.match(ligne, /natif=App\b/);
+  assert.match(ligne, /partage=ABSENT/);
+  assert.match(ligne, /app=SANS-NATIF/);
+});
+
+test('la profondeur non enregistrée reste tolérée', () => {
+  // Un téléphone sans ARCore n'enregistre pas DepthScan. C'est le cas normal.
+  const d = natif(TOUS, TOUS.filter((p) => p !== 'DepthScan')).selfCheck();
+  assert.equal(d.profondeur, 'sans-natif');
+  assert.deepEqual(plain(d.manquesNatifs), []);
+  assert.match(natif(TOUS, TOUS.filter((p) => p !== 'DepthScan')).selfCheckLine('78'),
+    /natif=ok/);
 });
 
 test('la ligne nomme les manques au lieu de dire « aucun »', () => {
@@ -90,7 +140,8 @@ test('le rapport est écrit dans le cache privé, là où la CI le lit', () => {
   // build sur une application pourtant saine.
   const ecrits = [];
   const Cap = {
-    Capacitor: { isNativePlatform: () => true, getPlatform: () => 'android' },
+    Capacitor: { isNativePlatform: () => true, getPlatform: () => 'android',
+                 PluginHeaders: TOUS.map((n) => ({ name: n })) },
     Directory: { Cache: 'CACHE', Data: 'DATA' },
     Filesystem: { writeFile: (o) => { ecrits.push(o); return Promise.resolve({}); } }
   };
@@ -111,7 +162,8 @@ test('une écriture impossible ne fait pas échouer le démarrage', () => {
   // Le disque plein ne doit pas empêcher l'app de s'ouvrir. La CI verra
   // l'absence du fichier — c'est justement le signal qu'elle attend.
   const Cap = {
-    Capacitor: { isNativePlatform: () => true, getPlatform: () => 'android' },
+    Capacitor: { isNativePlatform: () => true, getPlatform: () => 'android',
+                 PluginHeaders: TOUS.map((n) => ({ name: n })) },
     Directory: { Cache: 'CACHE' },
     Filesystem: { writeFile: () => Promise.reject(new Error('disque plein')) }
   };
