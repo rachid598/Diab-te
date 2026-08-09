@@ -85,7 +85,13 @@ async function ecran(page, liste) {
      utilise le navigateur qu'il a téléchargé lui-même. */
   const nav = await chromium.launch(
     process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
-  const page = await nav.newPage({ viewport: { width: 390, height: 844 } });
+  /* serviceWorkers bloqués : au premier contrôle de la page, le worker déclenche
+     un rechargement unique (registerSW). Ce rechargement arrivait au milieu d'un
+     page.evaluate et faisait échouer le test une fois sur deux, sans rapport
+     avec ce qu'il vérifie. Le worker n'est pas le sujet ici. */
+  const ctx = await nav.newContext({ viewport: { width: 390, height: 844 },
+                                     serviceWorkers: 'block' });
+  const page = await ctx.newPage();
   const erreursJs = [];
   page.on('pageerror', function (e) { erreursJs.push(e.message); });
   await page.goto('http://localhost:' + PORT + '/');
@@ -117,6 +123,35 @@ async function ecran(page, liste) {
                           avis('openrouter', 'x-ai/grok-4.5', 50, riz),
                           avis('claude', 'claude-opus-5', 46, riz)]);
   verifie(vu.colonnes === 3, 'un troisième avis ajoute une colonne');
+
+  /* Lien APK : on ne peut pas atteindre depuis un navigateur les branches
+     « à jour / plus récent » (elles dépendent du build natif installé), mais on
+     peut vérifier ce qui casse en silence — un href jamais rempli, un sélecteur
+     renommé, une exception dans le clic. */
+  console.log('\nTéléchargement de l’APK :');
+  await page.route('**/apk-codex/apk.json', function (route) {
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ appId: 'io.github.rachid598.glucovision', appVersion: 99,
+                             versionCode: 2099, versionName: '1.99.0', sha256: 'abcdef0123456789' })
+    });
+  });
+  await page.goto('http://localhost:' + PORT + '/');
+  await page.waitForSelector('#apk-link', { state: 'attached', timeout: 5000 });
+  const href = await page.getAttribute('#apk-link', 'href');
+  verifie(/releases\/download\/apk-codex\/glucovision\.apk$/.test(href || ''),
+    'le lien de téléchargement pointe vers l’APK du canal : ' + href);
+
+  /* Clic programmé : le bloc vit dans la modale de réglages, repliée au
+     chargement. On teste le gestionnaire, pas le chemin de navigation. */
+  await page.evaluate(function () { document.getElementById('check-apk').click(); });
+  await page.waitForFunction(function () {
+    const el = document.getElementById('apk-status');
+    return el && !el.hidden && !/Lecture de la version/.test(el.textContent);
+  }, null, { timeout: 5000 });
+  const etat = await page.textContent('#apk-status');
+  verifie(/1\.99\.0/.test(etat), 'la version publiée est lue et affichée : ' + etat.slice(0, 80));
+  verifie(/abcdef012345/.test(etat), 'l’empreinte SHA-256 est montrée pour vérification');
 
   verifie(erreursJs.length === 0, 'aucune erreur JavaScript : ' + (erreursJs[0] || '—'));
 

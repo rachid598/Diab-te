@@ -12,7 +12,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=75" />
+  <link rel="stylesheet" href="css/styles.css?v=76" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -618,6 +618,14 @@
         <p class="hint tiny">L'app se met à jour toute seule au lancement. Ce bouton force la vérification et dit précisément ce qu'il en est.</p>
         <button id="check-update" class="btn btn-ghost">🔄 Vérifier les mises à jour</button>
         <p id="update-status" class="update-status" hidden></p>
+
+        <div id="apk-block">
+          <h4>Application Android (APK)</h4>
+          <p class="hint tiny">Seul le contenu web se met à jour tout seul. L'APK, lui, ne bouge que si tu le réinstalles — nécessaire quand une fonction native change (appareil photo, capteur de profondeur, notifications).</p>
+          <button id="check-apk" class="btn btn-ghost">📦 Comparer avec l'APK publié</button>
+          <p id="apk-status" class="update-status" hidden></p>
+          <p class="hint tiny"><a id="apk-link" target="_blank" rel="noopener">⬇️ Télécharger le dernier APK signé</a> — s'ouvre dans le navigateur, puis installe par-dessus : tes repas et tes réglages sont conservés.</p>
+        </div>
         </div>
       </details>
 
@@ -655,19 +663,19 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=73"></script>
-  <script src="js/native.js?v=73"></script>
-  <script src="js/storage.js?v=73"></script>
-  <script src="js/foods.js?v=73"></script>
-  <script src="js/gi.js?v=73"></script>
-  <script src="js/queue.js?v=73"></script>
-  <script src="js/report.js?v=73"></script>
-  <script src="js/bench.js?v=73"></script>
-  <script src="js/estimator.js?v=73"></script>
-  <script src="js/camera.js?v=73"></script>
-  <script src="js/off.js?v=73"></script>
-  <script src="vendor/zxing.min.js?v=73"></script>
-  <script src="js/barcode.js?v=73"></script>
-  <script src="js/app.js?v=73"></script>
+  <script src="vendor/capacitor-plugins.js?v=76"></script>
+  <script src="js/native.js?v=76"></script>
+  <script src="js/storage.js?v=76"></script>
+  <script src="js/foods.js?v=76"></script>
+  <script src="js/gi.js?v=76"></script>
+  <script src="js/queue.js?v=76"></script>
+  <script src="js/report.js?v=76"></script>
+  <script src="js/bench.js?v=76"></script>
+  <script src="js/estimator.js?v=76"></script>
+  <script src="js/camera.js?v=76"></script>
+  <script src="js/off.js?v=76"></script>
+  <script src="vendor/zxing.min.js?v=76"></script>
+  <script src="js/barcode.js?v=76"></script>
+  <script src="js/app.js?v=76"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '75'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '76'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -3404,6 +3404,7 @@
       $('set-verify-model-custom-wrap').hidden = $('set-verify-model').value !== CUSTOM_VALUE;
     });
     initUpdateCheck();
+    initApkCheck();
     var purge = $('purge-photos');
     if (purge) {
       purge.addEventListener('click', function () {
@@ -4155,6 +4156,11 @@
     'https://github.com/rachid598/Diab-te/releases/download/ota-codex/latest.json';
   var APK_DOWNLOAD =
     'https://github.com/rachid598/Diab-te/releases/download/apk-codex/glucovision.apk';
+  /* Publié par la CI à côté de l'APK, sur le même tag : versionCode, versionName
+     et empreinte de l'APK réellement en ligne. C'est ce qui permet de COMPARER
+     au lieu de proposer un lien aveugle. */
+  var APK_MANIFEST =
+    'https://github.com/rachid598/Diab-te/releases/download/apk-codex/apk.json';
 
   function showApkRequired(info, installedBuild) {
     var el = $('native-outdated');
@@ -4320,6 +4326,98 @@
         btn.disabled = false;
         setUpdateStatus('❌ Impossible de vérifier : ' + escapeHtml(e.message || 'réseau injoignable') +
           '. Réessaie une fois connecté.', 'warn');
+      });
+    });
+  }
+
+  /* ---------- APK : lien permanent et comparaison de version ----------
+     Jusqu'ici le lien de téléchargement n'existait que dans le bandeau « APK
+     trop ancien » : il n'apparaissait donc qu'une fois déjà bloqué, et il n'y
+     avait aucun moyen de simplement DEMANDER s'il y a mieux. Le lien est
+     maintenant permanent, et le bouton compare le build installé à celui
+     réellement publié — ce que apk.json permet de savoir sans deviner. */
+
+  function setApkStatus(msg, kind) {
+    var el = $('apk-status');
+    if (!el) return;
+    el.hidden = false;
+    el.className = 'update-status' + (kind ? ' us-' + kind : '');
+    el.innerHTML = msg;
+  }
+
+  function fetchApkInfo() {
+    /* Un JSON incomplet ne doit pas produire un « à jour » rassurant : sans
+       versionCode exploitable il n'y a rien à comparer, et on le dit. */
+    var valide = function (data) {
+      var code = data ? parseInt(data.versionCode, 10) : NaN;
+      if (!isFinite(code) || code <= 0) throw new Error('publication illisible');
+      return data;
+    };
+    if (Native.isApp) {
+      // Dans l'APK la requête part du natif : pas de blocage d'origine croisée.
+      return Native.httpJson(APK_MANIFEST, 15000).then(function (r) {
+        if (!r || r.status !== 200) throw new Error('HTTP ' + ((r && r.status) || '?'));
+        return valide(r.data);
+      });
+    }
+    return fetch(APK_MANIFEST, { cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(valide);
+  }
+
+  function initApkCheck() {
+    var bloc = $('apk-block');
+    if (!bloc) return;
+    /* Sur iOS l'APK n'existe pas : l'app y est posée par Xcode, et proposer un
+       fichier Android n'y serait qu'une fausse piste. */
+    if (Native.isApp && Native.platform === 'ios') { bloc.hidden = true; return; }
+
+    // Une seule source pour l'URL : la constante, pas un href figé dans le HTML.
+    var lien = $('apk-link');
+    if (lien) lien.href = APK_DOWNLOAD;
+
+    var btn = $('check-apk');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      setApkStatus('<span class="spinner"></span>Lecture de la version publiée…', '');
+      fetchApkInfo().then(function (info) {
+        btn.disabled = false;
+        var publie = parseInt(info.versionCode, 10);
+        var nom = escapeHtml(String(info.versionName || ('build ' + publie)));
+        var emp = String(info.sha256 || '').slice(0, 12);
+        // L'empreinte permet de vérifier le fichier téléchargé avant installation.
+        var pied = emp ? '<br><span class="tiny">Empreinte SHA-256 : ' +
+                         escapeHtml(emp) + '…</span>' : '';
+
+        if (!Native.isApp) {
+          setApkStatus('📦 Dernier APK publié : <strong>' + nom + '</strong> (build ' +
+            publie + '). Tu n\'es pas dans l\'application Android — rien à comparer, ' +
+            'mais le lien ci-dessous installe bien cette version.' + pied, '');
+          return;
+        }
+        if (nativeBuild == null) {
+          setApkStatus('📦 Dernier APK publié : <strong>' + nom + '</strong> (build ' +
+            publie + '). Le build installé n\'a pas pu être lu, la comparaison ' +
+            'est donc impossible.' + pied, 'warn');
+          return;
+        }
+        if (publie <= nativeBuild) {
+          setApkStatus('✅ Ton APK est à jour — <strong>' + nom + '</strong> (build ' +
+            nativeBuild + '), c\'est bien le dernier publié.' + pied, 'ok');
+          return;
+        }
+        setApkStatus('⬇️ APK <strong>' + nom + '</strong> (build ' + publie +
+          ') disponible — tu as le build ' + nativeBuild + '. Télécharge-le ' +
+          'ci-dessous et installe-le par-dessus.' + pied, 'warn');
+      }).catch(function (e) {
+        btn.disabled = false;
+        setApkStatus('❌ Version publiée illisible : ' +
+          escapeHtml((e && e.message) || 'réseau injoignable') +
+          '. Le lien de téléchargement reste utilisable.', 'warn');
       });
     });
   }
