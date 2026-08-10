@@ -17,7 +17,7 @@ application Android.
 | | |
 |---|---|
 | **Web (PWA)** | **[rachid598.github.io/Diab-te](https://rachid598.github.io/Diab-te/)** — installable depuis le navigateur |
-| **Android (APK de test ARCore)** | **[glucovision.apk](https://github.com/rachid598/Diab-te/releases/download/apk-codex/glucovision.apk)** — canal `codex`, signé comme l'application existante |
+| **Android (APK de test ARCore)** | **[glucovision.apk](https://github.com/rachid598/Diab-te/releases/download/apk-codex/glucovision.apk)** — canal `codex`/`codex-2`, signé comme l'application existante |
 
 L'APK se met à jour **tout seul** : il vérifie au lancement s'il existe une version plus
 récente du contenu web, la télécharge et propose « Actualiser ». Une réinstallation n'est
@@ -197,14 +197,19 @@ enregistré : corriger un tarif ne réécrit pas l'historique.
 
 ## Confidentialité
 
-Tout reste sur l'appareil : réglages, historique, photos, aliments personnalisés. Les photos
-ne partent que vers le fournisseur d'IA choisi, le temps de l'estimation. Aucun compte,
-aucune télémétrie, aucun serveur intermédiaire.
+Les réglages, l'historique, les photos et les aliments personnalisés sont conservés sur
+l'appareil par GlucoVision. Lors d'une estimation, les photos et le texte partent directement
+vers le fournisseur d'IA choisi : aucun serveur GlucoVision ne sert d'intermédiaire et aucune
+télémétrie n'est ajoutée, mais le fournisseur applique ses propres règles de traitement et de
+conservation.
 
 L'**export de sauvegarde exclut toujours les clés API**. Sur Android, elles restent dans le
 Keystore du téléphone ; après un changement d'appareil, il faut donc les renseigner de
-nouveau. L'historique reste personnel et peut contenir des informations de santé : garde
-quand même le fichier de sauvegarde dans un emplacement privé.
+nouveau. Les photos originales de l'APK ne sont pas incluses dans le JSON (les repas et les
+éventuelles petites vignettes web le sont). L'APK exclut également toutes les données de la
+sauvegarde cloud et du transfert automatique Android : le passage vers un autre téléphone se
+fait donc par cet export explicite. L'historique reste personnel et peut contenir des
+informations de santé : garde le fichier de sauvegarde dans un emplacement privé.
 
 ## Développement
 
@@ -219,7 +224,7 @@ node scripts/render-icons.mjs     # régénère les PNG d'icônes depuis icons/*
 
 JavaScript sans dépendance à l'exécution (modules IIFE exposant des globales), aucun
 transpileur, aucun framework. L'APK est produit par GitHub Actions (Capacitor 8, Node 22) :
-sur la branche `codex`, l'APK est publié sous `apk-codex` et le manifeste web sous
+sur les branches `codex` et `codex-2`, l'APK est publié sous `apk-codex` et le manifeste web sous
 `ota-codex`. Chaque archive OTA versionnée (`ota-v73`, etc.) est immuable et vérifiée par
 SHA-256 avant installation.
 

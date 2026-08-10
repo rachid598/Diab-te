@@ -35,7 +35,7 @@ function verifie(condition, message) {
    dont le total brut ne correspond pas à son détail, et elle a raison de le
    faire. Un jeu d'essai incohérent ne testerait que ce refus. */
 function avis(provider, model, total, nomAliment) {
-  var aliments = [[nomAliment, total]];
+  var aliments = Array.isArray(nomAliment) ? nomAliment : [[nomAliment, total]];
   return {
     ok: true, provider: provider,
     result: {
@@ -72,7 +72,27 @@ async function ecran(page, liste) {
   await page.waitForSelector('.cmp-table', { timeout: 5000 });
   return page.evaluate(function () {
     const r = document.getElementById('results');
-    return { texte: r ? r.textContent : '', colonnes: document.querySelectorAll('.cmp-th').length };
+    const wrap = document.querySelector('.cmp-tablewrap');
+    const table = document.querySelector('.cmp-table');
+    const headers = Array.from(document.querySelectorAll('.cmp-th'));
+    const labels = Array.from(document.querySelectorAll('.cmp-use')).map(function (b) {
+      return b.getAttribute('aria-label');
+    });
+    return {
+      texte: r ? r.textContent : '',
+      colonnes: headers.length,
+      cartes: document.querySelectorAll('.cmp-card').length,
+      aliments: document.querySelectorAll('.cmp-food-list').length,
+      scroll: !!wrap && wrap.scrollWidth > wrap.clientWidth + 1,
+      tableWidth: table ? Math.round(table.getBoundingClientRect().width) : 0,
+      wrapWidth: wrap ? Math.round(wrap.getBoundingClientRect().width) : 0,
+      modelWidths: headers.map(function (h) { return Math.round(h.getBoundingClientRect().width); }),
+      sticky: getComputedStyle(document.querySelector('.cmp-metric')).position,
+      regionLabelled: !!wrap && wrap.getAttribute('role') === 'region' &&
+        wrap.getAttribute('aria-labelledby') === 'cmp-title' && wrap.tabIndex === 0,
+      caption: !!document.querySelector('.cmp-table caption'),
+      buttonLabels: labels
+    };
   });
 }
 
@@ -89,12 +109,64 @@ async function ecran(page, liste) {
      un rechargement unique (registerSW). Ce rechargement arrivait au milieu d'un
      page.evaluate et faisait échouer le test une fois sur deux, sans rapport
      avec ce qu'il vérifie. Le worker n'est pas le sujet ici. */
+  /* Le téléphone peut rester réglé en thème clair : GlucoVision garde
+     volontairement son identité sombre et ses contrastes dans ce cas. */
   const ctx = await nav.newContext({ viewport: { width: 390, height: 844 },
-                                     serviceWorkers: 'block' });
+                                     colorScheme: 'light', serviceWorkers: 'block' });
   const page = await ctx.newPage();
   const erreursJs = [];
   page.on('pageerror', function (e) { erreursJs.push(e.message); });
   await page.goto('http://localhost:' + PORT + '/');
+
+  const theme = await page.evaluate(function () {
+    const body = getComputedStyle(document.body);
+    const root = getComputedStyle(document.documentElement);
+    const card = getComputedStyle(document.querySelector('.card'));
+    return {
+      bodyBg: body.backgroundColor,
+      bodyText: body.color,
+      cardBg: card.backgroundColor,
+      scheme: root.colorScheme,
+      meta: document.querySelector('meta[name="theme-color"]').content,
+      pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+    };
+  });
+  console.log('Thème sombre :');
+  verifie(theme.bodyBg === 'rgb(6, 9, 16)' && /dark/.test(theme.scheme),
+    'le thème reste sombre même si le téléphone demande le mode clair');
+  verifie(theme.bodyText === 'rgb(245, 248, 252)' && theme.meta.toLowerCase() === '#060910',
+    'le texte et la barre système utilisent les couleurs du design system');
+  verifie(!theme.pageOverflow, 'la page ne déborde pas horizontalement à 390 px');
+
+  await page.click('#open-settings');
+  await page.waitForFunction(function () {
+    return document.activeElement && document.activeElement.id === 'close-settings';
+  });
+  let modalState = await page.evaluate(function () {
+    const modal = document.getElementById('settings-modal');
+    return {
+      focus: document.activeElement && document.activeElement.id,
+      inert: document.querySelector('main').inert,
+      unnamed: Array.from(modal.querySelectorAll('input,select,textarea')).filter(function (el) {
+        if (el.hidden || el.closest('[hidden]')) return false;
+        return !el.labels || el.labels.length === 0;
+      }).map(function (el) { return el.id; })
+    };
+  });
+  verifie(modalState.focus === 'close-settings' && modalState.inert,
+    'la modale reçoit le focus et rend l’arrière-plan inerte');
+  verifie(modalState.unnamed.length === 0,
+    'chaque champ visible des réglages possède un libellé accessible');
+  await page.keyboard.press('Shift+Tab');
+  verifie(await page.evaluate(function () {
+    return document.getElementById('settings-modal').contains(document.activeElement);
+  }), 'Tab reste enfermé dans la modale');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(function () {
+    return document.getElementById('settings-modal').hidden &&
+      document.activeElement && document.activeElement.id === 'open-settings';
+  });
+  verifie(true, 'Échap ferme la modale et rend le focus au bouton Réglages');
 
   const riz = 'riz blanc';
   const pain = 'pain baguette';
@@ -106,23 +178,159 @@ async function ecran(page, liste) {
   verifie(vu.colonnes === 2, 'deux avis produisent deux colonnes');
   verifie(!/Avis concordants/.test(vu.texte),
     'même total sur des aliments différents n’est PAS annoncé concordant');
-  verifie(/aliments différents/i.test(vu.texte),
+  verifie(/aliments|quantités/i.test(vu.texte),
     'et le désaccord de contenu est affiché explicitement');
+  verifie(vu.aliments === 2, 'le détail alimentaire des deux avis est visible avant Retenir');
+  verifie(vu.cartes === 0, 'la comparaison reste un tableau, jamais des cartes empilées');
+  verifie(vu.regionLabelled && vu.caption, 'le tableau est une région accessible et nommée');
+  verifie(new Set(vu.buttonLabels).size === 2 && vu.buttonLabels.every(Boolean),
+    'chaque bouton Retenir nomme son modèle');
 
   vu = await ecran(page, [avis('gemini', 'gemini-3.1-flash-lite', 48, riz),
                           avis('openrouter', 'x-ai/grok-4.5', 50, riz)]);
   verifie(/Avis concordants/.test(vu.texte),
     'même total ET mêmes aliments reste concordant');
 
+  vu = await ecran(page, [
+    avis('gemini', 'gemini-3.1-flash-lite', 50, [[riz, 40], [pain, 10]]),
+    avis('openrouter', 'x-ai/grok-4.5', 52, [[riz, 10], [pain, 42]])
+  ]);
+  verifie(!/Avis concordants/.test(vu.texte),
+    'mêmes noms et même total, mais répartition opposée, ne sont PAS concordants');
+  verifie(/calculs différents/i.test(vu.texte),
+    'la compensation entre aliments est expliquée');
+
   vu = await ecran(page, [avis('gemini', 'gemini-3.1-flash-lite', 48, riz),
                           avis('openrouter', 'google/gemini-3.1-flash-lite', 50, riz)]);
   verifie(/même modèle/i.test(vu.texte),
     'deux routes vers le même modèle sont dénoncées');
+  verifie(!/Avis concordants/.test(vu.texte),
+    'deux routes vers le même modèle ne reçoivent jamais le statut vert');
 
   vu = await ecran(page, [avis('gemini', 'gemini-3.1-flash-lite', 48, riz),
                           avis('openrouter', 'x-ai/grok-4.5', 50, riz),
                           avis('claude', 'claude-opus-5', 46, riz)]);
   verifie(vu.colonnes === 3, 'un troisième avis ajoute une colonne');
+  verifie(vu.scroll, 'à 390 px, les trois colonnes restent lisibles grâce au défilement');
+  verifie(Math.min.apply(null, vu.modelWidths) >= 120,
+    'aucune colonne modèle n’est comprimée sous 120 px : ' + vu.modelWidths.join('/'));
+  verifie(vu.sticky === 'sticky', 'la colonne des mesures reste visible pendant le défilement');
+  verifie(!/moyenne\s+\d+/i.test(vu.texte),
+    'une divergence ne propose plus de moyenne chiffrée');
+
+  const comparaisonEnAttente = await page.evaluate(function () {
+    const h = JSON.parse(localStorage.getItem('diabete.history.v1') || '[]');
+    return h.filter(function (e) { return e.choiceRequired === true; })[0] || null;
+  });
+  verifie(!!comparaisonEnAttente,
+    'le brouillon technique indique qu’aucune colonne n’a encore été retenue');
+  await page.click('.tab[data-tab="history"]');
+  await page.locator('.history-head[data-open="' + comparaisonEnAttente.date + '"]').click();
+  verifie(await page.locator('.history-confirm[data-confirm="' + comparaisonEnAttente.date + '"]').count() === 0,
+    'l’historique ne permet pas de confirmer arbitrairement le premier avis');
+  verifie(/Comparaison non tranchée/.test(await page.textContent('#history-list')),
+    'l’historique explique qu’un choix explicite est encore requis');
+  await page.click('.tab[data-tab="analyze"]');
+
+  await page.setViewportSize({ width: 320, height: 844 });
+  vu = await ecran(page, [avis('gemini', 'gemini-3.1-flash-lite', 48, riz),
+                          avis('openrouter', 'x-ai/grok-4.5', 50, riz),
+                          avis('claude', 'claude-opus-5', 46, riz)]);
+  verifie(vu.scroll && vu.tableWidth > vu.wrapWidth,
+    'à 320 px, le tableau défile au lieu d’écraser les colonnes (' +
+      vu.tableWidth + ' > ' + vu.wrapWidth + ')');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('.cmp-use').nth(1).click();
+  await page.waitForSelector('#reopen-compare', { timeout: 5000 });
+  verifie(/3 colonnes/.test(await page.textContent('#reopen-compare')),
+    'après Retenir, les trois colonnes restent accessibles');
+  await page.click('#reopen-compare');
+  await page.waitForSelector('.cmp-table');
+  verifie(await page.locator('.cmp-th').count() === 3,
+    'Revoir restaure bien toutes les colonnes, sans perdre un avis');
+
+  /* Une colonne est une preuve d'origine, pas une vue vivante du résultat
+     choisi. Corriger ensuite la portion retenue ne doit donc jamais réécrire
+     l'archive ni l'avis conservé dans l'historique. */
+  await page.locator('.cmp-use').first().click();
+  await page.waitForSelector('.item-grams-edit');
+  await page.locator('.item-grams-edit').first().fill('140');
+  await page.locator('.item-grams-edit').first().dispatchEvent('change');
+  await page.click('#reopen-compare');
+  await page.waitForSelector('.cmp-table');
+  const totalOriginal = await page.locator('.cmp-row-main .cmp-td').first().textContent();
+  verifie(/48/.test(totalOriginal || '') && !/70/.test(totalOriginal || ''),
+    'corriger le résultat retenu ne modifie pas sa colonne originale');
+  const avisArchive = await page.evaluate(function () {
+    const h = JSON.parse(localStorage.getItem('diabete.history.v1') || '[]');
+    return h[0] && h[0].opinions && h[0].opinions[0]
+      ? h[0].opinions[0].totalCarbsG : null;
+  });
+  verifie(avisArchive === 48,
+    'l’historique garde lui aussi la valeur originale de la colonne (48 g)');
+
+  /* Reprendre un autre brouillon est un changement de repas. Les colonnes du
+     précédent ne doivent jamais suivre et permettre de remplacer le nouveau
+     repas par un ancien avis. */
+  const dateBrouillonB = await page.evaluate(function () {
+    const h = JSON.parse(localStorage.getItem('diabete.history.v1') || '[]');
+    const date = Date.now() + 1000;
+    h.unshift({
+      date: date, source: 'texte', draft: true, confirmed: false,
+      totalCarbsG: 30, parts: 3, provider: 'gemini', model: 'gemini-3.1-flash-lite',
+      seen: 'Brouillon B, soupe de lentilles',
+      items: [{ name: 'lentilles', carbsG: 30, portion: 'une assiette' }],
+      input: { notes: 'soupe de lentilles', extras: '', imageCount: 0 },
+      resultSnapshot: {
+        totalCarbsG: 30, rangeLowG: 22, rangeHighG: 38,
+        overallConfidence: 'medium', model: 'gemini-3.1-flash-lite',
+        seen: 'Brouillon B, soupe de lentilles', fromText: true,
+        items: [{ name: 'lentilles', carbsG: 30, estimatedMassG: 150,
+                  carbDensityPer100g: 20, confidence: 'medium' }]
+      }
+    });
+    localStorage.setItem('diabete.history.v1', JSON.stringify(h));
+    return date;
+  });
+  await page.goto('http://localhost:' + PORT + '/');
+  await page.waitForFunction(function () {
+    const v = document.getElementById('app-version');
+    return v && /Version 80/.test(v.textContent || '');
+  }, null, { timeout: 5000 });
+  await page.click('.tab[data-tab="history"]');
+  await page.locator('.history-head[data-open="' + dateBrouillonB + '"]').click();
+  await page.waitForSelector('.history-resume[data-resume="' + dateBrouillonB + '"]');
+  await page.locator('.history-resume[data-resume="' + dateBrouillonB + '"]').click();
+  await page.waitForSelector('#confirm-result');
+  verifie(await page.locator('#reopen-compare').count() === 0,
+    'reprendre le brouillon B ne montre aucune colonne du repas A');
+  verifie(/30/.test(await page.textContent('.hero-carbs')) &&
+      /Brouillon B/.test(await page.textContent('#results')),
+    'la reprise conserve bien le chiffre et le contenu du brouillon B');
+
+  /* Confirmer un choix n'autorise pas les choix futurs à hériter de cette
+     confirmation. Une autre colonne signifie un autre chiffre à revérifier. */
+  vu = await ecran(page, [avis('gemini', 'gemini-3.1-flash-lite', 48, riz),
+                          avis('openrouter', 'x-ai/grok-4.5', 50, riz),
+                          avis('claude', 'claude-opus-5', 46, riz)]);
+  await page.locator('.cmp-use').first().click();
+  if (await page.locator('#dominant-ok').count()) await page.click('#dominant-ok');
+  await page.click('#confirm-result');
+  verifie(await page.locator('#confirm-result').isDisabled(),
+    'le premier choix peut être confirmé');
+  await page.click('#reopen-compare');
+  await page.locator('.cmp-use').nth(1).click();
+  verifie(!(await page.locator('#confirm-result').isDisabled()) &&
+      /Confirmer ce repas/.test(await page.textContent('#confirm-result')),
+    'retenir une autre colonne redemande explicitement une confirmation');
+  const nouvelEtat = await page.evaluate(function () {
+    const h = JSON.parse(localStorage.getItem('diabete.history.v1') || '[]');
+    return h[0] || null;
+  });
+  verifie(!!nouvelEtat && nouvelEtat.totalCarbsG === 50 &&
+      nouvelEtat.draft === true && nouvelEtat.confirmed === false &&
+      nouvelEtat.choiceRequired === false,
+    'le nouveau choix est sauvegardé comme brouillon non confirmé');
 
   /* Lien APK : on ne peut pas atteindre depuis un navigateur les branches
      « à jour / plus récent » (elles dépendent du build natif installé), mais on

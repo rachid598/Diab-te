@@ -57,6 +57,32 @@ test('Bench.runModel ne score jamais un résultat bloqué', async () => {
   assert.equal(Bench.score(results).n, 0);
 });
 
+test('Bench.score rend inéligible un modèle qui échoue sur plus de 20 % des cas', () => {
+  const { Bench } = loadScript('js/bench.js', {
+    Storage: { getHistory: () => [] },
+    Native: { isApp: false }
+  });
+  const sparse = [{ real: 100, got: 100, err: 0 }];
+  for (let i = 0; i < 11; i++) sparse.push({ real: 100, got: null, error: 'échec' });
+
+  const rejected = Bench.score(sparse);
+  assert.equal(rejected.eligible, false);
+  assert.equal(rejected.n, 0);
+  assert.equal(rejected.successes, 1);
+  assert.equal(rejected.total, 12);
+  assert.equal(rejected.failed, 11);
+  assert.equal(rejected.coveragePct, 8);
+
+  const covered = Array.from({ length: 10 }, () => ({ real: 100, got: 105, err: 5 }));
+  covered.push({ real: 100, got: null }, { real: 100, got: null });
+  const accepted = Bench.score(covered);
+  assert.equal(accepted.eligible, true);
+  assert.equal(accepted.n, 10);
+  assert.equal(accepted.successes, 10);
+  assert.equal(accepted.coveragePct, 83);
+  assert.equal(accepted.mape, 5);
+});
+
 test('Report.analyse exclut les entrées non confirmées et les valeurs réelles peu fiables', () => {
   const now = Date.now();
   const entries = [
@@ -82,4 +108,63 @@ test('Report.analyse exclut les entrées non confirmées et les valeurs réelles
   assert.equal(got.count, 2);
   assert.equal(got.mesures, 1);
   assert.deepEqual(got.meals.map((e) => e.totalCarbsG), [40, 30]);
+});
+
+test('Report.analyse calcule médiane, biais et catégories sur la période demandée', () => {
+  const now = Date.now();
+  const day = 86400000;
+  const recent = [1, 2, 3].map((n) => ({
+    date: now - n * day,
+    draft: false,
+    totalCarbsG: n === 1 ? 10 : (n === 2 ? 20 : 100),
+    realCarbsG: n === 1 ? 5 : (n === 2 ? 10 : 50),
+    realSource: 'pesee',
+    items: [{ name: 'riz', carbsG: n === 1 ? 10 : (n === 2 ? 20 : 100) }]
+  }));
+  const old = [40, 41, 42].map((n) => ({
+    date: now - n * day,
+    draft: false,
+    totalCarbsG: 100,
+    realCarbsG: 150,
+    realSource: 'pesee',
+    items: [{ name: 'riz', carbsG: 100 }]
+  }));
+  const { Report } = loadScript('js/report.js', {
+    Storage: {
+      getHistory: () => recent.concat(old),
+      getSettings: () => ({ partSizeG: 10 }),
+      getBias: () => { throw new Error('le biais global ne doit pas être lu'); },
+      getBiasByCategory: () => { throw new Error('les catégories globales ne doivent pas être lues'); },
+      categoryOf: (name) => name === 'riz' ? 'Féculents' : null,
+      isConfirmedMeal: confirmed,
+      isReliableReal: reliable
+    }
+  });
+
+  const got = Report.analyse(30);
+  assert.equal(got.count, 3);
+  assert.equal(got.mediane, 20);
+  assert.equal(got.bias.count, 3);
+  assert.equal(got.bias.medianRatio, 0.5);
+  assert.equal(got.bias.pct, -50);
+  assert.equal(got.byCategory.length, 1);
+  assert.equal(got.byCategory[0].category, 'Féculents');
+  assert.equal(got.byCategory[0].count, 3);
+  assert.equal(got.byCategory[0].pct, -50);
+});
+
+test('Report.analyse moyenne les deux valeurs centrales pour une médiane paire', () => {
+  const now = Date.now();
+  const { Report } = loadScript('js/report.js', {
+    Storage: {
+      getHistory: () => [
+        { date: now - 1000, draft: false, totalCarbsG: 10 },
+        { date: now - 2000, draft: false, totalCarbsG: 100 }
+      ],
+      getSettings: () => ({ partSizeG: 10 }),
+      isConfirmedMeal: confirmed,
+      isReliableReal: reliable
+    }
+  });
+  assert.equal(Report.analyse(30).mediane, 55);
 });

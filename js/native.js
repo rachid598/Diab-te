@@ -28,7 +28,9 @@
   var platform = (C && typeof C.getPlatform === 'function') ? C.getPlatform() : 'web';
 
   var PHOTO_DIR = 'photos';
-  var NOTIF_CHANNEL = 'glucovision-controle';
+  /* Nouvel identifiant : Android conserve la visibilité d'un canal déjà créé,
+     même après mise à jour. v2 permet de passer réellement en mode privé. */
+  var NOTIF_CHANNEL = 'glucovision-controle-prive-v2';
   var photoBase = null;      // URL affichable du dossier photos (calculée une fois)
   var readyPromise = null;
   var markedReadyPromise = null;
@@ -65,7 +67,7 @@
         name: 'Contrôle glycémie',
         description: 'Rappel de contrôle après un repas analysé',
         importance: 4,
-        visibility: 1
+        visibility: 0
       }).catch(noop)
     ]).then(function () { return true; });
 
@@ -346,9 +348,23 @@
           return typeof f === 'string' ? f : f.name;
         }).filter(function (n) { return n && !keep[n]; });
         return Promise.all(files.map(function (n) { return deletePhoto(n); }))
-          .then(function () { return files.length; });
+          .then(function (results) {
+            var failed = results.filter(function (ok) { return ok !== true; }).length;
+            if (failed) {
+              throw new Error(failed + ' photo' + (failed > 1 ? 's' : '') +
+                ' n\'ont pas pu être supprimée' + (failed > 1 ? 's' : '') + '.');
+            }
+            return results.length;
+          });
       })
-      .catch(function () { return 0; });
+      .catch(function (err) {
+        /* Un dossier encore inexistant signifie simplement zéro photo. Les
+           autres erreurs (permission, disque, plugin) doivent remonter : les
+           transformer en succès faisait mentir l'interface de purge. */
+        if (err && /(?:ENOENT|not found|does not exist|introuvable)/i.test(
+          String(err.code || '') + ' ' + String(err.message || err))) return 0;
+        throw err;
+      });
   }
 
   // Place occupée par les photos, en octets.
@@ -360,7 +376,11 @@
           return s + ((f && f.size) || 0);
         }, 0);
       })
-      .catch(function () { return 0; });
+      .catch(function (err) {
+        if (err && /(?:ENOENT|not found|does not exist|introuvable)/i.test(
+          String(err.code || '') + ' ' + String(err.message || err))) return 0;
+        throw err;
+      });
   }
 
   // ---------- Clés API chiffrées (Keystore Android) ----------
