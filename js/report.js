@@ -39,6 +39,66 @@
       .replace(/"/g, '&quot;');
   }
 
+  function median(sorted) {
+    if (!sorted.length) return null;
+    var mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  // Même statistique robuste que l'historique, mais appliquée uniquement aux
+  // repas déjà filtrés pour la période du rapport.
+  function robustRatio(raw) {
+    if (!raw.length) return { count: 0, meanRatio: 1, medianRatio: 1, pct: 0 };
+    var ratios = raw.map(function (r) {
+      return Math.max(0.5, Math.min(1.5, r));
+    }).sort(function (a, b) { return a - b; });
+    var value = median(ratios);
+    return {
+      count: ratios.length,
+      meanRatio: value,
+      medianRatio: value,
+      pct: Math.round((value - 1) * 100)
+    };
+  }
+
+  function dominantCategory(items) {
+    if (!Storage.categoryOf || !items || !items.length) return null;
+    var totals = {};
+    items.forEach(function (it) {
+      var category = Storage.categoryOf(it.name);
+      if (!category) return;
+      totals[category] = (totals[category] || 0) + (it.carbsG || 0);
+    });
+    var best = null;
+    Object.keys(totals).forEach(function (category) {
+      if (best === null || totals[category] > totals[best]) best = category;
+    });
+    return best && totals[best] > 0 ? best : null;
+  }
+
+  function categoryBias(meals, minMeals) {
+    var groups = {};
+    meals.forEach(function (e) {
+      var category = dominantCategory(e.items);
+      if (!category) return;
+      (groups[category] = groups[category] || []).push(e.realCarbsG / e.totalCarbsG);
+    });
+    return Object.keys(groups).map(function (category) {
+      var stat = robustRatio(groups[category]);
+      return {
+        category: category,
+        count: stat.count,
+        meanRatio: stat.meanRatio,
+        medianRatio: stat.medianRatio,
+        pct: stat.pct
+      };
+    }).filter(function (group) {
+      return group.count >= minMeals;
+    }).sort(function (a, b) {
+      return Math.abs(b.pct) - Math.abs(a.pct);
+    });
+  }
+
   /* Agrégats sur la période. Tout est calculé ici plutôt qu'au rendu pour que
      les mêmes chiffres puissent servir à un autre format plus tard. */
   function analyse(days) {
@@ -78,6 +138,9 @@
       return e.realCarbsG > 0 && e.realCarbsG <= 400 &&
         (!Storage.isReliableReal || Storage.isReliableReal(e));
     });
+    var periodBias = robustRatio(mesures.map(function (e) {
+      return e.realCarbsG / e.totalCarbsG;
+    }));
 
     return {
       days: days,
@@ -87,7 +150,7 @@
       parJour: nbJours ? meals.length / nbJours : 0,
       partSize: partSize,
       moyenne: sum / meals.length,
-      mediane: sorted[Math.floor(sorted.length / 2)],
+      mediane: median(sorted),
       min: sorted[0],
       max: sorted[sorted.length - 1],
       glucidesParJour: nbJours ? sum / nbJours : 0,
@@ -95,8 +158,8 @@
       gl: gls.length ? gls.reduce(function (s, v) { return s + v; }, 0) / gls.length : null,
       glCount: gls.length,
       mesures: mesures.length,
-      bias: Storage.getBias(),
-      byCategory: Storage.getBiasByCategory(3) || [],
+      bias: periodBias,
+      byCategory: categoryBias(mesures, 3),
       from: meals[0].date,
       to: meals[meals.length - 1].date
     };
@@ -194,7 +257,7 @@
       '</div>',
 
       '<table><tbody>',
-      '<tr><td>Médiane par repas</td><td class="num">' + a.mediane + ' g</td><td class="muted">moins sensible aux repas exceptionnels</td></tr>',
+      '<tr><td>Médiane par repas</td><td class="num">' + fr1(a.mediane) + ' g</td><td class="muted">moins sensible aux repas exceptionnels</td></tr>',
       '<tr><td>Étendue</td><td class="num">' + a.min + ' – ' + a.max + ' g</td><td class="muted">du plus léger au plus copieux</td></tr>',
       glBlock,
       '</tbody></table>',

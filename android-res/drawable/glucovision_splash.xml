@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/glucovision_background" />
+    <item
+        android:width="116dp"
+        android:height="116dp"
+        android:gravity="center"
+        android:drawable="@drawable/glucovision_mark" />
+</layer-list>

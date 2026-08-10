@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '79'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '80'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -14,20 +14,32 @@
   /* La branche stable utilise un offset de 2000 pour versionCode. 2073 est le
      premier APK qui contient le nouveau plugin ARCore : un OTA v73 ne doit pas
      se charger sur le build stable 2072, même si son nombre est > 73. */
-  var MIN_NATIVE_BUILD = 2073;
+  /* v80 ajoute aussi les règles Android qui excluent repas/photos du cloud et
+     du transfert appareil-à-appareil. Elles vivent dans l'APK : un ancien
+     build 2073 ne doit donc pas accepter le bundle OTA v80. */
+  var MIN_NATIVE_BUILD = 2080;
   var nativeBuild = null;      // build réellement en cours d'exécution, sur APK
   var settings = Storage.getSettings();
 
   // État courant
   var images = [];        // [{base64, mediaType, previewUrl}]
+  /* Images exactes envoyées pour le résultat courant. `images` reste la
+     sélection éditable du prochain appel ; l'historique et une relance doivent
+     rester attachés au snapshot analysé, même si la galerie change ensuite. */
+  var lastEstimateImages = [];
   var lastResult = null;  // résultat IA (modifiable)
   var manualItems = [];   // [{name, carb(per100g), grams}]
   var currentHistoryDate = null;
   var currentHistoryConfirmed = false;
   var currentHistoryPhotoStarted = false;
+  /* Vrai tant qu'une comparaison affichée n'a pas encore été tranchée. Le
+     premier avis est conservé comme brouillon de secours, mais il ne devient
+     pas pour autant le choix de l'utilisateur. */
+  var currentChoiceRequired = false;
   var lastEstimateContext = null;
   var lastVerification = null;
   var estimateGeneration = 0;
+  var estimateBusy = false;
   var lastDepthShown = null;
   var currentDominantConfirmed = false;
   var resumedPhotoDraft = false;
@@ -51,6 +63,80 @@
     var ms = Math.min(8000, 2800 + msg.length * 45);
     toast._t = setTimeout(function () { t.hidden = true; }, ms);
   }
+
+  /* Une modale annoncée avec aria-modal doit réellement isoler l'arrière-plan,
+     recevoir le focus et le garder jusqu'à sa fermeture. Sans ce contrat, un
+     lecteur d'écran ou la touche Tab continue dans la page cachée derrière. */
+  var activeModal = null;
+  var modalReturnFocus = null;
+
+  function modalFocusables(modal) {
+    return Array.from(modal.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), ' +
+      'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )).filter(function (el) {
+      return !el.hidden && el.getAttribute('aria-hidden') !== 'true' &&
+        (el.offsetWidth > 0 || el.offsetHeight > 0);
+    });
+  }
+
+  function setModalBackgroundInert(modal, inert) {
+    Array.from(document.body.children).forEach(function (el) {
+      if (el !== modal && el.id !== 'toast' && el.tagName !== 'SCRIPT') el.inert = inert;
+    });
+  }
+
+  function showModal(id, initialFocusId) {
+    var modal = $(id);
+    if (!modal) return;
+    if (activeModal && activeModal !== modal) hideModal(activeModal.id);
+    modalReturnFocus = document.activeElement;
+    modal.hidden = false;
+    activeModal = modal;
+    setModalBackgroundInert(modal, true);
+    requestAnimationFrame(function () {
+      if (activeModal !== modal || modal.hidden) return;
+      var target = initialFocusId && $(initialFocusId);
+      if (!target || target.disabled || target.hidden) target = modalFocusables(modal)[0];
+      if (target) target.focus();
+    });
+  }
+
+  function hideModal(id) {
+    var modal = $(id);
+    if (!modal) return;
+    modal.hidden = true;
+    if (activeModal !== modal) return;
+    setModalBackgroundInert(modal, false);
+    activeModal = null;
+    var target = modalReturnFocus;
+    modalReturnFocus = null;
+    if (target && target.isConnected && !target.hidden) {
+      requestAnimationFrame(function () { try { target.focus(); } catch (e) {} });
+    }
+  }
+
+  document.addEventListener('keydown', function (e) {
+    var modal = activeModal;
+    if (!modal || modal.hidden) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (modal.id === 'barcode-modal') closeBarcode();
+      else hideModal(modal.id);
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    var focusables = modalFocusables(modal);
+    if (!focusables.length) { e.preventDefault(); return; }
+    var first = focusables[0], last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault(); last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault(); first.focus();
+    } else if (!modal.contains(document.activeElement)) {
+      e.preventDefault(); first.focus();
+    }
+  });
 
   var CONF_LABEL = {
     high: 'Confiance déclarée par l’IA : élevée',
@@ -255,6 +341,7 @@
       var on = b.dataset.mode === name;
       b.classList.toggle('active', on);
       b.setAttribute('aria-selected', on ? 'true' : 'false');
+      b.tabIndex = on ? 0 : -1;
     });
     root.querySelectorAll(':scope > .mode-pane').forEach(function (p) {
       p.classList.toggle('active', p.dataset.pane === name);
@@ -264,10 +351,27 @@
   function initPanes(rootId, onSelect) {
     var root = $(rootId);
     if (!root) return;
-    root.querySelectorAll(':scope > .mode-switch > .mode-btn').forEach(function (b) {
+    var buttons = Array.prototype.slice.call(
+      root.querySelectorAll(':scope > .mode-switch > .mode-btn'));
+    var initial = buttons.filter(function (b) {
+      return b.classList.contains('active') || b.getAttribute('aria-selected') === 'true';
+    })[0] || buttons[0];
+    if (initial) selectPane(rootId, initial.dataset.mode);
+    buttons.forEach(function (b, index) {
       b.addEventListener('click', function () {
         selectPane(rootId, b.dataset.mode);
         if (onSelect) onSelect(b.dataset.mode);
+      });
+      b.addEventListener('keydown', function (e) {
+        var next = index;
+        if (e.key === 'ArrowRight') next = (index + 1) % buttons.length;
+        else if (e.key === 'ArrowLeft') next = (index - 1 + buttons.length) % buttons.length;
+        else if (e.key === 'Home') next = 0;
+        else if (e.key === 'End') next = buttons.length - 1;
+        else return;
+        e.preventDefault();
+        buttons[next].click();
+        buttons[next].focus();
       });
     });
   }
@@ -307,11 +411,11 @@
       ? (describedMeal().length >= 4 || extrasText().length >= 4)
       : images.length > 0;
     var btn = $('estimate-btn');
-    btn.disabled = !ready;
-    $('estimate-btn-label').textContent = textMode
-      ? 'Estimer d\'après ma description'
-      : 'Estimer les glucides';
-    btn.classList.toggle('btn-ready', ready);
+    btn.disabled = !ready || estimateBusy;
+    $('estimate-btn-label').textContent = estimateBusy
+      ? 'Analyse en cours…'
+      : (textMode ? 'Estimer d\'après ma description' : 'Estimer les glucides');
+    btn.classList.toggle('btn-ready', ready && !estimateBusy);
     updateInputSummaries();
 
     /* Des photos prises puis laissées de côté ne sont PAS envoyées en mode
@@ -565,6 +669,15 @@
 
   function initPhotos() {
     initNativePhotoButtons();
+    ['btn-photo', 'btn-video', 'btn-gallery'].forEach(function (id) {
+      var trigger = $(id);
+      if (!trigger) return;
+      trigger.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        trigger.click();
+      });
+    });
     $('camera-input').addEventListener('change', function (e) {
       if (e.target.files.length) addFiles(e.target.files);
       e.target.value = '';
@@ -601,22 +714,31 @@
   }
 
   function runEstimate() {
+    /* Un changement de texte ou de photo rappelle updateEstimateBtn(). Sans cet
+       verrou il pouvait réactiver le bouton pendant l'appel : une ancienne
+       réponse arrivée en dernier remplaçait alors le repas le plus récent. */
+    if (estimateBusy) return;
+    estimateBusy = true;
     var runGeneration = ++estimateGeneration;
     var status = $('analyze-status');
     var resultsEl = $('results');
     resultsEl.hidden = true;
     status.hidden = false;
-    $('estimate-btn').disabled = true;
+    updateEstimateBtn();
     currentHistoryDate = null;
     currentHistoryConfirmed = false;
     currentHistoryPhotoStarted = false;
+    currentChoiceRequired = false;
     currentDominantConfirmed = false;
     resumedPhotoDraft = false;
     lastVerification = null;
 
     // En mode description, les photos éventuelles ne sont pas envoyées.
     var textOnly = inputMode === 'texte';
-    var sent = textOnly ? [] : images;
+    /* Snapshot de la sélection : l'utilisateur peut modifier ses photos pendant
+       l'attente, mais le résultat doit rester attaché à ce qui a été envoyé. */
+    var sent = textOnly ? [] : images.slice();
+    lastEstimateImages = sent.slice();
     var ctx = {
       referenceObject: $('reference-object').value,
       plateDiameterCm: $('plate-diameter').value ? parseFloat($('plate-diameter').value) : null,
@@ -626,6 +748,13 @@
       depth: textOnly ? null : depthOfSent(sent)
     };
     lastEstimateContext = Object.assign({}, ctx);
+
+    var isCurrentRun = function () { return runGeneration === estimateGeneration; };
+    var finishRun = function () {
+      if (!isCurrentRun()) return;
+      estimateBusy = false;
+      updateEstimateBtn();
+    };
 
     var cmp = settings.verifyProvider;
     var wantCompare = settings.verificationMode === 'ask' && cmp && cmp !== settings.provider &&
@@ -637,20 +766,36 @@
         (PROVIDER_NAME[cmp] || cmp) + ')… cela peut prendre 20 à 40 s.';
       // On lance les deux fournisseurs en parallèle ; chacun peut échouer indépendamment.
       var wrap = function (p) {
-        return Estimator.estimateWith(p, sent, ctx, settings)
+        return Promise.resolve().then(function () {
+          return Estimator.estimateWith(p, sent, ctx, settings);
+        })
           .then(function (r) { return { ok: true, provider: p, result: r }; })
-          .catch(function (e) { return { ok: false, provider: p, error: e.message }; });
+          .catch(function (e) {
+            return { ok: false, provider: p, error: e.message, cause: e };
+          });
       };
       var mdl = settings.models || {};
       lastCompareRun = [settings.provider + '|' + (mdl[settings.provider] || ''),
                         cmp + '|' + (mdl[cmp] || '')];
       lastRunProvider = null; lastRunModel = null;
       Promise.all([wrap(settings.provider), wrap(cmp)]).then(function (pair) {
+        if (!isCurrentRun()) return;
         status.hidden = true;
         var a = pair[0], b = pair[1];
-        if (!a.ok && !b.ok) { toast(a.error || b.error); return; }
+        if (!a.ok && !b.ok) {
+          /* Le double avis est le parcours par défaut. Il doit proposer la même
+             sauvegarde hors-ligne que l'appel simple si les deux réseaux tombent. */
+          var network = [a, b].filter(function (x) {
+            return x.cause && Queue.isNetworkError(x.cause);
+          })[0];
+          offerQueue((network && network.cause) || a.cause || b.cause ||
+            new Error(a.error || b.error || 'Analyse impossible.'), ctx, sent);
+          return;
+        }
         renderCompare([a, b]);
-      }).then(function () { updateEstimateBtn(); });
+      }).catch(function (e) {
+        if (isCurrentRun()) offerQueue(e, ctx, sent);
+      }).then(finishRun);
       return;
     }
 
@@ -663,21 +808,24 @@
     var verify = startVerification(sent, ctx);
 
     lastCompare = null;
+    lastComparisonArchive = null;
     oublierEnCours();
     lastCompareRun = null;
     lastRunProvider = settings.provider;
     lastRunModel = (settings.models || {})[settings.provider] || null;
-    estimateWithFallback(sent, ctx, status).then(function (result) {
+    Promise.resolve().then(function () {
+      return estimateWithFallback(sent, ctx, status);
+    }).then(function (result) {
+      if (!isCurrentRun()) return;
       lastResult = result;
       status.hidden = true;
       renderResults(result);
       attachVerification(verify, runGeneration);
     }).catch(function (e) {
+      if (!isCurrentRun()) return;
       status.hidden = true;
       offerQueue(e, ctx, sent);
-    }).then(function () {
-      updateEstimateBtn();
-    });
+    }).then(finishRun);
   }
 
   /* Rejoue l'estimation chez un AUTRE fournisseur quand le principal échoue.
@@ -859,9 +1007,8 @@
               id: Math.floor(item.date / 1000),
               title: blocked ? 'Repas à vérifier' : 'Estimation prête',
               body: blocked
-                ? 'Le repas mis de côté a été conservé, mais son estimation est incohérente. Ouvre le brouillon pour la corriger.'
-                : 'Le repas mis de côté a été analysé : ' + result.totalCarbsG + ' g (' +
-                  fr(partsFrom(result.totalCarbsG)) + ' parts). Confirme-le dans l\'historique.',
+                ? 'Ouvre GlucoVision : le repas mis de côté demande une vérification.'
+                : 'Ouvre GlucoVision : le repas mis de côté est prêt à être vérifié.',
               at: new Date(Date.now() + 1000)
             });
             return next(i + 1);
@@ -1037,6 +1184,7 @@
     currentDominantConfirmed = false;
     lastEstimateContext = ctx;
     images = [];
+    lastEstimateImages = [];
     resumedPhotoDraft = ctx.imageCount > 0;
     if (ctx.notes && $('user-notes')) $('user-notes').value = ctx.notes;
     renderCompare(avis);
@@ -1048,8 +1196,9 @@
      troisième avis pour départager les deux premiers, les faire disparaître
      serait exactement le contraire du service rendu. */
   var lastCompare = null;
+  var lastComparisonArchive = null;
 
-  function renderCompare(avis) {
+  function renderCompare(avis, reviewOnly) {
     var el = $('results');
     avis = (avis || []).map(function (x) {
       if (x && x.ok && x.result && x.result.blocking && x.result.blocking.length) {
@@ -1062,6 +1211,12 @@
       return x;
     });
     lastCompare = avis;
+    if (!reviewOnly) currentChoiceRequired = true;
+    /* Archive indépendante : corriger ensuite le résultat retenu ne doit ni
+       réécrire les colonnes d'origine, ni falsifier les avis conservés dans
+       l'historique. */
+    try { lastComparisonArchive = JSON.parse(JSON.stringify(avis)); }
+    catch (e) { lastComparisonArchive = avis.slice(); }
 
     /* Présentation en TABLEAU et non en cartes côte à côte. Des cartes obligent
        l'œil à faire l'aller-retour pour comparer chaque grandeur : le total de
@@ -1078,6 +1233,10 @@
       for (var i = 0; i < cat.length; i++) {
         if (cat[i].id === id) return cat[i].label;
       }
+      /* Un modèle OpenRouter personnalisé ne doit pas devenir une énième
+         colonne « OpenRouter ». Le dernier segment de son identifiant reste
+         court, distinct et permet de savoir quel avis on choisit. */
+      if (id) return String(id).split('/').pop().replace(/[-_]+/g, ' ');
       return PROVIDER_NAME[x.provider] || x.provider;
     }
     function sousTitreDe(x) { return PROVIDER_NAME[x.provider] || x.provider; }
@@ -1094,14 +1253,29 @@
 
     var ok = avis.filter(function (x) { return x.ok; });
     var totaux = ok.map(function (x) { return x.result.totalCarbsG; });
+    var duplicateModel = Estimator.sameUnderlyingModel(ok.map(function (x) {
+      return x.result.model;
+    }));
+
+    var memeContenu = true;
+    for (var ci = 1; ci < ok.length && memeContenu; ci++) {
+      if (!foodComparison(ok[0].result.items, ok[ci].result.items).same) {
+        memeContenu = false;
+      }
+    }
 
     var html = '<div class="cmp-head">' +
-      '<h2>' + (avis.length > 2 ? avis.length + ' avis indépendants' : 'Deux avis indépendants') + '</h2>' +
-      '<p class="hint">' + (avis.length > 2
-        ? 'Trois modèles de familles différentes ont analysé la même photo. '
-        : 'Deux modèles ont analysé la même photo, sans se consulter. ') +
-      'Retiens celui qui te paraît le plus juste — tu pourras encore corriger les portions.</p>' +
+      '<span class="cmp-kicker">COMPARAISON</span>' +
+      '<h2 id="cmp-title">' + avis.length + ' estimations côte à côte</h2>' +
+      '<p class="hint">Compare le total et surtout sa répartition par aliment. ' +
+      'Aucun avis n’est présélectionné : retiens celui qui décrit le mieux ton assiette.</p>' +
       '</div>';
+
+    if (duplicateModel) {
+      html += '<div class="cmp-warn">⚠️ <strong>Deux colonnes viennent du même modèle.</strong> ' +
+        'Elles ont été obtenues par des routes différentes, mais ne constituent pas deux ' +
+        'avis indépendants. Leur accord ne confirme donc rien.</div>';
+    }
 
     // Divergence : annoncée AVANT le tableau, sinon elle se lit après la décision.
     if (totaux.length > 1) {
@@ -1118,8 +1292,15 @@
       }
     }
 
-    html += '<div class="cmp-tablewrap"><table class="cmp-table' +
-            (avis.length > 2 ? ' cmp-table-3' : '') + '"><thead><tr><th class="cmp-metric"></th>';
+    if (avis.length > 2) {
+      html += '<p class="cmp-scrollhint">↔ Fais glisser le tableau pour voir chaque modèle.</p>';
+    }
+    html += '<div class="cmp-tablewrap" role="region" aria-labelledby="cmp-title" tabindex="0">' +
+      '<table class="cmp-table cmp-table-' + avis.length + '">' +
+      '<caption class="sr-only">Comparaison détaillée de ' + avis.length + ' estimations</caption>' +
+      '<colgroup><col class="cmp-col-metric">' + avis.map(function () {
+        return '<col class="cmp-col-model">';
+      }).join('') + '</colgroup><thead><tr><th class="cmp-metric" scope="col">Mesure</th>';
     avis.forEach(function (x) {
       // Sur un avis en échec le modèle est inconnu : le libellé retombe sur le
       // fournisseur, et l'afficher deux fois n'apprend rien.
@@ -1135,6 +1316,17 @@
     html += ligne('Confiance', function (r) {
       return '<span class="confidence conf-' + r.overallConfidence + '">' +
              CONF_LABEL[r.overallConfidence] + '</span>'; });
+    html += ligne('Aliments', function (r) {
+      var items = (r.items || []).slice(0, 12);
+      if (!items.length) return '<span class="cmp-empty">Aucun détail</span>';
+      return '<ul class="cmp-food-list">' + items.map(function (it) {
+        var portion = it.portionDescription || (it.estimatedMassG != null
+          ? '≈ ' + Math.round(it.estimatedMassG) + ' g' : '');
+        return '<li><span class="cmp-food-name">' + escapeHtml(it.name) + '</span>' +
+          (portion ? '<small>' + escapeHtml(portion) + '</small>' : '') +
+          '<strong>' + Math.round(it.carbsG || 0) + ' g</strong></li>';
+      }).join('') + '</ul>';
+    }, 'cmp-food');
 
     // Un échec ne doit pas disparaître derrière un tiret : on dit lequel et pourquoi.
     if (ok.length !== avis.length) {
@@ -1147,45 +1339,24 @@
 
     html += '<tr class="cmp-row-actions"><td class="cmp-metric"></td>';
     avis.forEach(function (x, i) {
+      var modelName = nomDe(x);
       html += '<td class="cmp-td">' + (x.ok
-        ? '<button class="btn btn-primary cmp-use" data-i="' + i + '">Retenir</button>' : '') + '</td>';
+        ? '<button class="btn btn-primary cmp-use" data-i="' + i +
+          '" aria-label="Retenir l’estimation de ' + escapeHtml(modelName) + '">Retenir</button>' : '') + '</td>';
     });
     html += '</tr></tbody></table></div>';
 
     if (totaux.length > 1) {
       var lo2 = Math.min.apply(null, totaux), hi2 = Math.max.apply(null, totaux);
-      var moy2 = Math.round(totaux.reduce(function (a2, b2) { return a2 + b2; }, 0) / totaux.length);
-
-      /* « Concordants » ne peut pas se décider sur les totaux seuls : « pain
-         40 g » et « riz 40 g » se ressemblent parfaitement en chiffres et
-         décrivent deux repas différents. On exige donc aussi que les aliments
-         glucidiques se recoupent — c'est la seule façon de savoir que les deux
-         modèles ont regardé la même assiette. */
-      var memeContenu = true;
-      for (var ci = 1; ci < ok.length && memeContenu; ci++) {
-        var dd = foodDisagreements(ok[0].result.items, ok[ci].result.items);
-        if (dd.onlyMine.length || dd.onlyTheirs.length) memeContenu = false;
-      }
-      html += '<div class="cmp-avg">' + ((hi2 - lo2 < 5 && memeContenu)
+      html += '<div class="cmp-summary">' + ((hi2 - lo2 < 5 && memeContenu && !duplicateModel)
         ? '<span class="cmp-agree">✓ Avis concordants</span> — ' + (hi2 - lo2) + ' g d\'écart seulement.'
-        : 'Écart de <strong>' + (hi2 - lo2) + ' g</strong> · moyenne ' + moy2 + ' g (' +
-          fr(partsFrom(moy2)) + ' parts)') + '</div>';
+        : 'Valeurs de <strong>' + lo2 + ' à ' + hi2 + ' g</strong> · écart maximal de <strong>' +
+          (hi2 - lo2) + ' g</strong>. Choisis d’après le détail, sans faire de moyenne.') + '</div>';
       if (hi2 - lo2 < 5 && !memeContenu) {
-        html += '<div class="cmp-warn">⚠️ <strong>Même total, aliments différents.</strong> ' +
-          'Les avis tombent sur le même chiffre en décrivant des assiettes qui ne se ' +
-          'recoupent pas : au moins l\'un des deux s\'est trompé d\'aliment. Ouvre le ' +
-          'détail avant de retenir un chiffre.</div>';
+        html += '<div class="cmp-warn">⚠️ <strong>Totaux proches, calculs différents.</strong> ' +
+          'Les colonnes arrivent presque au même chiffre, mais pas avec les mêmes aliments ' +
+          'ou les mêmes quantités. Les erreurs peuvent se compenser : compare chaque ligne.</div>';
       }
-    }
-
-    /* Deux routes vers le MÊME modèle ne font pas deux avis. Gemini appelé en
-       direct et le même Gemini appelé via OpenRouter donnent deux colonnes
-       d'apparence indépendante, alors que c'est un seul avis affiché deux fois
-       — et rien n'empêchait de les choisir ainsi dans les réglages. */
-    if (Estimator.sameUnderlyingModel(ok.map(function (x) { return x.result.model; }))) {
-      html += '<div class="cmp-warn">⚠️ <strong>Deux de ces avis viennent du même modèle</strong>, ' +
-        'appelé par deux fournisseurs différents. Ils ne sont pas indépendants : leur accord ' +
-        'ne confirme rien. Choisis un modèle d\'une autre famille dans les réglages.</div>';
     }
 
     html += rerunHtml(true);
@@ -1203,7 +1374,7 @@
        On enregistre donc dès l'affichage, sans attendre le choix : le premier
        avis abouti sert de brouillon. Retenir l'autre ensuite met simplement à
        jour la MÊME entrée, puisque currentHistoryDate ne change pas. */
-    if (ok.length) {
+    if (ok.length && !reviewOnly) {
       lastResult = ok[0].result;
       var second = ok[1];
       lastVerification = second
@@ -1217,13 +1388,22 @@
 
     el.querySelectorAll('.cmp-use').forEach(function (btn) {
       btn.addEventListener('click', function () {
+        if (estimateBusy) {
+          toast('Attends la fin de l’avis en cours avant de choisir une colonne.');
+          return;
+        }
         var choisiIndex = parseInt(btn.dataset.i, 10);
         var choisi = avis[choisiIndex], autres = avis.filter(function (x, i) {
           return i !== choisiIndex;
         });
         if (!choisi) return;
-        lastResult = choisi.result;
+        try { lastResult = JSON.parse(JSON.stringify(choisi.result)); }
+        catch (e) { lastResult = Object.assign({}, choisi.result); }
         currentDominantConfirmed = false;
+        /* Rechoisir après une confirmation change le chiffre : ce nouveau choix
+           redevient donc un brouillon et doit être confirmé à son tour. */
+        currentHistoryConfirmed = false;
+        currentChoiceRequired = false;
         /* La vérification retenue est le PREMIER autre avis abouti : c'est celui
            qui sert de contrepoint dans le détail et dans l'historique. */
         var autre = autres.filter(function (x) { return x.ok; })[0] || autres[0];
@@ -1255,6 +1435,7 @@
     delete lastResult.dominantConfirmed;
     currentDominantConfirmed = false;
     currentHistoryConfirmed = false;
+    lastResult.humanEdited = true;
     /* Une correction humaine rend l'ancien second avis périmé : il portait sur
        la liste précédente. Le conserver comme « confirmé » serait trompeur. */
     lastVerification = null;
@@ -1500,15 +1681,33 @@
       html += bloque.map(function (b) { return '<li>' + escapeHtml(b) + '</li>'; }).join('');
       html += '</ul>';
       html += '<p class="hint">Relance l\'estimation, ou corrige les aliments ci-dessous : ' +
-              'le total se recalcule et l\'estimation redevient utilisable.</p>';
+              'le total se recalcule. Une contradiction de la réponse initiale demandera ' +
+              'ensuite une validation explicite de ton calcul.</p>';
+      if (r.humanEdited && r.sourceBlocking && r.sourceBlocking.length) {
+        html += '<button id="accept-manual-recalc" class="btn btn-secondary">' +
+          'J’ai vérifié chaque aliment — utiliser mon calcul</button>';
+      }
       html += '</div>';
       html += '<div id="verify-box" class="verify-box" hidden></div>';
       html += seenHtml(r);
       html += '<div class="card"><h2>Détail par aliment</h2>';
       html += '<p class="hint">Corrige une portion pour débloquer le total.</p>';
-      html += '<div id="items-list"></div></div>';
+      html += '<div id="items-list"></div>' +
+        '<button id="add-result-item" class="btn btn-secondary result-add-item">＋ Ajouter un aliment manquant</button></div>';
       el.innerHTML = html;
+      el.hidden = false;
       renderItems();
+      initResultItemAdder();
+      var acceptManual = $('accept-manual-recalc');
+      if (acceptManual) {
+        acceptManual.addEventListener('click', function () {
+          Estimator.acceptManualRecalculation(lastResult);
+          renderResults(lastResult, true);
+          toast(lastResult.blocking && lastResult.blocking.length
+            ? 'Le calcul reste bloqué : corrige encore les points signalés.'
+            : 'Ton calcul corrigé remplace maintenant la réponse incohérente du modèle.');
+        });
+      }
       autoSaveCurrentResult();
       if (!keepPosition) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
@@ -1551,7 +1750,8 @@
     // Détail par aliment (grammes éditables)
     html += '<div class="card"><h2>Détail par aliment</h2>';
     html += '<p class="hint">Une portion te semble fausse dans la liste ci-dessus ? Corrige-la ici, le total se recalcule.</p>';
-    html += '<div id="items-list"></div></div>';
+    html += '<div id="items-list"></div>' +
+      '<button id="add-result-item" class="btn btn-secondary result-add-item">＋ Ajouter un aliment manquant</button></div>';
 
     if (nutrition || r.notes) {
       html += '<details class="card result-more"><summary>Informations complémentaires</summary>' +
@@ -1566,17 +1766,28 @@
             '<span class="autosave-dot"></span><span>Enregistrement du brouillon…</span></div>';
     html += '<div class="btn-row">' +
             '<button id="confirm-result" class="btn btn-primary">✓ Confirmer ce repas</button>' +
-            '<button id="save-meal" class="btn btn-ghost">⭐ Repas fréquent</button>' +
+            '<button id="save-meal" class="btn btn-ghost"' +
+            (typeof r.mergedTotalCarbsG === 'number' ? ' disabled title="Corrige le détail avant de sauvegarder ce repas"' : '') +
+            '>⭐ Repas fréquent</button>' +
             '</div>';
+    if (lastComparisonArchive && lastComparisonArchive.length > 1) {
+      html += '<button id="reopen-compare" class="btn btn-secondary btn-lg">' +
+        '↔ Revoir les ' + lastComparisonArchive.length + ' colonnes d’origine</button>';
+    }
     html += rerunHtml();
     html += '<div class="disclaimer-mini">Estimation indicative — vérifie toujours avant de doser.</div>';
 
     el.innerHTML = html;
     el.hidden = false;
     renderItems();
+    initResultItemAdder();
     initDominant();
     $('confirm-result').addEventListener('click', confirmCurrentResult);
     $('save-meal').addEventListener('click', function () {
+      if (typeof lastResult.mergedTotalCarbsG === 'number') {
+        toast('Corrige d’abord le détail : un repas fréquent doit avoir des aliments dont la somme correspond au total.');
+        return;
+      }
       if ((lastResult.blocking && lastResult.blocking.length) ||
           (dominantItem(lastResult) && !currentDominantConfirmed)) {
         toast('Confirme et corrige d’abord ce résultat avant d’en faire un repas fréquent.');
@@ -1584,6 +1795,12 @@
       }
       promptSaveMeal(lastResult.items);
     });
+    var reopen = $('reopen-compare');
+    if (reopen) {
+      reopen.addEventListener('click', function () {
+        renderCompare(lastComparisonArchive, true);
+      });
+    }
     initRerun();
     renderVerificationState();
     autoSaveCurrentResult();
@@ -1639,6 +1856,15 @@
     var p = settings.verifyProvider;
     if (settings.verificationMode !== 'auto' || !p || p === settings.provider) return null;
     if (!(settings.apiKeys || {})[p]) return null;
+    var configured = settings.models || {};
+    if (Estimator.sameUnderlyingModel([
+      configured[settings.provider], configured[p]
+    ])) {
+      return Promise.resolve({
+        ok: false, provider: p,
+        error: 'même modèle que l’estimation principale : avis non indépendant'
+      });
+    }
     return Estimator.estimateWith(p, images, ctx, settings)
       .then(function (r) {
         if (r.blocking && r.blocking.length) {
@@ -1684,22 +1910,51 @@
     var a = carbed(mine), b = carbed(theirs);
     if (Storage.matchFoods) {
       var matched = Storage.matchFoods(a, b);
-      return { onlyMine: matched.onlyA || [], onlyTheirs: matched.onlyB || [] };
+      return {
+        pairs: matched.pairs || [],
+        onlyMine: matched.onlyA || [],
+        onlyTheirs: matched.onlyB || []
+      };
     }
     /* Repli un-à-un : un aliment du second avis ne peut pas « confirmer »
        plusieurs lignes du premier. */
-    var used = {};
-    var missing = function (from, into) {
-      return from.filter(function (x) {
-        for (var i = 0; i < into.length; i++) {
-          if (!used[i] && sameFood(x.name, into[i].name)) { used[i] = true; return false; }
-        }
-        return true;
-      });
+    var used = {}, pairs = [], onlyMine = [];
+    a.forEach(function (x, ai) {
+      var found = -1;
+      for (var i = 0; i < b.length; i++) {
+        if (!used[i] && sameFood(x.name, b[i].name)) { found = i; break; }
+      }
+      if (found < 0) onlyMine.push(x);
+      else {
+        used[found] = true;
+        pairs.push({ aIndex: ai, bIndex: found, a: x, b: b[found] });
+      }
+    });
+    return {
+      pairs: pairs,
+      onlyMine: onlyMine,
+      onlyTheirs: b.filter(function (_, i) { return !used[i]; })
     };
-    var onlyMine = missing(a, b);
-    used = {};
-    return { onlyMine: onlyMine, onlyTheirs: missing(b, a) };
+  }
+
+  /* Des noms identiques ne suffisent pas à établir un accord. Riz 40 + pain 10
+     et riz 10 + pain 42 donnent presque le même total, mais racontent deux
+     calculs opposés. On exige donc aussi une proximité raisonnable pour chaque
+     aliment apparié (5 g minimum de tolérance, ou 25 % de leur moyenne). */
+  function foodComparison(mine, theirs) {
+    var d = foodDisagreements(mine, theirs);
+    var amountDiffs = (d.pairs || []).filter(function (pair) {
+      var a = Number(pair.a && pair.a.carbsG) || 0;
+      var b = Number(pair.b && pair.b.carbsG) || 0;
+      return Math.abs(a - b) > Math.max(5, ((a + b) / 2) * 0.25);
+    });
+    return {
+      pairs: d.pairs || [],
+      onlyMine: d.onlyMine || [],
+      onlyTheirs: d.onlyTheirs || [],
+      amountDiffs: amountDiffs,
+      same: !(d.onlyMine || []).length && !(d.onlyTheirs || []).length && !amountDiffs.length
+    };
   }
 
   function renderVerificationState() {
@@ -1729,7 +1984,10 @@
     var seuil = settings.verifyThresholdPct || 20;
     var parts = fr(partsFrom(v.total));
 
-    var d = foodDisagreements(lastResult.items, v.items);
+    var d = foodComparison(lastResult.items, v.items);
+    var duplicateModel = Estimator.sameUnderlyingModel([
+      lastResult && lastResult.model, v.model
+    ]);
     var listeEcarts = '';
     if (d.onlyTheirs.length) {
       listeEcarts += '<br>• ' + escapeHtml(nom) + ' voit aussi : <strong>' +
@@ -1743,12 +2001,23 @@
           return escapeHtml(x.name) + ' (' + x.carbsG + ' g)';
         }).join(', ') + '</strong>';
     }
+    if (d.amountDiffs.length) {
+      listeEcarts += '<br>• Répartition différente : <strong>' +
+        d.amountDiffs.map(function (pair) {
+          return escapeHtml(pair.a.name) + ' ' + Math.round(pair.a.carbsG || 0) +
+            ' g / ' + Math.round(pair.b.carbsG || 0) + ' g';
+        }).join(', ') + '</strong>';
+    }
 
-    if (ecart <= seuil && !listeEcarts) {
+    if (ecart <= seuil && d.same && !duplicateModel) {
       el.className = 'verify-box v-ok';
       el.innerHTML = '✅ <strong>Confirmé</strong> par ' + escapeHtml(nom) + ' : ' +
         v.total + ' g (' + parts + ' parts), soit ' + Math.round(ecart) + ' % d\'écart, ' +
         'et les deux modèles voient les mêmes aliments.';
+    } else if (duplicateModel) {
+      el.className = 'verify-box v-warn';
+      el.innerHTML = '⚠️ <strong>Vérification non indépendante</strong> — les deux réponses ' +
+        'viennent du même modèle appelé par deux routes différentes. Leur accord ne confirme rien.';
     } else if (ecart <= seuil) {
       /* Totaux proches mais désaccord sur le CONTENU : c'est le cas que la
          comparaison des seuls totaux laissait passer pour une confirmation. */
@@ -1780,8 +2049,7 @@
         m === 'qwen/qwen3-vl-235b-a22b-instruct';
     };
     if (!((gemini(a) && complement(b)) || (gemini(b) && complement(a)))) return false;
-    var d = foodDisagreements(mainResult.items, verification.items);
-    return !d.onlyMine.length && !d.onlyTheirs.length;
+    return foodComparison(mainResult.items, verification.items).same;
   }
 
   function attachVerification(promise, generation) {
@@ -1957,6 +2225,9 @@
      simplement le même repas ailleurs, et le résultat remplace l'affichage. */
   function rerunOptions() {
     var out = [];
+    var core = function (model) {
+      return String(model || '').toLowerCase().trim().split('/').pop();
+    };
     /* Après une double analyse, DEUX modèles ont déjà répondu. N'en exclure
        qu'un laissait l'autre en tête de liste : la relance proposée par défaut
        aurait refait à l'identique l'un des deux avis déjà affichés. */
@@ -1970,12 +2241,16 @@
         faits.push(x.provider + '|' + ((x.result && x.result.model) || mdl2[x.provider] || ''));
       });
     }
+    var coresDejaFaits = faits.map(function (entry) {
+      return core(String(entry).split('|').slice(1).join('|'));
+    }).filter(Boolean);
     (Storage.PROVIDERS || []).forEach(function (p) {
       if (!(settings.apiKeys || {})[p]) return;          // pas de clé, pas d'option
       var cat = (Storage.MODEL_CATALOG || {})[p] || [];
       cat.forEach(function (m) {
         // On ne propose pas de refaire exactement ce qui vient d'être fait.
-        var dejaFait = faits.indexOf(p + '|' + m.id) !== -1;
+        var dejaFait = faits.indexOf(p + '|' + m.id) !== -1 ||
+          coresDejaFaits.indexOf(core(m.id)) !== -1;
         if (dejaFait) return;
         out.push({ provider: p, model: m.id,
                    label: (PROVIDER_NAME[p] || p) + ' · ' + m.label });
@@ -2044,19 +2319,33 @@
     var btn = $('rerun-btn');
     if (!btn) return;
     btn.addEventListener('click', function () {
+      if (estimateBusy) { toast('Une analyse est déjà en cours.'); return; }
       var opts = rerunOptions();
       var o = opts[parseInt($('rerun-model').value, 10)];
       if (!o) return;
+
+      estimateBusy = true;
+      var rerunGeneration = ++estimateGeneration;
+      updateEstimateBtn();
+      var isCurrentRerun = function () {
+        return rerunGeneration === estimateGeneration;
+      };
 
       var status = $('rerun-status');
       var sel = $('rerun-model');
       var hint = $('rerun-hint');
       var debut = Date.now();
+      var sourceCompare = lastCompare;
+      var sourceResult = lastResult;
+      var sourceDate = currentHistoryDate;
 
       // Tout se verrouille et s'annonce sur place : bouton, sélecteur, message.
       btn.disabled = true;
       btn.textContent = '↻ En cours…';
       if (sel) sel.disabled = true;
+      document.querySelectorAll('.cmp-use').forEach(function (choice) {
+        choice.disabled = true;
+      });
       if (hint) hint.hidden = true;
       if (status) {
         status.hidden = false;
@@ -2072,9 +2361,16 @@
       }, 1000);
       var fini = function () {
         clearInterval(tick);
+        if (isCurrentRerun()) {
+          estimateBusy = false;
+          updateEstimateBtn();
+        }
         btn.disabled = false;
         btn.textContent = '↻ Relancer';
         if (sel) sel.disabled = false;
+        document.querySelectorAll('.cmp-use').forEach(function (choice) {
+          choice.disabled = false;
+        });
         if (hint) hint.hidden = false;
       };
 
@@ -2097,11 +2393,17 @@
             imageCount: inputMode === 'texte' ? 0 : images.length,
             depth: inputMode === 'texte' ? null : depthOfSent(images)
           };
-      var sent = ctx.imageCount > 0 ? images : [];
+      var sent = ctx.imageCount > 0 ? lastEstimateImages.slice() : [];
 
       var avant = lastResult ? lastResult.totalCarbsG : null;
+      var isStillSource = function () {
+        if (!isCurrentRerun() || currentHistoryDate !== sourceDate) return false;
+        return sourceCompare ? lastCompare === sourceCompare
+          : (lastCompare === null && lastResult === sourceResult);
+      };
 
       Estimator.estimateWith(o.provider, sent, ctx, ponctuel).then(function (r) {
+        if (!isStillSource()) { fini(); return; }
         fini();
         lastRunProvider = o.provider;
         lastRunModel = o.model;
@@ -2130,6 +2432,7 @@
         toast(escapeHtml(o.label) + ' : ' + r.totalCarbsG + ' g (' +
               fr(partsFrom(r.totalCarbsG)) + ' parts)' + ecart);
       }).catch(function (e) {
+        if (!isStillSource()) { fini(); return; }
         fini();
         if (status) {
           status.className = 'rerun-status rerun-fail';
@@ -2148,7 +2451,10 @@
     if (name == null) return;
     name = name.trim();
     if (!name) { toast('Donne un nom au repas.'); return; }
-    Storage.saveMeal(name, items);
+    if (!Storage.saveMeal(name, items)) {
+      toast('Repas fréquent non enregistré : stockage indisponible.');
+      return;
+    }
     renderSavedMeals();
     toast('« ' + name + ' » enregistré. Retrouve-le dans l\'onglet Manuel.');
   }
@@ -2254,6 +2560,14 @@
              chiffre saisi dans la pompe n'avait pas bougé d'un gramme. */
           if (!it.needsNutrition) it.renamedFrom = it.name;
           it.needsNutrition = true;
+          /* Masse, densité et macros décrivent l'ancien aliment. Les garder
+             permettait de débloquer la ligne en changeant seulement sa masse,
+             donc de calculer l'avoine avec la densité du fromage blanc. */
+          it.estimatedMassG = null;
+          it.carbDensityPer100g = null;
+          it.proteinG = null;
+          it.fatG = null;
+          it.kcal = null;
         }
         it.name = name;
         recomputeTotal();
@@ -2289,6 +2603,40 @@
     });
   }
 
+  /* Réparer un oubli du modèle sans jeter toute l'analyse. La valeur demandée
+     est celle de LA portion réellement mangée, pas une densité pour 100 g :
+     cela évite d'obliger l'utilisateur à inventer une masse. */
+  function initResultItemAdder() {
+    var btn = $('add-result-item');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var name = prompt('Quel aliment manque dans le résultat ?');
+      if (name == null) return;
+      name = name.trim().slice(0, 160);
+      if (!name) { toast('Indique le nom de l’aliment manquant.'); return; }
+      var raw = prompt('Combien de grammes de glucides contient la portion mangée de « ' + name + ' » ?');
+      if (raw == null) return;
+      var carbs = Number(String(raw).replace(',', '.'));
+      if (!isFinite(carbs) || carbs <= 0 || carbs > 400) {
+        toast('Indique un nombre de glucides entre 1 et 400 g.');
+        return;
+      }
+      lastResult.items.push({
+        name: name,
+        portionDescription: 'portion ajoutée manuellement',
+        estimatedMassG: null,
+        carbDensityPer100g: null,
+        carbsG: Math.round(carbs),
+        added: true,
+        confidence: 'medium',
+        assumptions: 'Valeur saisie manuellement.'
+      });
+      recomputeTotal();
+      renderResults(lastResult, true);
+      toast('« ' + name + ' » ajouté au calcul.');
+    });
+  }
+
   function currentResultEntry(date) {
     var entry = {
       date: date,
@@ -2297,6 +2645,9 @@
       source: lastResult.fromText ? 'texte' : 'photo',
       draft: !currentHistoryConfirmed,
       confirmed: !!currentHistoryConfirmed,
+      /* Un avis provisoire autosauvegardé pendant la comparaison ne peut pas
+         être confirmé depuis l'historique avant un clic explicite sur Retenir. */
+      choiceRequired: !!currentChoiceRequired,
       // Le total enregistré est celui qui a été AFFICHÉ, donc la moyenne des deux
       // modèles quand la fusion est active : c'est lui qui a servi à doser, et
       // c'est donc lui que la calibration doit comparer aux glucides réels.
@@ -2336,6 +2687,23 @@
           portion: it.portionDescription || '',
           added: !!it.added
         };
+      }),
+      /* Les trois avis restent disponibles dans l'historique, même si un seul
+         a ensuite été retenu pour les corrections. */
+      opinions: (lastComparisonArchive || []).slice(0, 3).map(function (opinion) {
+        return {
+          provider: opinion.provider || '',
+          ok: !!opinion.ok,
+          error: opinion.ok ? '' : String(opinion.error || '').slice(0, 500),
+          model: opinion.ok && opinion.result
+            ? String(opinion.result.model || '').slice(0, 200) : '',
+          totalCarbsG: opinion.ok && opinion.result ? opinion.result.totalCarbsG : null,
+          items: opinion.ok && opinion.result
+            ? (opinion.result.items || []).slice(0, 40).map(function (it) {
+                return { name: it.name, carbsG: it.carbsG,
+                         portion: it.portionDescription || '' };
+              }) : []
+        };
       })
     };
     /* Snapshot sans photo ni secret : il permet de reprendre un brouillon après
@@ -2367,7 +2735,12 @@
         ? 'Repas confirmé dans l\'historique'
         : 'Brouillon sauvegardé automatiquement') + '</span>';
     btn.disabled = currentHistoryConfirmed;
-    btn.textContent = currentHistoryConfirmed ? '✓ Repas confirmé' : '✓ Confirmer ce repas';
+    if (currentChoiceRequired) {
+      btn.disabled = true;
+      btn.textContent = 'Choisis d’abord une estimation';
+    } else {
+      btn.textContent = currentHistoryConfirmed ? '✓ Repas confirmé' : '✓ Confirmer ce repas';
+    }
   }
 
   function prepareCurrentHistoryPhoto(date) {
@@ -2378,7 +2751,7 @@
        PWA : une vignette de 320 px en base64, seule taille que le quota de
        localStorage tolère. APK : la photo entière, écrite comme un vrai fichier
        — aucune raison de la dégrader puisqu'il n'y a plus de quota. */
-    var first = images[0];
+    var first = lastEstimateImages[0];
     if (!first || !first.previewUrl) return;
 
     if (Native.isApp && first && first.previewUrl) {
@@ -2436,6 +2809,10 @@
 
   function confirmCurrentResult() {
     if (!lastResult) return;
+    if (currentChoiceRequired) {
+      toast('Compare les colonnes puis appuie sur Retenir avant de confirmer ce repas.');
+      return;
+    }
     /* Un repas incohérent ne doit pas entrer dans l'historique : il y servirait
        ensuite de référence à la calibration personnelle, et un total faux s'y
        propagerait bien après avoir été oublié. */
@@ -2474,12 +2851,6 @@
      jamais de dose, c'est la pompe qui dose. */
   var REMIND_DEFAULT_MIN = { rapide: 90, moderee: 120, lente: 180 };
 
-  function humanDelay(min) {
-    var h = Math.floor(min / 60), m = min % 60;
-    if (!h) return m + ' min';
-    return h + ' h' + (m ? ' ' + (m < 10 ? '0' + m : m) : '');
-  }
-
   function scheduleReminderFor(entry) {
     if (!Native.isApp || !settings.remindEnabled) return;
     var delay = settings.remindDelayMin > 0
@@ -2490,8 +2861,7 @@
       // Identifiant 32 bits stable et unique : l'horodatage du repas en secondes.
       id: Math.floor(entry.date / 1000),
       title: 'Contrôle glycémie',
-      body: 'Repas estimé à ' + entry.totalCarbsG + ' g (' + fr(partsFrom(entry.totalCarbsG)) +
-            ' parts) il y a ' + humanDelay(delay) + '. Pense à contrôler.',
+      body: 'Ouvre GlucoVision pour ton contrôle après repas.',
       at: at
     }).then(function (ok) {
       if (ok) {
@@ -2579,9 +2949,10 @@
       el.className = 'food-item off-item';
       var brand = f.brand ? ' <span class="off-brand">' + escapeHtml(f.brand) + '</span>' : '';
       el.innerHTML =
-        '<span class="food-label">' + escapeHtml(f.n) + brand +
-        ' <span class="item-detail">(' + fr(f.carb) + ' g/100 g)</span></span>' +
-        '<span class="food-actions"><span class="food-add">＋</span></span>';
+        '<button type="button" class="food-label">' + escapeHtml(f.n) + brand +
+        ' <span class="item-detail">(' + fr(f.carb) + ' g/100 g)</span></button>' +
+        '<span class="food-actions"><button type="button" class="food-add" aria-label="Ajouter ' +
+        escapeHtml(f.n) + '">＋</button></span>';
       var add = function () { showPortionCard(f); };
       el.querySelector('.food-label').addEventListener('click', add);
       el.querySelector('.food-add').addEventListener('click', function (e) { e.stopPropagation(); add(); });
@@ -2760,7 +3131,7 @@
     scanBusy = false; lastScanCode = null; lastScanAt = 0;
     $('barcode-status').hidden = true;
     $('barcode-unknown').hidden = true;
-    $('barcode-modal').hidden = false;
+    showModal('barcode-modal', 'close-barcode');
     var video = $('barcode-video');
     if (Barcode.supported()) {
       Barcode.start(video, function (code) {
@@ -2780,7 +3151,7 @@
   function closeBarcode() {
     try { Barcode.stop(); } catch (e) {}
     scanBusy = false;
-    $('barcode-modal').hidden = true;
+    hideModal('barcode-modal');
   }
 
   function showBarcodeStatus(msg) {
@@ -2876,6 +3247,12 @@
     return (p ? p[1] : 0) * (it.qty || 1);
   }
 
+  function manualCalculation() {
+    return ManualCalc.calculate(manualItems.map(function (it) {
+      return { name: it.name, grams: itemGrams(it), carb: it.carb };
+    }));
+  }
+
   function renderChips() {
     var wrap = $('cat-chips');
     wrap.innerHTML = '';
@@ -2917,9 +3294,10 @@
       var perso = f.custom ? ' <span class="tag">perso</span>' : '';
       var del = f.custom ? '<button class="food-del" aria-label="Supprimer">🗑️</button>' : '';
       el.innerHTML =
-        '<span class="food-label">' + escapeHtml(f.n) + perso +
-        ' <span class="item-detail">(' + f.carb + ' g/100 g)</span></span>' +
-        '<span class="food-actions">' + del + '<span class="food-add">＋</span></span>';
+        '<button type="button" class="food-label">' + escapeHtml(f.n) + perso +
+        ' <span class="item-detail">(' + f.carb + ' g/100 g)</span></button>' +
+        '<span class="food-actions">' + del + '<button type="button" class="food-add" aria-label="Ajouter ' +
+        escapeHtml(f.n) + '">＋</button></span>';
       el.querySelector('.food-label').addEventListener('click', function () { addFoodToMeal(f); });
       el.querySelector('.food-add').addEventListener('click', function (e) { e.stopPropagation(); addFoodToMeal(f); });
       if (f.custom) {
@@ -2984,9 +3362,10 @@
       return;
     }
     wrap.innerHTML = '';
+    var calculation = manualCalculation();
     manualItems.forEach(function (it, idx) {
       var grams = itemGrams(it);
-      var carbs = Math.round(grams * it.carb / 100);
+      var carbs = calculation.rows[idx] ? calculation.rows[idx].carbsG : 0;
 
       // Sélecteur de portion : chaque mesure courante + « Grammes… »
       var opts = it.portions.map(function (p, i) {
@@ -3003,13 +3382,14 @@
       // Contrôle de quantité : stepper (mode portion) ou champ grammes (mode grammes)
       var control;
       if (it.mode === 'grams') {
-        control = '<span class="grams-field"><input class="input small manual-grams" type="number" inputmode="numeric" min="0" step="5" value="' +
-                  Math.round(grams) + '" data-i="' + idx + '"> g</span>';
+        control = '<span class="grams-field"><input class="input small manual-grams" type="number" inputmode="decimal" min="0" max="' +
+                  ManualCalc.MAX_ITEM_GRAMS + '" step="5" value="' + (Math.round(grams * 10) / 10) + '" data-i="' + idx +
+                  '" aria-label="Quantité de ' + escapeHtml(it.name) + ' en grammes"> g</span>';
       } else {
         control = '<span class="stepper">' +
-                  '<button class="step-btn" data-dec="' + idx + '" aria-label="Moins">−</button>' +
+                  '<button class="step-btn" data-dec="' + idx + '" aria-label="Diminuer ' + escapeHtml(it.name) + '">−</button>' +
                   '<span class="step-qty">' + (it.qty || 1) + '</span>' +
-                  '<button class="step-btn" data-inc="' + idx + '" aria-label="Plus">+</button>' +
+                  '<button class="step-btn" data-inc="' + idx + '" aria-label="Augmenter ' + escapeHtml(it.name) + '">+</button>' +
                   '</span><span class="grams-eq">= ' + Math.round(grams) + ' g</span>';
       }
 
@@ -3019,7 +3399,8 @@
         '<div class="item-main">' +
         '  <div class="item-name">' + escapeHtml(it.name) + '</div>' +
         '  <div class="manual-controls">' +
-        '    <select class="input small portion-select" data-i="' + idx + '">' + opts + '</select>' +
+        '    <select class="input small portion-select" data-i="' + idx + '" aria-label="Portion de ' +
+             escapeHtml(it.name) + '">' + opts + '</select>' +
         '    ' + control +
         '  </div>' +
         '</div>' +
@@ -3060,7 +3441,15 @@
     // Saisie directe en grammes
     wrap.querySelectorAll('.manual-grams').forEach(function (inp) {
       inp.addEventListener('change', function () {
-        manualItems[parseInt(inp.dataset.i, 10)].grams = parseFloat(inp.value) || 0;
+        var index = parseInt(inp.dataset.i, 10);
+        var grams = ManualCalc.normalizeGrams(inp.value);
+        if (grams == null) {
+          inp.setAttribute('aria-invalid', 'true');
+          toast('Quantité invalide : indique entre 0 et ' + ManualCalc.MAX_ITEM_GRAMS + ' g.');
+          inp.value = Math.round(itemGrams(manualItems[index]) * 10) / 10;
+          return;
+        }
+        manualItems[index].grams = grams;
         renderManualItems();
       });
     });
@@ -3075,53 +3464,66 @@
   }
 
   function renderManualTotal() {
-    var total = manualItems.reduce(function (s, it) { return s + itemGrams(it) * it.carb / 100; }, 0);
-    total = Math.round(total);
+    var calculation = manualCalculation();
+    var total = calculation.totalCarbsG;
     var parts = partsFrom(total);
     // La charge glycémique du mode manuel sort entièrement de la table locale :
     // aucun appel réseau, donc elle fonctionne aussi hors ligne.
-    var giInfo = GI.meal(manualItems.map(function (it) {
-      return { name: it.name, carbsG: Math.round(itemGrams(it) * it.carb / 100) };
+    var giInfo = GI.meal(calculation.rows.map(function (row) {
+      return { name: row.name, carbsG: row.carbsG };
     }));
     var el = $('manual-total');
+    var blocked = !calculation.ok;
+    var errorHtml = blocked
+      ? '<div class="manual-blocked" role="alert"><strong>Calcul bloqué</strong><ul>' +
+        calculation.errors.map(function (msg) { return '<li>' + escapeHtml(msg) + '</li>'; }).join('') +
+        '</ul></div>'
+      : '';
     el.innerHTML =
-      '<div class="result-hero">' +
-      '  <div class="hero-carbs">' + total + ' <small>g</small></div>' +
-      '  <div class="hero-parts">' + fr(parts) + ' <small>parts de glucides</small></div>' +
-      '  <div class="pump-hint">💉 <strong>Total calculé</strong> : <strong>' + total + ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>). Vérifie avant de saisir.</div>' +
-      giHtml({ gi: giInfo }) +
+      '<div class="result-hero' + (blocked ? ' manual-result-blocked' : '') + '">' +
+      '  <div class="hero-carbs">' + (blocked ? '—' : total + ' <small>g</small>') + '</div>' +
+      '  <div class="hero-parts">' + (blocked ? 'Corrige les quantités' : fr(parts) + ' <small>parts de glucides</small>') + '</div>' +
+      errorHtml +
+      (blocked ? '' : '  <div class="pump-hint">💉 <strong>Total calculé</strong> : <strong>' + total + ' g</strong> (soit <strong>' + fr(parts) + ' parts</strong>). Vérifie avant de saisir.</div>') +
+      (blocked ? '' : giHtml({ gi: giInfo })) +
       '  <div class="btn-row" style="margin-top:12px">' +
-      '    <button id="save-manual" class="btn btn-primary">💾 Enregistrer</button>' +
-      '    <button id="save-manual-meal" class="btn btn-ghost">⭐ Repas fréquent</button>' +
+      '    <button id="save-manual" class="btn btn-primary"' + (blocked ? ' disabled' : '') + '>💾 Enregistrer</button>' +
+      '    <button id="save-manual-meal" class="btn btn-ghost"' + (blocked ? ' disabled' : '') + '>⭐ Repas fréquent</button>' +
       '  </div>' +
       '</div>';
     el.hidden = false;
-    $('manual-dock-total').textContent = total + ' g · ' + fr(parts) + ' parts';
+    $('manual-dock-total').textContent = blocked ? 'Quantités à corriger' : total + ' g · ' + fr(parts) + ' parts';
     $('manual-dock').hidden = false;
+    if (blocked) return;
     $('save-manual-meal').addEventListener('click', function () {
-      promptSaveMeal(manualItems.map(function (it) {
-        return { name: it.name, carbsG: Math.round(itemGrams(it) * it.carb / 100) };
+      promptSaveMeal(calculation.rows.map(function (row) {
+        return { name: row.name, carbsG: row.carbsG };
       }));
     });
     $('save-manual').addEventListener('click', function () {
+      var saveButton = $('save-manual');
+      if (!saveButton || saveButton.disabled) return;
+      saveButton.disabled = true;
       var entry = {
         date: Date.now(), source: 'manuel', draft: false, confirmed: true,
         blocked: false, dominantRequired: false, dominantConfirmed: true,
         totalCarbsG: total,
         parts: parts, partSizeG: settings.partSizeG,
         gi: giInfo ? { gl: giInfo.gl, gi: giInfo.gi } : null,
-        items: manualItems.map(function (it) {
+        items: calculation.rows.map(function (row) {
           return {
-            name: it.name,
-            carbsG: Math.round(itemGrams(it) * it.carb / 100),
-            portion: Math.round(itemGrams(it)) + ' g'
+            name: row.name,
+            carbsG: row.carbsG,
+            portion: fr(row.grams) + ' g'
           };
         })
       };
       if (!Storage.addHistory(entry)) {
+        saveButton.disabled = false;
         toast('Repas non enregistré : stockage indisponible.');
         return;
       }
+      saveButton.textContent = '✓ Enregistré';
       toast('Enregistré dans l\'historique.');
       // Un repas saisi à la main mérite le même rappel qu'un repas photographié.
       // Faute de vitesse d'absorption estimée par l'IA, le délai reste le défaut.
@@ -3158,6 +3560,15 @@
       out += '<div class="detail-label">Ajouté par toi</div>' +
              '<ul class="detail-foods">' + ajoutes.map(ligne).join('') + '</ul>';
     }
+    if (Array.isArray(e.opinions) && e.opinions.length > 1) {
+      out += '<div class="detail-label">Avis comparés à l’origine</div>' +
+        '<ul class="detail-foods detail-opinions">' + e.opinions.slice(0, 3).map(function (opinion) {
+          var model = String(opinion.model || opinion.provider || 'modèle').split('/').pop();
+          return '<li><span class="detail-food">' + escapeHtml(model) + '</span>' +
+            '<span class="detail-carb">' + (opinion.ok && opinion.totalCarbsG != null
+              ? Math.round(opinion.totalCarbsG) + ' g' : 'indisponible') + '</span></li>';
+        }).join('') + '</ul>';
+    }
 
     if (!(e.items || []).length) {
       out += '<p class="detail-none">Le détail des aliments n\'a pas été enregistré ' +
@@ -3184,11 +3595,18 @@
     if (e.draft) {
       out += '<div class="draft-note">Sauvegardé automatiquement. Confirme ce repas pour ' +
         'l\'inclure dans tes synthèses.</div>';
-      if (e.resultSnapshot) {
+      if (e.choiceRequired) {
+        out += '<div class="cmp-warn">⚠️ <strong>Comparaison non tranchée.</strong> ' +
+          'Aucun modèle n’a encore été retenu : retourne dans Analyser et choisis une colonne. ' +
+          'Ce brouillon ne peut pas être confirmé tel quel.</div>';
+      } else if (e.resultSnapshot) {
         out += '<button class="btn btn-secondary history-resume" data-resume="' + e.date +
           '">↩ Reprendre et corriger</button>';
       }
-      if (e.blocked) {
+      if (e.choiceRequired) {
+        /* Le premier avis n'est qu'un support de sauvegarde : pas de raccourci
+           Confirmer tant que l'utilisateur n'a pas réellement choisi. */
+      } else if (e.blocked) {
         out += '<p class="hint tiny">⛔ Ce brouillon est incohérent : reprends-le pour le corriger.</p>';
       } else if (e.dominantRequired && !e.dominantConfirmed) {
         out += '<p class="hint tiny">🔎 Confirme d’abord l’aliment principal dans le résultat.</p>';
@@ -3238,6 +3656,10 @@
 
   function resumeHistoryDraft(date) {
     var e = Storage.getHistory().filter(function (x) { return x.date === date; })[0];
+    if (e && e.choiceRequired) {
+      toast('Ce brouillon attend encore ton choix dans les colonnes de comparaison.');
+      return;
+    }
     if (!e || !e.draft || !e.resultSnapshot || !Array.isArray(e.resultSnapshot.items)) {
       toast('Ce brouillon ancien ne contient pas assez de données pour être repris.');
       return;
@@ -3248,6 +3670,22 @@
     var ctx = safePendingContext(e.input, e.source === 'photo' ? 1 : 0);
     try { lastResult = Estimator.sanitize(snapshot, ctx); }
     catch (err2) { toast('Brouillon invalide : impossible de le reprendre.'); return; }
+
+    /* Une reprise change de repas. Rien de l'écran précédent ne doit survivre :
+       ni une réponse IA encore en vol, ni surtout l'archive de ses colonnes.
+       Sinon le brouillon B proposait « Revoir les colonnes d'origine » du
+       repas A et un clic suffisait à remplacer silencieusement B par A. Les
+       opinions compactes de l'historique restent consultables dans son détail,
+       mais elles n'ont plus la fourchette/confiance nécessaires pour recréer
+       honnêtement le tableau complet. */
+    ++estimateGeneration;
+    estimateBusy = false;
+    updateEstimateBtn();
+    lastCompare = null;
+    lastComparisonArchive = null;
+    lastCompareRun = null;
+    oublierEnCours();
+
     lastResult.provider = (Storage.PROVIDERS || []).indexOf(e.provider) >= 0 ? e.provider : '';
     lastResult.model = typeof e.model === 'string' ? e.model.slice(0, 200) : '';
     var restoredVerification = e.verification ? {
@@ -3269,7 +3707,9 @@
       var restoredMerge = Storage.validateStoredMerge
         ? Storage.validateStoredMerge(e, snapshot, lastResult, restoredVerification)
         : null;
-      if (restoredMerge && mergePairValidated(lastResult, restoredVerification)) {
+      if (restoredMerge && mergePairValidated(lastResult, restoredVerification) &&
+          Estimator.mergeAllowed(restoredMerge.primaryTotal, restoredMerge.verifyTotal,
+            settings.verifyThresholdPct || 20, MAX_ECART_FUSION_G)) {
         lastResult.mergedTotalCarbsG = restoredMerge.mergedTotal;
         lastResult.verifyTotalCarbsG = restoredMerge.verifyTotal;
         lastResult.rangeLowG = Math.min(lastResult.rangeLowG, restoredMerge.verifyTotal);
@@ -3285,17 +3725,21 @@
       var prior = Array.isArray(snapshot.blocking) ? snapshot.blocking : e.blocking;
       prior = (Array.isArray(prior) ? prior : ['Ce brouillon avait été refusé avant son enregistrement.'])
         .filter(function (m) { return typeof m === 'string' && m; }).slice(0, 10);
-      lastResult.blocking = (lastResult.blocking || []).concat(prior)
+      prior = (lastResult.sourceBlocking || []).concat(prior)
         .filter(function (m, i, a) { return a.indexOf(m) === i; });
+      lastResult.sourceBlocking = prior;
+      Estimator.refresh(lastResult);
     }
     currentHistoryDate = e.date;
     currentHistoryConfirmed = false;
+    currentChoiceRequired = false;
     currentHistoryPhotoStarted = true;
     currentDominantConfirmed = !!e.dominantConfirmed;
     lastResult.dominantConfirmed = currentDominantConfirmed;
     lastEstimateContext = ctx;
     lastVerification = restoredVerification;
     images = [];
+    lastEstimateImages = [];
     resumedPhotoDraft = ctx.imageCount > 0;
     lastRunProvider = e.provider || null;
     lastRunModel = e.model || null;
@@ -3413,11 +3857,13 @@
     list.querySelectorAll('.history-del').forEach(function (b) {
       b.addEventListener('click', function (ev) {
         ev.stopPropagation();
-        if (!Storage.deleteHistory(Number(b.dataset.del))) {
+        var deletedDate = Number(b.dataset.del);
+        if (!Storage.deleteHistory(deletedDate)) {
           toast('Suppression non enregistrée : stockage indisponible.');
           return;
         }
-        delete openMeals[Number(b.dataset.del)];
+        if (Native.isApp) Native.notify.cancel(Math.floor(deletedDate / 1000));
+        delete openMeals[deletedDate];
         renderHistory();
       });
     });
@@ -3432,7 +3878,8 @@
       b.addEventListener('click', function () {
         var date = Number(b.dataset.confirm);
         var entry = Storage.getHistory().filter(function (x) { return x.date === date; })[0];
-        if (!entry || entry.blocked || (entry.dominantRequired && !entry.dominantConfirmed)) {
+        if (!entry || entry.choiceRequired || entry.blocked ||
+            (entry.dominantRequired && !entry.dominantConfirmed)) {
           toast('Reprends ce brouillon et termine ses vérifications avant de le confirmer.');
           return;
         }
@@ -3546,7 +3993,8 @@
     var abs = Math.abs(pct);
     var verdict, cls;
     if (abs < 5) {
-      verdict = 'Tes estimations sont <strong>justes</strong> (écart moyen &lt; 5 %). Continue comme ça.';
+      verdict = 'Aucun <strong>biais directionnel net</strong> n’est détecté (&lt; 5 %). ' +
+        'Cela ne mesure pas la précision repas par repas : continue à vérifier chaque estimation.';
       cls = 'good';
     } else if (pct > 0) {
       verdict = 'Tu as tendance à <strong>SOUS-estimer d\'environ ' + abs + ' %</strong>. ' +
@@ -3573,23 +4021,34 @@
     if (!groups.length) return '';
     var rows = groups.slice(0, 4).map(function (g) {
       var pct = Math.abs(g.pct);
-      var verdict = pct < 5 ? '<span class="cat-ok">juste</span>'
+      var verdict = pct < 5 ? '<span class="cat-ok">sans biais net</span>'
         : (g.pct > 0 ? 'sous-estimé de <b>' + pct + ' %</b>' : 'sur-estimé de <b>' + pct + ' %</b>');
       return '<li><span class="cat-name">' + escapeHtml(g.category) + '</span> ' + verdict +
              ' <span class="cat-count">(' + g.count + ' repas)</span></li>';
     }).join('');
     return '<ul class="bias-cats">' + rows + '</ul>';
   }
-  // Recalcule les parts avec la taille de part actuelle si elle a changé.
-  function partsFromStored(e) { return partsFrom(e.totalCarbsG); }
+  // Un ancien repas garde la taille de part utilisée le jour de son calcul.
+  function partsFromStored(e) {
+    var savedSize = Number(e && e.partSizeG);
+    if (isFinite(savedSize) && savedSize >= 5 && savedSize <= 20) {
+      return e.totalCarbsG / savedSize;
+    }
+    var savedParts = Number(e && e.parts);
+    return isFinite(savedParts) && savedParts >= 0 ? savedParts : partsFrom(e.totalCarbsG);
+  }
 
   function initHistory() {
     $('clear-history').addEventListener('click', function () {
       if (!confirm('Vider tout l\'historique ?')) return;
+      var reminderIds = Storage.getHistory().map(function (entry) {
+        return Math.floor(entry.date / 1000);
+      });
       if (!Storage.clearHistory()) {
         toast('Historique non effacé : stockage indisponible.');
         return;
       }
+      if (Native.isApp) reminderIds.forEach(function (id) { Native.notify.cancel(id); });
       renderHistory();
     });
     // La synthèse médecin vivait dans les Réglages, où personne ne la cherchait.
@@ -3612,7 +4071,7 @@
 
   function initSettings() {
     $('open-settings').addEventListener('click', openSettings);
-    $('close-settings').addEventListener('click', function () { $('settings-modal').hidden = true; });
+    $('close-settings').addEventListener('click', function () { hideModal('settings-modal'); });
     $('save-settings').addEventListener('click', saveSettingsFromForm);
     $('clear-key').addEventListener('click', function () {
       var field = KEY_FIELD[$('set-provider').value];
@@ -3661,6 +4120,11 @@
           refreshStorageUsage();
           renderHistory();
           toast('Photos supprimées.');
+        }).catch(function (err) {
+          refreshStorageUsage();
+          renderHistory();
+          toast('Repas conservés, mais certaines photos n’ont pas pu être supprimées : ' +
+            ((err && err.message) || 'stockage indisponible') + '. Réessaie après redémarrage.');
         });
       });
     }
@@ -3759,6 +4223,29 @@
   }
 
   // ---------- Sauvegarde / restauration ----------
+  function finishRestore(restored, afterUi) {
+    settings = Storage.getSettings();
+    renderSavedMeals();
+    renderHistory();
+    renderChips();
+    renderFoodResults($('food-search').value);
+    updateCompareToggle();
+    if (typeof afterUi === 'function') afterUi();
+    hideModal('settings-modal');
+    var ok = 'Sauvegarde restaurée (' + restored.length + ' catégories).';
+    if (!Native.isApp) { toast(ok); return Promise.resolve(); }
+    /* Le format JSON ne contient pas les photos originales : après un vrai
+       remplacement, les anciens fichiers sont orphelins et doivent partir. */
+    return Storage.prunePhotos().then(function () {
+      refreshStorageUsage();
+      toast(ok);
+    }).catch(function (err) {
+      refreshStorageUsage();
+      toast(ok + ' Anciennes photos non nettoyées : ' +
+        ((err && err.message) || 'stockage indisponible') + '.');
+    });
+  }
+
   function initBackup() {
     $('export-data').addEventListener('click', function () {
       var payload = Storage.exportAll();
@@ -3794,6 +4281,10 @@
       var file = e.target.files && e.target.files[0];
       e.target.value = '';
       if (!file) return;
+      if (file.size > 10 * 1024 * 1024) {
+        toast('Sauvegarde trop volumineuse (maximum 10 Mo).');
+        return;
+      }
       var reader = new FileReader();
       reader.onload = function () {
         var parsed;
@@ -3804,14 +4295,7 @@
           return;
         }
         Storage.importAll(parsed).then(function (restored) {
-          settings = Storage.getSettings();
-          renderSavedMeals();
-          renderHistory();
-          renderChips();
-          renderFoodResults($('food-search').value);
-          updateCompareToggle();
-          $('settings-modal').hidden = true;
-          toast('Sauvegarde restaurée (' + restored.length + ' catégories).');
+          return finishRestore(restored);
         }).catch(function (err) {
           toast(err.message || 'Fichier illisible.');
         });
@@ -3882,6 +4366,10 @@
     apply.addEventListener('click', function () {
       var raw = box.value.trim();
       if (!raw) { toast('Colle d\'abord le texte de ta sauvegarde.'); return; }
+      if (raw.length > 10 * 1024 * 1024) {
+        toast('Sauvegarde trop volumineuse (maximum 10 Mo).');
+        return;
+      }
       if (!confirm('Restaurer remplacera ton historique, tes aliments perso et ta calibration actuels. Continuer ?')) return;
       var parsed;
       try {
@@ -3891,14 +4379,9 @@
         return;
       }
       Storage.importAll(parsed).then(function (restored) {
-        settings = Storage.getSettings();
-        renderSavedMeals();
-        renderHistory();
-        renderChips();
-        renderFoodResults($('food-search').value);
-        wrap.hidden = true; box.value = '';
-        $('settings-modal').hidden = true;
-        toast('Sauvegarde restaurée (' + restored.length + ' catégories).');
+        return finishRestore(restored, function () {
+          wrap.hidden = true; box.value = '';
+        });
       }).catch(function (err) {
         toast('Texte illisible : ' + (err.message || 'ce n\'est pas une sauvegarde JSON.'));
       });
@@ -4044,7 +4527,7 @@
     updateSettingsSummaries();
     renderUsage();
     openNativeSettings();
-    $('settings-modal').hidden = false;
+    showModal('settings-modal', 'close-settings');
   }
 
   /* Réglages qui n'existent que dans l'APK. Les blocs sont dans le HTML commun
@@ -4070,6 +4553,8 @@
       el.textContent = n + ' photo' + (n > 1 ? 's' : '') + ' conservée' + (n > 1 ? 's' : '') +
         ' · ' + (mb < 0.1 ? '<0,1' : fr(mb)) + ' Mo. ' +
         'Les photos sont des fichiers sur le téléphone : elles ne sont plus rognées comme dans la version web.';
+    }).catch(function () {
+      el.textContent = 'Espace photo indisponible : le stockage Android n’a pas pu être lu.';
     });
   }
 
@@ -4138,7 +4623,7 @@
     }).then(function (savedSettings) {
       if (!savedSettings) throw new Error('Le téléphone a refusé d’enregistrer les réglages.');
       settings = savedSettings;
-      $('settings-modal').hidden = true;
+      hideModal('settings-modal');
       updateCompareToggle();
       var depthBtn = $('btn-depth');
       if (depthBtn) depthBtn.hidden = !(depthSupported && settings.experimentalDepth);
@@ -4174,8 +4659,12 @@
      exécute en série pour ne pas déclencher de limitation de débit. */
   // Coût approximatif d'une estimation, en dollars, par identifiant de modèle.
   var COST_HINT = {
+    'gemini-3.1-flash-lite': 0.0020,
+    'google/gemini-3.1-flash-lite': 0.0020,
+    'x-ai/grok-4.5': 0.0212,
+    'qwen/qwen3-vl-235b-a22b-thinking': 0.0140,
     'qwen/qwen3.7-flash': 0.00025, 'qwen/qwen3.7-plus': 0.0026,
-    'qwen/qwen3-vl-235b-a22b-instruct': 0.004,
+    'qwen/qwen3-vl-235b-a22b-instruct': 0.0025,
     'anthropic/claude-sonnet-5': 0.018, 'openai/gpt-5.6-terra': 0.0123,
     'google/gemini-3.6-flash': 0.0135,
     'claude-opus-5': 0.045, 'claude-opus-4-8': 0.045,
@@ -4499,12 +4988,61 @@
     box.innerHTML = '<table class="usage-table"><tbody>' +
       lignes.map(function (l) {
         return '<tr><td>' + escapeHtml(l.label) + '</td>' +
-          '<td class="num">' + l.n + ' appel' + (l.n > 1 ? 's' : '') + '</td>' +
+          '<td class="num">' + l.n + ' tentative' + (l.n > 1 ? 's' : '') + '</td>' +
           '<td class="num">' + (l.c < 0.01 ? '<0,01' : l.c.toFixed(2)) + ' $</td></tr>';
       }).join('') +
       '<tr class="usage-total"><td>Total du mois</td><td class="num"></td><td class="num">' +
-      (total < 0.01 ? '<0,01' : total.toFixed(2)) + ' $</td></tr>' +
+      (total < 0.01 ? '<0,01' : total.toFixed(2)) + ' $ max.</td></tr>' +
       '</tbody></table>';
+  }
+
+  /* Demande une mise à jour PWA sans recharger tant que le nouveau worker n'a
+     pas fini de précharger toute sa coquille. Recharger juste après reg.update()
+     provoquait parfois une seconde demande « Actualiser », ou une page encore
+     servie par l'ancien worker. */
+  function installAndActivateWorker(reg) {
+    if (!reg) { window.location.reload(); return Promise.resolve(); }
+    if (reg.waiting) {
+      reg.waiting.postMessage('SKIP_WAITING');
+      return Promise.resolve();
+    }
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true;
+        reject(new Error('Le nouveau contenu n’a pas fini de s’installer. Réessaie.'));
+      }, 20000);
+      var activate = function (worker) {
+        if (!worker) return;
+        var check = function () {
+          if (done || worker.state !== 'installed') return;
+          done = true;
+          clearTimeout(timer);
+          worker.postMessage('SKIP_WAITING');
+          resolve();
+        };
+        worker.addEventListener('statechange', check);
+        check();
+      };
+      reg.addEventListener('updatefound', function () { activate(reg.installing); }, { once: true });
+      activate(reg.installing);
+      reg.update().then(function () {
+        if (reg.waiting && !done) {
+          done = true;
+          clearTimeout(timer);
+          reg.waiting.postMessage('SKIP_WAITING');
+          resolve();
+        } else {
+          activate(reg.installing);
+        }
+      }).catch(function (err) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
   }
 
   function initUpdateCheck() {
@@ -4555,11 +5093,8 @@
         setUpdateStatus('✅ Version ' + pub.version + ' disponible.', 'ok');
         var apply = function () {
           if (!('serviceWorker' in navigator)) { window.location.reload(); return; }
-          navigator.serviceWorker.getRegistration().then(function (reg) {
-            if (reg && reg.waiting) { reg.waiting.postMessage('SKIP_WAITING'); return; }
-            (reg ? reg.update() : Promise.resolve())
-              .catch(function () {})
-              .then(function () { window.location.reload(); });
+          return navigator.serviceWorker.getRegistration().then(function (reg) {
+            return installAndActivateWorker(reg);
           });
         };
         showUpdate(apply);
@@ -4747,6 +5282,72 @@
     }).catch(function () {});
   }
 
+  function controlledWorkerVersion() {
+    if (!navigator.serviceWorker || !navigator.serviceWorker.controller ||
+        typeof MessageChannel === 'undefined') return Promise.resolve(null);
+    return new Promise(function (resolve) {
+      var done = false;
+      var timer = setTimeout(function () {
+        if (!done) { done = true; resolve(null); }
+      }, 500);
+      var channel = new MessageChannel();
+      channel.port1.onmessage = function (event) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(String(event.data || ''));
+      };
+      try {
+        navigator.serviceWorker.controller.postMessage(
+          { type: 'GET_VERSION' }, [channel.port2]);
+      } catch (e) {
+        clearTimeout(timer);
+        done = true;
+        resolve(null);
+      }
+    });
+  }
+
+  /* Protection de transition v79 → v80. L'ancien worker v79 était
+     network-first : un rechargement pouvait donc exécuter index/app v80 avant
+     que le worker v80 soit activé. On interroge le contrôleur AVANT toute
+     hydratation ou interaction. S'il est ancien (ou ne sait pas répondre), on
+     termine l'installation atomique et recharge ; l'utilisateur ne manipule
+     jamais cette coquille intermédiaire. Les mises à jour normales restent,
+     elles, soumises au bouton Actualiser. */
+  function ensureCurrentPwaShell() {
+    if (Native.isApp || !('serviceWorker' in navigator) ||
+        !navigator.serviceWorker.controller) return Promise.resolve(true);
+    return controlledWorkerVersion().then(function (version) {
+      if (version === APP_VERSION) return true;
+      var banner = $('update-banner'), updateBtn = $('update-btn');
+      if (banner) banner.hidden = false;
+      if (updateBtn) {
+        updateBtn.disabled = true;
+        updateBtn.textContent = 'Finalisation…';
+      }
+      return navigator.serviceWorker.getRegistration().then(function (reg) {
+        if (!reg) return true;
+        var reloading = false;
+        navigator.serviceWorker.addEventListener('controllerchange', function () {
+          if (reloading) return;
+          reloading = true;
+          window.location.reload();
+        }, { once: true });
+        return installAndActivateWorker(reg).then(function () { return false; });
+      }).catch(function (err) {
+        var el = $('native-outdated');
+        if (el) {
+          el.hidden = false;
+          el.innerHTML = '⚠️ <strong>Mise à jour web incomplète.</strong> ' +
+            'Reconnecte-toi puis recharge la page avant d’utiliser une estimation. ' +
+            escapeHtml((err && err.message) || 'Service worker indisponible.');
+        }
+        return false;
+      });
+    });
+  }
+
   function showVersion() {
     var el = $('app-version');
     if (!el) return;
@@ -4813,7 +5414,11 @@
     initQueue();
     initShortcuts();
     // Rattrape les images orphelines laissées par un enregistrement interrompu.
-    if (Native.isApp) Storage.prunePhotos();
+    if (Native.isApp) Storage.prunePhotos().catch(function () {
+      /* Nettoyage opportuniste : une permission temporairement refusée ne doit
+         jamais empêcher l'app de démarrer. Le bouton Réglages donnera le
+         diagnostic explicite si l'utilisateur demande une purge. */
+    });
     /* En dernier : si une comparaison n'avait pas été tranchée, on la remet à
        l'écran. Après tout le reste, pour ne pas être écrasée par un rendu. */
     restaurerEnCours();
@@ -4856,7 +5461,10 @@
      le démarrage ; dans le navigateur il se résout immédiatement. */
   document.addEventListener('DOMContentLoaded', function () {
     Native.ready()
-      .then(function () { return Storage.hydrate(); })
-      .then(init, init);
+      .then(ensureCurrentPwaShell)
+      .then(function (ready) {
+        if (!ready) return;
+        return Storage.hydrate().then(init, init);
+      });
   });
 })();

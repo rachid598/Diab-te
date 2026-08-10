@@ -43,6 +43,33 @@ test('le total brut contradictoire reste bloquant après normalisation', () => {
   assert.match(got.blocking.join(' '), /somme des aliments/i);
 });
 
+test('une simple édition ne gomme pas les contradictions brutes', () => {
+  const { Estimator } = env();
+  const value = raw(50);
+  value.totalCarbsG = 120;
+  value.rangeLowG = 100;
+  value.rangeHighG = 140;
+  const got = Estimator.sanitize(value, { imageCount: 1, referenceObject: 'none' });
+  got.items[0].carbsG = 40;
+  got.humanEdited = true;
+  Estimator.refresh(got);
+  assert.match(got.blocking.join(' '), /brut|somme des aliments/i);
+
+  Estimator.acceptManualRecalculation(got);
+  assert.equal(got.sourceBlocking.length, 0);
+  assert.equal(got.blocking.length, 0);
+  assert.equal(got.totalCarbsG, 40);
+});
+
+test('une contradiction 100 g × 50 % contre 80 g est bloquante', () => {
+  const { Estimator } = env();
+  const value = raw(80);
+  value.items[0].estimatedMassG = 100;
+  value.items[0].carbDensityPer100g = 50;
+  const got = Estimator.sanitize(value, { imageCount: 1, referenceObject: 'none' });
+  assert.match(got.blocking.join(' '), /en donnent 50/i);
+});
+
 test('une fourchette brute invalide bloque mais ne devient jamais la fourchette affichée', () => {
   const { Estimator } = env();
   const invalid = raw(100);

@@ -114,19 +114,37 @@
     return next(0);
   }
 
+  // Un modèle doit avoir répondu sur au moins 80 % des cas pour être classé.
+  // Sinon un unique succès pourrait masquer une longue série d'échecs.
+  var MIN_COVERAGE = 0.8;
+
   // Erreur absolue moyenne, et erreur relative moyenne (plus comparable).
   function score(results) {
+    results = results || [];
     var ok = results.filter(function (r) { return r.got != null; });
-    if (!ok.length) return { n: 0 };
+    var successes = ok.length;
+    var total = results.length;
+    var failed = total - successes;
+    var coverage = total ? successes / total : 0;
+    var eligible = successes > 0 && coverage >= MIN_COVERAGE;
+    var summary = {
+      // `n` reste le signal historique utilisé par l'interface pour classer un
+      // modèle. Il vaut donc zéro si la couverture rend le score inéligible.
+      n: eligible ? successes : 0,
+      successes: successes,
+      total: total,
+      failed: failed,
+      coveragePct: Math.round(coverage * 100),
+      eligible: eligible
+    };
+    if (!successes) return summary;
     var mae = ok.reduce(function (s, r) { return s + r.err; }, 0) / ok.length;
     var mape = ok.reduce(function (s, r) { return s + r.err / r.real; }, 0) / ok.length * 100;
     var biais = ok.reduce(function (s, r) { return s + (r.got - r.real); }, 0) / ok.length;
-    return {
-      n: ok.length, failed: results.length - ok.length,
-      mae: Math.round(mae * 10) / 10,
-      mape: Math.round(mape),
-      biais: Math.round(biais * 10) / 10
-    };
+    summary.mae = Math.round(mae * 10) / 10;
+    summary.mape = Math.round(mape);
+    summary.biais = Math.round(biais * 10) / 10;
+    return summary;
   }
 
   window.Bench = { cases: cases, runModel: runModel, score: score };

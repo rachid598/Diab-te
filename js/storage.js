@@ -447,7 +447,7 @@
     out.apiKeys = {};
     PROVIDERS.forEach(function (p) { out.apiKeys[p] = cleanKey(rawKeys[p]); });
 
-    out.partSizeG = bounded(raw.partSizeG, 1, 100, DEFAULT_SETTINGS.partSizeG);
+    out.partSizeG = bounded(raw.partSizeG, 5, 20, DEFAULT_SETTINGS.partSizeG);
     out.roundHalf = raw.roundHalf == null ? DEFAULT_SETTINGS.roundHalf : raw.roundHalf === true;
     out.remindEnabled = raw.remindEnabled === true;
     out.remindDelayMin = bounded(raw.remindDelayMin, 0, 1440, DEFAULT_SETTINGS.remindDelayMin);
@@ -476,6 +476,67 @@
     Object.keys(value).slice(0, 250).forEach(function (key) {
       if (key === '__proto__' || key === 'prototype' || key === 'constructor') return;
       out[key] = safeClone(value[key], depth + 1);
+    });
+    return out;
+  }
+
+  function shortText(value, max) {
+    return typeof value === 'string' ? value.trim().slice(0, max || 200) : '';
+  }
+
+  function sanitizePortions(value) {
+    if (!Array.isArray(value)) return [];
+    return value.slice(0, 30).map(function (portion) {
+      if (!Array.isArray(portion) || portion.length < 2) return null;
+      var grams = finite(portion[1]);
+      if (!(grams > 0) || grams > 5000) return null;
+      return [shortText(portion[0], 80) || '1 portion', grams];
+    }).filter(Boolean);
+  }
+
+  function sanitizeFoodList(value, custom) {
+    if (!Array.isArray(value)) return [];
+    return value.slice(0, 500).map(function (raw) {
+      if (!isObject(raw)) return null;
+      var name = shortText(raw.n, 160), carb = finite(raw.carb);
+      if (!name || carb == null || carb < 0 || carb > 100) return null;
+      return {
+        id: shortText(raw.id, 80), n: name, carb: carb,
+        portions: sanitizePortions(raw.portions),
+        custom: custom ? true : raw.custom === true,
+        cat: custom ? 'Perso' : shortText(raw.cat, 80)
+      };
+    }).filter(Boolean);
+  }
+
+  function sanitizeSavedMeals(value) {
+    if (!Array.isArray(value)) return [];
+    return value.slice(0, 40).map(function (raw) {
+      if (!isObject(raw)) return null;
+      var name = shortText(raw.name, 160);
+      var items = Array.isArray(raw.items) ? raw.items.slice(0, 80).map(function (it) {
+        if (!isObject(it)) return null;
+        var itemName = shortText(it.name, 160), carbs = finite(it.carbsG);
+        if (!itemName || carbs == null || carbs < 0 || carbs > 400) return null;
+        return { name: itemName, carbsG: Math.round(carbs) };
+      }).filter(Boolean) : [];
+      if (!name || !items.length) return null;
+      return {
+        id: shortText(raw.id, 80) || ('m' + Date.now()),
+        name: name,
+        items: items,
+        totalCarbsG: items.reduce(function (sum, it) { return sum + it.carbsG; }, 0),
+        savedAt: finite(raw.savedAt) || Date.now()
+      };
+    }).filter(Boolean);
+  }
+
+  function sanitizeObjectMap(value, max) {
+    if (!isObject(value)) return {};
+    var out = {};
+    Object.keys(value).slice(0, max || 500).forEach(function (key) {
+      if (!/^\d{6,18}$/.test(key) || !isObject(value[key])) return;
+      out[key] = safeClone(value[key]);
     });
     return out;
   }
@@ -513,12 +574,75 @@
       var date = finite(e.date);
       if (!(date > 0)) return null;
       e.date = date;
-      if (e.totalCarbsG != null) e.totalCarbsG = finite(e.totalCarbsG);
-      if (e.realCarbsG != null) e.realCarbsG = finite(e.realCarbsG);
+      var historyTotal = finite(e.totalCarbsG);
+      if (historyTotal == null || historyTotal < 0 || historyTotal > 2000) return null;
+      e.totalCarbsG = Math.round(historyTotal);
+      if (e.realCarbsG != null) {
+        var real = finite(e.realCarbsG);
+        if (real == null || real < 0 || real > 2000) delete e.realCarbsG;
+        else e.realCarbsG = Math.round(real);
+      }
+      e.source = /^(photo|texte|manuel)$/.test(e.source || '') ? e.source : 'manuel';
+      e.provider = PROVIDERS.indexOf(e.provider) >= 0 ? e.provider : '';
+      e.model = shortText(e.model, 200);
+      e.seen = shortText(e.seen, 2000);
+      e.glycemicSpeed = /^(rapide|moderee|lente)$/.test(e.glycemicSpeed || '')
+        ? e.glycemicSpeed : null;
+      var storedPartSize = finite(e.partSizeG);
+      if (storedPartSize == null || storedPartSize < 5 || storedPartSize > 20) delete e.partSizeG;
+      else e.partSizeG = storedPartSize;
+      if (typeof e.thumb !== 'string' || e.thumb.length > 1024 * 1024 ||
+          !/^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=\s]+$/i.test(e.thumb)) {
+        delete e.thumb;
+      }
+      if (typeof e.photo !== 'string' || e.photo.length > 120 ||
+          !/^[a-z0-9][a-z0-9._-]*\.(?:jpe?g|png|webp)$/i.test(e.photo)) {
+        delete e.photo;
+      }
+      if (isObject(e.gi)) {
+        var giValue = finite(e.gi.gi), glValue = finite(e.gi.gl);
+        if ((giValue == null || giValue < 0 || giValue > 100) &&
+            (glValue == null || glValue < 0 || glValue > 2000)) delete e.gi;
+        else e.gi = {
+          gi: giValue != null && giValue >= 0 && giValue <= 100 ? giValue : null,
+          gl: glValue != null && glValue >= 0 && glValue <= 2000 ? glValue : null
+        };
+      } else if (e.gi != null) {
+        delete e.gi;
+      }
       if (!Array.isArray(e.items)) e.items = [];
-      else e.items = e.items.slice(0, 80).filter(isObject);
+      else e.items = e.items.slice(0, 80).map(function (it) {
+        if (!isObject(it)) return null;
+        var name = shortText(it.name, 160), carbs = finite(it.carbsG);
+        if (!name || carbs == null || carbs < 0 || carbs > 400) return null;
+        return {
+          name: name, carbsG: Math.round(carbs),
+          portion: shortText(it.portion || it.portionDescription, 200),
+          added: it.added === true
+        };
+      }).filter(Boolean);
+      if (!Array.isArray(e.opinions)) e.opinions = [];
+      else e.opinions = e.opinions.slice(0, 3).map(function (opinion) {
+        if (!isObject(opinion)) return null;
+        var total = finite(opinion.totalCarbsG);
+        return {
+          provider: PROVIDERS.indexOf(opinion.provider) >= 0 ? opinion.provider : '',
+          model: shortText(opinion.model, 200),
+          ok: opinion.ok === true && total != null && total >= 0 && total <= 400,
+          totalCarbsG: total != null && total >= 0 && total <= 400 ? Math.round(total) : null,
+          error: shortText(opinion.error, 500),
+          items: Array.isArray(opinion.items) ? opinion.items.slice(0, 40).map(function (it) {
+            if (!isObject(it)) return null;
+            var name = shortText(it.name, 160), carbs = finite(it.carbsG);
+            return name && carbs != null && carbs >= 0 && carbs <= 400
+              ? { name: name, carbsG: Math.round(carbs), portion: shortText(it.portion, 200) }
+              : null;
+          }).filter(Boolean) : []
+        };
+      }).filter(Boolean);
       e.blocked = e.blocked === true || !!(e.blocking && e.blocking.length);
       if (e.draft != null) e.draft = e.draft === true;
+      e.choiceRequired = e.choiceRequired === true;
       if (e.dominantRequired != null) e.dominantRequired = e.dominantRequired === true;
       if (e.dominantConfirmed != null) e.dominantConfirmed = e.dominantConfirmed === true;
       if (!isObject(e.resultSnapshot)) delete e.resultSnapshot;
@@ -530,7 +654,9 @@
 
   /* Écriture de l'historique avec gestion du quota. Les vignettes de repas pèsent
      lourd : quand le navigateur refuse d'écrire, on abandonne les plus anciennes
-     images (pas les données) et on réessaie, plutôt que de perdre l'enregistrement. */
+     images (pas les données) et on réessaie. Si cela ne suffit pas, on échoue
+     explicitement : supprimer la moitié des repas en prétendant avoir réussi
+     détruirait aussi leurs photos et les données de calibration. */
   function writeHistory(h) {
     h = sanitizeHistoryList(h);
     if (write(KEYS.history, h)) return h;
@@ -541,11 +667,6 @@
         delete trimmed[i].thumb;
         if (write(KEYS.history, trimmed)) return trimmed;
       }
-    }
-    // Toujours trop gros : on tronque l'historique le plus ancien.
-    while (trimmed.length > 10) {
-      trimmed = trimmed.slice(0, Math.floor(trimmed.length / 2));
-      if (write(KEYS.history, trimmed)) return trimmed;
     }
     return null;
   }
@@ -761,7 +882,6 @@
         h.forEach(function (e, i) { if (i >= 40 && e.thumb) delete e.thumb; });
       }
       var saved = writeHistory(h);
-      if (saved && native) this.prunePhotos(saved);
       return saved;
     },
     updateHistory: function (date, patch) {
@@ -774,25 +894,23 @@
       });
       if (!changed) return null;
       var saved = writeHistory(h);
-      if (saved && native) this.prunePhotos(saved);
       return saved;
     },
     clearHistory: function () {
       if (!write(KEYS.history, [])) return null;
-      if (native) this.prunePhotos([]);
+      if (native) this.prunePhotos([]).catch(function () { /* repris au prochain démarrage */ });
       return [];
     },
     // Réécrit l'historique tel quel (utilisé pour retirer les images en masse).
     replaceHistory: function (h) {
       var saved = writeHistory(h || []);
-      if (saved && native) this.prunePhotos(saved);
       return saved;
     },
     deleteHistory: function (date) {
       var h = this.getHistory().filter(function (e) { return e.date !== date; });
       var saved = writeHistory(h);
       if (!saved) return null;
-      if (native) this.prunePhotos(saved);
+      if (native) this.prunePhotos(saved).catch(function () { /* repris au prochain démarrage */ });
       return saved;
     },
 
@@ -959,7 +1077,7 @@
 
     // ----- Repas enregistrés (« mes repas fréquents ») -----
     getSavedMeals: function () {
-      return read(KEYS.savedMeals, []);
+      return sanitizeSavedMeals(read(KEYS.savedMeals, []));
     },
     saveMeal: function (name, items) {
       var list = this.getSavedMeals().filter(function (m) { return m.name !== name; });
@@ -973,8 +1091,7 @@
         savedAt: Date.now()
       });
       if (list.length > 40) list = list.slice(0, 40);
-      write(KEYS.savedMeals, list);
-      return list;
+      return write(KEYS.savedMeals, list) ? list : null;
     },
     deleteSavedMeal: function (id) {
       var list = this.getSavedMeals().filter(function (m) { return m.id !== id; });
@@ -992,16 +1109,30 @@
         formatVersion: 3,
         exportedAt: new Date().toISOString(),
         containsApiKeys: false,
-        warning: 'Fichier personnel sans clés API : il contient ton historique de repas.',
-        data: {}
+        warning: 'Fichier personnel sans clés API. Les photos originales de l’APK ne sont pas incluses.',
+        /* Une restauration est annoncée comme un REMPLACEMENT. Chaque catégorie
+           doit donc exister, même vide : omettre une clé jamais écrite ferait
+           survivre les anciennes données du téléphone destinataire. */
+        data: {
+          usage: safeClone(read(KEYS.usage, {}) || {}),
+          settings: safeClone(Storage.getSettings()),
+          history: Storage.getHistory().map(function (entry) {
+            var copy = safeClone(entry);
+            /* Un nom de fichier interne n'est pas une sauvegarde de la photo.
+               L'exporter créerait une image cassée sur l'autre téléphone. Les
+               petites vignettes PWA en base64, elles, voyagent réellement. */
+            delete copy.photo;
+            return copy;
+          }),
+          disclaimer: Storage.disclaimerAccepted(),
+          customFoods: Storage.getCustomFoods(),
+          recentFoods: Storage.getRecentFoods(),
+          savedMeals: Storage.getSavedMeals(),
+          packaging: sanitizeObjectMap(read(KEYS.packaging, {}), 300),
+          products: sanitizeObjectMap(read(KEYS.products, {}), 500)
+        }
       };
-      Object.keys(KEYS).forEach(function (name) {
-        var raw = null;
-        try { raw = localStorage.getItem(KEYS[name]); } catch (e) {}
-        if (raw != null) { try { out.data[name] = JSON.parse(raw); } catch (e) {} }
-      });
       if (out.data.settings) {
-        out.data.settings = safeClone(out.data.settings);
         delete out.data.settings.apiKeys;
         delete out.data.settings.apiKey;
       }
@@ -1013,9 +1144,19 @@
       }
 
       var staged = {};
+      var replaceAll = Number(obj.formatVersion) >= 3;
+      var emptyFor = function (name) {
+        if (name === 'settings' || name === 'usage' || name === 'packaging' || name === 'products') return {};
+        if (name === 'disclaimer') return false;
+        return [];
+      };
       Object.keys(KEYS).forEach(function (name) {
-        if (!Object.prototype.hasOwnProperty.call(obj.data, name)) return;
-        var value = obj.data[name];
+        var present = Object.prototype.hasOwnProperty.call(obj.data, name);
+        /* Les anciens formats étaient parfois partiels : on conserve leur
+           sémantique d'import ciblé. Le format v3, lui, remplace explicitement
+           toutes les catégories et remet une catégorie absente à vide. */
+        if (!present && !replaceAll) return;
+        var value = present ? obj.data[name] : emptyFor(name);
         if (name === 'settings') {
           var incoming = isObject(value) ? safeClone(value) : {};
           var current = Storage.getSettings();
@@ -1035,10 +1176,21 @@
           staged[name] = sanitizeSettings(incoming);
         } else if (name === 'history') {
           staged[name] = sanitizeHistoryList(value);
+          /* Le JSON n'embarque pas les octets des photos APK. Une référence
+             importée seule pointerait vers un fichier arbitraire ou absent. */
+          staged[name].forEach(function (entry) { delete entry.photo; });
         } else if (name === 'disclaimer') {
           staged[name] = value === true;
         } else if (name === 'usage') {
           staged[name] = isObject(value) ? safeClone(value) : {};
+        } else if (name === 'packaging' || name === 'products') {
+          staged[name] = sanitizeObjectMap(value, name === 'products' ? 500 : 300);
+        } else if (name === 'savedMeals') {
+          staged[name] = sanitizeSavedMeals(value);
+        } else if (name === 'customFoods') {
+          staged[name] = sanitizeFoodList(value, true);
+        } else if (name === 'recentFoods') {
+          staged[name] = sanitizeFoodList(value, false).slice(0, 12);
         } else {
           staged[name] = Array.isArray(value) ? safeClone(value).slice(0, 500) : [];
         }
@@ -1087,7 +1239,7 @@
 
     // ----- Aliments récents (mode manuel) -----
     getRecentFoods: function () {
-      return read(KEYS.recentFoods, []);
+      return sanitizeFoodList(read(KEYS.recentFoods, []), false).slice(0, 12);
     },
     addRecentFood: function (food) {
       var list = this.getRecentFoods().filter(function (f) { return f.n !== food.n; });
@@ -1109,7 +1261,7 @@
 
     // ----- Aliments personnalisés -----
     getCustomFoods: function () {
-      return read(KEYS.customFoods, []);
+      return sanitizeFoodList(read(KEYS.customFoods, []), true);
     },
     addCustomFood: function (food) {
       var list = this.getCustomFoods();

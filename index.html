@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#f5f8f8" />
+  <meta name="theme-color" content="#060910" />
+  <meta name="color-scheme" content="dark" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; worker-src 'self'; connect-src 'self' https://api.anthropic.com https://generativelanguage.googleapis.com https://api.openai.com https://openrouter.ai https://world.openfoodfacts.org https://search.openfoodfacts.org https://github.com https://objects.githubusercontent.com" />
   <title>GlucoVision — Estimateur de glucides</title>
   <meta name="description" content="Estime les glucides d'un repas à partir d'une photo et convertit en parts de glucides pour ta pompe à insuline." />
@@ -12,7 +13,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=79" />
+  <link rel="stylesheet" href="css/styles.css?v=80" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -123,7 +124,7 @@
           <p id="angle-count" class="angle-count" hidden></p>
 
           <div class="btn-row capture-actions">
-            <label id="btn-photo" class="btn btn-primary">
+            <label id="btn-photo" class="btn btn-primary" role="button" tabindex="0">
               <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M14.5 5h-5L7.5 8H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-2.5z" />
                 <circle cx="12" cy="13" r="3" />
@@ -137,7 +138,7 @@
               </svg>
               Photo mesurée
             </button>
-            <label class="btn btn-secondary">
+            <label id="btn-video" class="btn btn-secondary" role="button" tabindex="0">
               <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <rect x="3" y="6" width="13" height="12" rx="2" />
                 <path d="m16 11 5-3v8l-5-3" />
@@ -145,7 +146,7 @@
               Vidéo
               <input id="video-input" type="file" accept="video/*" capture="environment" hidden />
             </label>
-            <label id="btn-gallery" class="btn">
+            <label id="btn-gallery" class="btn" role="button" tabindex="0">
               <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <rect x="3" y="3" width="18" height="18" rx="2" />
                 <circle cx="9" cy="9" r="2" />
@@ -178,7 +179,7 @@
               <option value="assiette">Assiette (préciser Ø)</option>
             </select>
             <div id="plate-diameter-wrap" class="inline-field" hidden>
-              <label>Diamètre de l'assiette (cm)</label>
+              <label for="plate-diameter">Diamètre de l'assiette (cm)</label>
               <input id="plate-diameter" class="input small" type="number" inputmode="decimal" min="10" max="40" step="0.5" placeholder="ex. 26" />
             </div>
           </div>
@@ -278,11 +279,11 @@
           <button id="add-custom-toggle" class="btn btn-ghost add-custom">＋ Ajouter un aliment personnalisé</button>
 
           <div id="custom-form" class="custom-form" hidden>
-            <label>Nom de l'aliment</label>
+            <label for="cf-name">Nom de l'aliment</label>
             <input id="cf-name" class="input" type="text" placeholder="ex. Mon pain complet" />
-            <label>Glucides pour 100 g (sur l'emballage)</label>
+            <label for="cf-carb">Glucides pour 100 g (sur l'emballage)</label>
             <input id="cf-carb" class="input small" type="number" inputmode="decimal" min="0" max="100" step="0.1" placeholder="g / 100 g" />
-            <label>Poids d'une portion (g) <span class="tag">optionnel</span></label>
+            <label for="cf-portion">Poids d'une portion (g) <span class="tag">optionnel</span></label>
             <input id="cf-portion" class="input small" type="number" inputmode="numeric" min="1" step="1" placeholder="ex. 50" />
             <div class="btn-row">
               <button id="cf-save" class="btn btn-primary">Enregistrer l'aliment</button>
@@ -432,7 +433,7 @@
         <div class="card">
           <h2>Synthèse pour ton médecin</h2>
           <p class="hint">Un document lisible par un tiers : glucides par repas, répartition dans la journée, fiabilité de tes estimations. Ne contient ni glycémie ni dose — l'app n'en connaît pas.</p>
-          <label>Période</label>
+          <label for="report-days">Période</label>
           <select id="report-days" class="input">
             <option value="30">30 derniers jours</option>
             <option value="90" selected>90 derniers jours</option>
@@ -448,10 +449,10 @@
   </main>
 
   <!-- ============ Réglages (modale) ============ -->
-  <div id="settings-modal" class="modal" hidden>
+  <div id="settings-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title" hidden>
     <div class="modal-card">
       <div class="modal-head">
-        <h2>Réglages</h2>
+        <h2 id="settings-title">Réglages</h2>
         <button id="close-settings" class="icon-btn" aria-label="Fermer">✕</button>
       </div>
 
@@ -462,21 +463,21 @@
           <span class="set-summary" id="settings-ai-summary">Claude</span>
         </summary>
         <div class="set-content">
-        <label>Fournisseur actif</label>
+        <label for="set-provider">Fournisseur actif</label>
         <select id="set-provider" class="input">
           <option value="claude">Claude (Anthropic)</option>
           <option value="gemini">Google Gemini</option>
           <option value="openai">OpenAI (ChatGPT)</option>
         </select>
 
-        <label>Modèle (<span id="set-model-provider-name">Claude</span>)</label>
+        <label for="set-model">Modèle (<span id="set-model-provider-name">Claude</span>)</label>
         <select id="set-model" class="input"></select>
         <div id="set-model-custom-wrap" class="inline-field" hidden>
           <input id="set-model-custom" class="input" type="text" placeholder="id du modèle (ex. gemini-2.5-flash)" />
         </div>
         <p class="hint tiny" id="model-hint"></p>
 
-        <label>Fournisseur de secours</label>
+        <label for="set-fallback-provider">Fournisseur de secours</label>
         <select id="set-fallback-provider" class="input">
           <option value="">Aucun — l'estimation échoue</option>
           <option value="claude">Claude (Anthropic)</option>
@@ -487,22 +488,22 @@
         <p class="hint tiny">Rejoué <strong>uniquement si le fournisseur actif échoue</strong> : panne, quota dépassé, clé refusée. Ne coûte rien le reste du temps. Choisis-en un <strong>différent</strong> du principal — servi par la même API, il tomberait avec lui. Le chiffre obtenu est signalé comme venant du secours.</p>
 
         <h4>Clés API <span class="tag">sur cet appareil</span></h4>
-        <label>Anthropic (Claude)</label>
+        <label for="set-key-claude">Anthropic (Claude)</label>
         <input id="set-key-claude" class="input" type="password" placeholder="sk-ant-…" autocomplete="off" />
         <p class="hint tiny">console.anthropic.com — payant à l'usage.</p>
 
-        <label>Google (Gemini)</label>
+        <label for="set-key-gemini">Google (Gemini)</label>
         <input id="set-key-gemini" class="input" type="password" placeholder="AIza…" autocomplete="off" />
         <p class="hint tiny">aistudio.google.com/apikey — <strong>facturation obligatoire depuis
         l'UE</strong> : les conditions de l'API Gemini imposent le mode payant dans l'EEE, en Suisse
         et au Royaume-Uni, le palier gratuit n'y est pas disponible. Compte environ
         <strong>0,002 $ par analyse</strong> avec 3.1 Flash-Lite, soit ~500 repas pour 1 $.</p>
 
-        <label>OpenAI (ChatGPT)</label>
+        <label for="set-key-openai">OpenAI (ChatGPT)</label>
         <input id="set-key-openai" class="input" type="password" placeholder="sk-…" autocomplete="off" />
         <p class="hint tiny">platform.openai.com/api-keys — payant. ⚠️ L'abonnement <strong>ChatGPT Pro ne donne pas accès à l'API</strong>.</p>
 
-        <label>OpenRouter <span class="tag">tous les modèles</span></label>
+        <label for="set-key-openrouter">OpenRouter <span class="tag">tous les modèles</span></label>
         <input id="set-key-openrouter" class="input" type="password" placeholder="sk-or-v1-…" autocomplete="off" />
         <p class="hint tiny">openrouter.ai/keys — un seul compte pour Claude, Gemini, ChatGPT, Qwen… Facturation à l'usage, sans abonnement.</p>
 
@@ -518,27 +519,27 @@
         </summary>
         <div class="set-content">
         <p class="hint tiny">Un second modèle peut être lancé sur demande ou automatiquement. En mode automatique, l'estimation principale s'affiche sans l'attendre.</p>
-        <label>Mode</label>
+        <label for="set-verify-mode">Mode</label>
         <select id="set-verify-mode" class="input">
           <option value="off">Désactivé</option>
           <option value="ask">Sur demande — afficher une case avant l'estimation</option>
           <option value="auto">Automatique — vérifier chaque estimation</option>
         </select>
         <div id="set-verify-options" hidden>
-        <label>Fournisseur de vérification</label>
+        <label for="set-verify-provider">Fournisseur de vérification</label>
         <select id="set-verify-provider" class="input">
           <option value="openrouter">OpenRouter</option>
           <option value="claude">Claude</option>
           <option value="gemini">Gemini</option>
           <option value="openai">ChatGPT</option>
         </select>
-        <label>Modèle de vérification (<span id="set-verify-provider-name">OpenRouter</span>)</label>
+        <label for="set-verify-model">Modèle de vérification (<span id="set-verify-provider-name">OpenRouter</span>)</label>
         <select id="set-verify-model" class="input"></select>
         <div id="set-verify-model-custom-wrap" class="inline-field" hidden>
           <input id="set-verify-model-custom" class="input" type="text" placeholder="id du modèle (ex. qwen/qwen3.7-flash)" />
         </div>
         <div id="set-verify-threshold-wrap">
-          <label>Alerter à partir de</label>
+          <label for="set-verify-threshold">Alerter à partir de</label>
           <select id="set-verify-threshold" class="input">
             <option value="10">10 % d'écart — très sensible</option>
             <option value="15">15 % d'écart</option>
@@ -568,7 +569,7 @@
         </summary>
         <div class="set-content">
         <h4>Parts de glucides</h4>
-        <label>1 part = ? grammes</label>
+        <label for="set-partsize">1 part = ? grammes</label>
         <input id="set-partsize" class="input small" type="number" min="5" max="20" step="1" />
         <label class="check">
           <input type="checkbox" id="set-round-half" />
@@ -582,7 +583,7 @@
           <input type="checkbox" id="set-remind" />
           <span>Me rappeler de contrôler ma glycémie après un repas analysé</span>
         </label>
-        <label>Délai</label>
+        <label for="set-remind-delay">Délai</label>
         <select id="set-remind-delay" class="input">
           <option value="0">Automatique — selon la vitesse d'absorption estimée</option>
           <option value="60">1 h après le repas</option>
@@ -621,7 +622,7 @@
         </div>
 
         <h4>Sauvegarde</h4>
-        <p class="hint tiny">Tes repas, aliments perso et ta calibration ne vivent que dans ce navigateur. Exporte-les avant de changer de téléphone ou de nettoyer tes données.</p>
+        <p class="hint tiny">Tes repas, aliments perso et ta calibration ne vivent que sur cet appareil. Exporte-les avant de changer de téléphone ou de nettoyer tes données.</p>
         <div class="btn-row">
           <button id="export-data" class="btn btn-ghost">⬇️ Exporter</button>
           <label class="btn btn-ghost">
@@ -629,7 +630,7 @@
             <input id="import-data" type="file" accept="application/json,.json" hidden />
           </label>
         </div>
-        <p class="hint tiny">Les clés API ne sont jamais incluses dans l'export. Après une restauration, renseigne-les de nouveau dans les Réglages.</p>
+        <p class="hint tiny">Les clés API et les photos originales de l’APK ne sont jamais incluses dans l’export. Après une restauration, renseigne les clés de nouveau dans les Réglages.</p>
 
         <!-- Sauvegarde SANS fichier. Indispensable quand l'écriture de fichier
              échoue, et surtout avant une réinstallation d'APK : c'est le seul
@@ -651,7 +652,7 @@
         <p class="hint tiny" id="keystore-note" hidden>🔒 Sur l'application Android, tes clés sont chiffrées par le Keystore du téléphone et ne sont plus stockées en clair.</p>
 
         <h4>Consommation d'API</h4>
-        <p class="hint tiny">Appels réellement effectués ce mois-ci, et coût approximatif d'après les tarifs publics. Indicatif : seul le relevé de ton fournisseur fait foi.</p>
+        <p class="hint tiny">Tentatives envoyées ce mois-ci et coût plafond approximatif d’après les tarifs mesurés. Une erreur peut ne pas être facturée : seul le relevé du fournisseur fait foi.</p>
         <div id="usage-box" class="usage-box">—</div>
 
         <h4>Mise à jour</h4>
@@ -673,16 +674,16 @@
       <div class="modal-actions">
         <button id="save-settings" class="btn btn-primary btn-lg">Enregistrer</button>
       </div>
-      <p class="hint tiny">Sécurité : les clés et les photos ne quittent ton téléphone que pour l'appel direct au fournisseur choisi. Rien n'est stocké sur un serveur.</p>
+      <p class="hint tiny">Confidentialité : l'app n'utilise aucun serveur intermédiaire ni télémétrie. Les photos et le texte sont toutefois envoyés directement au fournisseur d’IA choisi, qui applique ses propres règles de traitement et de conservation.</p>
       <p class="hint tiny app-version-line" id="app-version">Version…</p>
     </div>
   </div>
 
   <!-- ============ Scan code-barres (modale) ============ -->
-  <div id="barcode-modal" class="modal" hidden>
+  <div id="barcode-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="barcode-title" hidden>
     <div class="modal-card scan-card">
       <div class="modal-head">
-        <h2>Scanner un code-barres</h2>
+        <h2 id="barcode-title">Scanner un code-barres</h2>
         <button id="close-barcode" class="icon-btn" aria-label="Fermer">✕</button>
       </div>
       <div class="scan-frame">
@@ -715,26 +716,27 @@
     </div>
   </div>
 
-  <div id="toast" class="toast" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
 
   <!-- Plugins Capacitor puis pont natif : ils doivent précéder storage.js et
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=79"></script>
-  <script src="js/native.js?v=79"></script>
-  <script src="js/storage.js?v=79"></script>
-  <script src="js/foods.js?v=79"></script>
-  <script src="js/gi.js?v=79"></script>
-  <script src="js/queue.js?v=79"></script>
-  <script src="js/report.js?v=79"></script>
-  <script src="js/bench.js?v=79"></script>
-  <script src="js/estimator.js?v=79"></script>
-  <script src="js/camera.js?v=79"></script>
-  <script src="js/portion.js?v=79"></script>
-  <script src="js/off.js?v=79"></script>
-  <script src="vendor/zxing.min.js?v=79"></script>
-  <script src="js/barcode.js?v=79"></script>
-  <script src="js/app.js?v=79"></script>
+  <script src="vendor/capacitor-plugins.js?v=80"></script>
+  <script src="js/native.js?v=80"></script>
+  <script src="js/storage.js?v=80"></script>
+  <script src="js/foods.js?v=80"></script>
+  <script src="js/gi.js?v=80"></script>
+  <script src="js/queue.js?v=80"></script>
+  <script src="js/report.js?v=80"></script>
+  <script src="js/bench.js?v=80"></script>
+  <script src="js/estimator.js?v=80"></script>
+  <script src="js/camera.js?v=80"></script>
+  <script src="js/portion.js?v=80"></script>
+  <script src="js/manual.js?v=80"></script>
+  <script src="js/off.js?v=80"></script>
+  <script src="vendor/zxing.min.js?v=80"></script>
+  <script src="js/barcode.js?v=80"></script>
+  <script src="js/app.js?v=80"></script>
 </body>
 </html>

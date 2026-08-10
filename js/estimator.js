@@ -727,7 +727,12 @@
       _modelGlycemicSpeed: result.glycemicSpeed,
       glycemicNote: result.glycemicNote || '',
       notes: result.notes || '',
-      referenceUsed: result.referenceUsed || ''
+      referenceUsed: result.referenceUsed || '',
+      /* Les contradictions de la réponse BRUTE ne doivent pas disparaître à la
+         première édition. Elles restent séparées des garde-fous recalculables
+         afin qu'une reprise manuelle puisse les lever explicitement, jamais
+         silencieusement. */
+      sourceBlocking: uniqueMessages(rawBlocking)
     };
     return recompute(out, rawBlocking);
   }
@@ -738,6 +743,10 @@
      l'IA ni un repère qu'elle dit avoir trouvé ne peuvent la resserrer. */
   function recompute(result, rawBlocking) {
     result = result || {};
+    var sourceBlocking = rawBlocking === undefined
+      ? (Array.isArray(result.sourceBlocking) ? result.sourceBlocking : [])
+      : (Array.isArray(rawBlocking) ? rawBlocking : []);
+    result.sourceBlocking = uniqueMessages(sourceBlocking);
     var items = Array.isArray(result.items) ? result.items : [];
     var currentBlocking = [];
 
@@ -783,7 +792,7 @@
     result.glycemicSpeed = glycemicSpeed(result._modelGlycemicSpeed || result.glycemicSpeed, total,
                                          result.totalFatG, result.totalProteinG, result.gi);
     result.alerts = plausibility(items, total);
-    result.blocking = uniqueMessages((rawBlocking || []).concat(currentBlocking,
+    result.blocking = uniqueMessages(result.sourceBlocking.concat(currentBlocking,
       blocking(items, total, result.rangeLowG, result.rangeHighG)));
     return result;
   }
@@ -891,16 +900,15 @@
     }
     /* Contradiction masse x densité assez forte pour rendre le chiffre
        inutilisable, et non plus seulement suspect. La version « alerte » se
-       déclenche à 35 % d'écart, ce qui attrape des arrondis ; ici on exige le
-       double du calcul ET au moins 20 g, c'est-à-dire un aliment dont les
-       glucides annoncés ne peuvent pas venir de sa masse et de sa densité.
-       Une alerte se lit ou ne se lit pas ; ce nombre-là sert à doser. */
+       déclenche tôt ; ici on exige plus de 15 g ET plus de 50 % du calcul.
+       Cela bloque 50 g attendus contre 80 g annoncés, tout en laissant 28/40
+       comme alerte à relire plutôt que comme impasse. */
     items.forEach(function (it) {
       var d = it.carbDensityPer100g;
       if (!(it.estimatedMassG > 0) || d == null || !(d >= 0)) return;
       var attendu = it.estimatedMassG * d / 100;
       var ecart = Math.abs((it.carbsG || 0) - attendu);
-      if (ecart >= 20 && ecart > attendu) {
+      if (attendu > 2 && ecart > Math.max(15, attendu * 0.5)) {
         out.push('« ' + it.name + ' » : ' + Math.round(it.carbsG || 0) +
           ' g de glucides annoncés, mais ' + Math.round(it.estimatedMassG) + ' g à ' +
           Math.round(d) + ' g/100 g en donnent ' + Math.round(attendu) +
@@ -1039,6 +1047,17 @@
        glycémique et la vitesse d'absorption dépendent aussi des aliments, et
        les laisser figés afficherait des chiffres qui ne correspondent plus. */
     refresh: function (result) { return recompute(result); },
+
+    /* Après une correction, la réponse brute reste signalée jusqu'à une action
+       distincte où l'utilisateur confirme avoir repris le calcul aliment par
+       aliment. Cette action ne masque pas les incohérences encore présentes :
+       recompute() les recrée immédiatement depuis les valeurs courantes. */
+    acceptManualRecalculation: function (result) {
+      if (!result || result.humanEdited !== true) return recompute(result);
+      result.sourceBlocking = [];
+      result.sourceReviewed = true;
+      return recompute(result, []);
+    },
 
     /* Deux décisions extraites de l'interface pour être testables sans écran.
        Elles portent sur des nombres et des chaînes, pas sur du DOM : les

@@ -3,12 +3,18 @@
   "appName": "GlucoVision",
   "webDir": "www",
   "android": {
-    "allowMixedContent": false
+    "allowMixedContent": false,
+    "backgroundColor": "#060910"
   },
   "server": {
     "androidScheme": "https"
   },
   "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css",
+      "style": "DARK",
+      "hidden": false
+    },
     "CapacitorUpdater": {
       "autoUpdate": false,
       "appReadyTimeout": 20000,
