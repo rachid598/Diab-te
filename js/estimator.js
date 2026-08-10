@@ -98,6 +98,20 @@
     "     grillé », pas « poisson » ; « riz blanc long grain », pas « féculent »).",
     "   - Si tu hésites entre deux aliments, choisis le plus probable et dis",
     "     l'hésitation dans 'assumptions' (« pourrait être du cabillaud »).",
+    "   - 'clarification' : la SEULE question dont la réponse changerait vraiment",
+    "     le total. Une personne est devant son assiette et peut te répondre : elle",
+    "     sait si c'est du yaourt ou du porridge, si le riz est cuit ou cru, si la",
+    "     sauce est à la crème. Toi non. C'est l'information la moins chère qui",
+    "     existe, et personne d'autre ne l'a.",
+    "     impactCarbsG = de combien de grammes de glucides le total peut bouger",
+    "     selon la réponse. Sois honnête : c'est ce nombre qui décide si on",
+    "     dérange l'utilisateur.",
+    "     Mets null si aucune incertitude ne dépasse ~10 g, ou si la photo est",
+    "     claire. Une question posée pour rien fait fermer l'application, et la",
+    "     suivante ne sera plus lue.",
+    "     UNE seule question, jamais deux. Pas de question sur ce que tu peux",
+    "     mesurer toi-même (taille, volume) : uniquement sur ce qui est",
+    "     INVISIBLE — nature de l'aliment, mode de cuisson, ingrédient caché.",
     "   - Dans 'seen' : UNE phrase en français décrivant l'assiette telle que tu",
     "     la vois, comme si tu la décrivais à quelqu'un au téléphone. Mentionne",
     "     le contenant (assiette plate/creuse, bol, barquette) et ce qui est",
@@ -140,7 +154,12 @@
     '  "glycemicNote": "ce qui, dans ce repas, détermine la vitesse d\'absorption",',
     '  "notes": "LE facteur d\'incertitude dominant + action concrète pour l\'affiner",',
     '  "referenceFound": true | false,',
-    '  "referenceUsed": "objet-repère utilisé et échelle déduite (ex: pompe 96 mm → 0,3 cm/px)"',
+    '  "referenceUsed": "objet-repère utilisé et échelle déduite (ex: pompe 96 mm → 0,3 cm/px)",',
+    '  "clarification": null | {',
+    '    "question": "UNE question courte, en français, à la personne qui mange",',
+    '    "options": ["2 à 4 réponses possibles, courtes"],',
+    '    "impactCarbsG": nombre',
+    '  }',
     "}"
   ].join('\n');
 
@@ -382,22 +401,78 @@
   // réseau traîne ou si le modèle reste bloqué. 120 s laisse le temps au
   // raisonnement approfondi (Opus) tout en garantissant une sortie d'erreur.
   var REQUEST_TIMEOUT_MS = 120000;
+  /* Erreur réseau maison, reconnaissable sans deviner le libellé du moteur.
+     Le drapeau reseau:true est ce sur quoi s'appuient la relance automatique et
+     la mise en file d'attente — pas une expression régulière appliquée à un
+     message d'erreur, qui change d'un navigateur à l'autre et d'une version à
+     l'autre. C'est exactement ce qui faisait qu'un « fetch failed » n'était pas
+     reconnu comme une panne réseau et coûtait le repas. */
+  function reseauCoupe(quoi) {
+    var e = new Error((quoi || 'Réseau indisponible') +
+      '. Vérifie ta connexion puis réessaie.');
+    e.reseau = true;
+    return e;
+  }
+
+  /* Une seule relance, et uniquement sur panne réseau.
+
+     Pourquoi : envoyer six photos fait plusieurs mégaoctets, et l'analyse dure
+     souvent une minute. Sur un téléphone qui change de cellule ou passe du Wi-Fi
+     à la 4G, une coupure passagère suffisait à perdre le repas — au moment
+     précis où l'assiette est entamée et où la photo n'est plus refaisable.
+
+     Pourquoi UNE seule : au-delà, on empile des minutes d'attente sans rien
+     dire, et l'appel a de bonnes chances d'avoir déjà été facturé côté modèle.
+     Et jamais sur une erreur d'API : une clé invalide ou un quota atteint
+     échouera exactement pareil la seconde fois. */
+  var RETRY_DELAY_MS = 1500;
+
+  function withRetry(faire) {
+    return faire().catch(function (err) {
+      if (!err || err.reseau !== true) throw err;
+      return new Promise(function (res) { setTimeout(res, RETRY_DELAY_MS); })
+        .then(faire)
+        .catch(function (err2) {
+          /* Le second échec dit qu'il y a EU une relance : sans ça, on croit à
+             une panne instantanée alors qu'on a attendu deux fois le délai. */
+          if (err2 && err2.reseau) {
+            err2.message = err2.message.replace(/\.$/, '') + ' (déjà réessayé une fois).';
+          }
+          throw err2;
+        });
+    });
+  }
+
   function fetchWithTimeout(url, options, ms) {
     ms = ms || REQUEST_TIMEOUT_MS;
-    if (typeof AbortController === 'undefined') return fetch(url, options);
-    var ctrl = new AbortController();
-    var id = setTimeout(function () { ctrl.abort(); }, ms);
-    var opts = Object.assign({}, options, { signal: ctrl.signal });
-    return fetch(url, opts).then(function (r) {
-      clearTimeout(id);
+    /* Sans AbortController on renonce au DÉLAI, jamais à la traduction de
+       l'erreur. La version précédente faisait « return fetch(...) » tout court
+       dans ce cas : sur un moteur ancien, l'échec réseau remontait donc brut,
+       sans le drapeau reseau, et le repas n'était même pas proposé à la file
+       d'attente. Le correctif ne devait pas reproduire le défaut qu'il corrige. */
+    var minute = null;
+    var demande;
+    if (typeof AbortController === 'undefined') {
+      demande = fetch(url, options);
+    } else {
+      var ctrl = new AbortController();
+      minute = setTimeout(function () { ctrl.abort(); }, ms);
+      demande = fetch(url, Object.assign({}, options, { signal: ctrl.signal }));
+    }
+    var fini = function () { if (minute !== null) clearTimeout(minute); };
+
+    return demande.then(function (r) {
+      fini();
       return r;
     }, function (err) {
-      clearTimeout(id);
+      fini();
       if (err && err.name === 'AbortError') {
-        throw new Error('Délai dépassé (' + Math.round(ms / 1000) +
+        var t = new Error('Délai dépassé (' + Math.round(ms / 1000) +
           ' s) : réseau lent ou modèle occupé. Réessaie, réduis le nombre de photos, ou choisis un modèle plus rapide.');
+        t.reseau = true;
+        throw t;
       }
-      throw new Error('Réseau indisponible. Vérifie ta connexion puis réessaie.');
+      throw reseauCoupe('Réseau indisponible');
     });
   }
 
@@ -539,7 +614,8 @@
       body.max_tokens = THINKING_MAX_TOKENS;
     }
 
-    return fetchWithTimeout('https://api.anthropic.com/v1/messages', {
+    return withRetry(function () {
+      return fetchWithTimeout('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -547,8 +623,9 @@
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true'
       },
-      body: JSON.stringify(body)
-    }).then(handleResponse).then(function (data) {
+        body: JSON.stringify(body)
+      }).then(handleResponse);
+    }).then(function (data) {
       if (data.error) throw new Error(data.error.message || 'Erreur API Claude.');
       // On ne garde que les blocs texte (les blocs "thinking" sont ignorés).
       var text = (data.content || []).map(function (b) {
@@ -567,15 +644,17 @@
     var url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
       encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(settings.apiKey);
 
-    return fetchWithTimeout(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemFor(images) }] },
-        contents: [{ role: 'user', parts: parts }],
-        generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 4000 }
-      })
-    }).then(handleResponse).then(function (data) {
+    return withRetry(function () {
+      return fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemFor(images) }] },
+          contents: [{ role: 'user', parts: parts }],
+          generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 4000 }
+        })
+      }).then(handleResponse);
+    }).then(function (data) {
       if (data.error) throw new Error(data.error.message || 'Erreur API Gemini.');
       var cand = data.candidates && data.candidates[0];
       var text = (cand && cand.content && cand.content.parts)
@@ -658,9 +737,9 @@
              (m.indexOf('max_tokens') !== -1 || m.indexOf('max_completion_tokens') !== -1);
     }
 
-    return send(modern)
+    return withRetry(function () { return send(modern); })
       .catch(function (err) {
-        if (isTokenParamError(err)) return send(!modern);
+        if (isTokenParamError(err)) return withRetry(function () { return send(!modern); });
         throw err;
       })
       .then(function (data) {
@@ -676,7 +755,17 @@
   }
 
   function handleResponse(res) {
-    return res.text().then(function (body) {
+    /* res.text() est un SECOND aller-retour réseau : fetch() résout dès que les
+       en-têtes arrivent, le corps continue de descendre après. Sur une réponse
+       de modèle qui met 30 à 90 s, un basculement Wi-Fi/4G ou un écran qui
+       s'éteint coupe la lecture ICI — et l'erreur brute du navigateur
+       (« Failed to fetch », « fetch failed », « Load failed » selon le moteur)
+       remontait telle quelle jusqu'au toast. C'est le message incompréhensible
+       qu'on voyait, et il échappait au filet de fetchWithTimeout, qui ne couvre
+       que l'établissement de la requête. */
+    return res.text().catch(function () {
+      throw reseauCoupe('Réponse interrompue en cours de lecture');
+    }).then(function (body) {
       var data;
       try { data = JSON.parse(body); } catch (e) { data = { raw: body }; }
       if (!res.ok) {
@@ -691,6 +780,48 @@
       }
       return data;
     });
+  }
+
+  /* -------- Question de clarification --------
+     Le modèle mesure ce qu'il voit. Il ne peut pas savoir si la préparation
+     blanche sous les fruits rouges est du yaourt (≈ 5 g/100 g) ou du porridge
+     (≈ 12 g/100 g) : la photo est identique, l'écart sur le total dépasse
+     largement 20 g. Toi, tu le sais en un coup d'œil. C'est l'information la
+     moins chère du système, et aucun second modèle ne peut la fournir.
+
+     Le seuil de 10 g n'est pas décoratif. L'étude 2026 qui montre l'apport des
+     informations complémentaires porte sur des repas décrits en détail ; ici on
+     n'en demande qu'UNE, et seulement quand elle compte. Une question posée pour
+     rien fait fermer l'application — et la suivante, celle qui aurait servi, ne
+     sera plus lue. Le champ impactCarbsG est donc un filtre, pas une décoration.
+
+     Tout est revalidé côté app : le modèle annonce l'impact lui-même, et il a
+     tout intérêt à le gonfler pour justifier sa question. */
+  var CLARIF_SEUIL_G = 10;
+  var CLARIF_MAX_OPTIONS = 4;
+
+  function sanitizeClarification(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    var q = typeof raw.question === 'string' ? raw.question.trim() : '';
+    var impact = strictNum(raw.impactCarbsG);
+    if (!q || q.length > 200) return null;
+    if (impact == null || impact < CLARIF_SEUIL_G) return null;
+
+    var options = Array.isArray(raw.options) ? raw.options : [];
+    options = options
+      .map(function (o) { return typeof o === 'string' ? o.trim() : ''; })
+      .filter(function (o) { return o && o.length <= 60; })
+      .slice(0, CLARIF_MAX_OPTIONS);
+    /* Moins de deux options n'est pas une question, c'est une affirmation
+       déguisée. On préfère ne rien demander. */
+    if (options.length < 2) return null;
+
+    return {
+      question: q,
+      options: options,
+      // Borné : un modèle qui annonce 900 g d'impact se trompe ou exagère.
+      impactCarbsG: Math.round(Math.min(impact, 300))
+    };
   }
 
   // -------- Normalisation / garde-fous sur le résultat --------
@@ -708,6 +839,7 @@
        Faute de réponse explicite, on retombe sur « non trouvé » : mieux vaut
        une marge trop large qu'une marge trop serrée. */
     var refFound = refAsked && result.referenceFound === true;
+    var clarification = sanitizeClarification(result.clarification);
     var rawBlocking = [];
     var rawTotal = strictNum(result.totalCarbsG);
     var rawLow = strictNum(result.rangeLowG);
@@ -789,6 +921,7 @@
       fromText: fromText,
       refAsked: refAsked,
       refFound: refFound,
+      clarification: clarification,
       seen: (result.seen || '').toString().trim(),
       glycemicSpeed: result.glycemicSpeed,
       _modelGlycemicSpeed: result.glycemicSpeed,
@@ -1101,6 +1234,8 @@
     // Exposés pour être testés sans réseau : ils décident du texte envoyé.
     mealMoment: mealMoment,
     contextBlock: contextBlock,
+    sanitizeClarification: sanitizeClarification,
+    CLARIF_SEUIL_G: CLARIF_SEUIL_G,
     buildPhotoPrompt: buildUserPrompt,
 
     /* images: [{base64, mediaType}], ctx: {referenceObject, plateDiameterCm, notes, imageCount},

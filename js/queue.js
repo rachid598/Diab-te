@@ -138,11 +138,30 @@
   /* Une panne réseau se reconnaît à l'absence de statut HTTP : le serveur n'a
      jamais répondu. Une clé invalide (401) ou un quota dépassé (429), eux,
      échoueront tout autant plus tard — les mettre en file ne servirait à rien. */
+  /* Décide si un repas mérite d'être mis de côté pour être rejoué plus tard.
+
+     Le drapeau err.reseau, posé par l'estimateur, est la source SÛRE : il ne
+     dépend d'aucun libellé. La liste d'expressions qui suit n'est qu'un filet
+     pour les erreurs venues d'ailleurs — et elle a déjà menti une fois.
+
+     Elle contenait « failed to fetch », le libellé de Chrome, mais pas
+     « fetch failed » (Node/undici) ni « load failed » (WebKit/iOS). Une coupure
+     réseau annoncée dans l'un de ces deux mots n'était donc PAS reconnue comme
+     telle : au lieu de proposer de garder le repas, l'app affichait un message
+     incompréhensible et l'analyse était perdue. Reconnaître un type de panne à
+     l'orthographe de son message est fragile par nature ; c'est pour ça que le
+     drapeau existe maintenant. */
+  var MOTS_RESEAU =
+    /r[ée]seau|network|failed to fetch|fetch failed|load failed|networkerror|err_|timeout|d[ée]lai|abort|connexion|connection/i;
+
   function isNetworkError(err) {
     if (!err) return false;
+    if (err.reseau === true) return true;
     if (err.status) return err.status >= 500 || err.status === 408;
-    return (typeof navigator !== 'undefined' && navigator.onLine === false) ||
-      /r[ée]seau|network|failed to fetch|timeout|d[ée]lai|abort/i.test(err.message || '');
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+    // Un TypeError nu est la signature d'un fetch() qui n'a jamais abouti.
+    if (err.name === 'TypeError' && !err.status) return true;
+    return MOTS_RESEAU.test(err.message || '');
   }
 
   var Queue = {

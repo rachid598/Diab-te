@@ -491,6 +491,67 @@ async function ecran(page, liste) {
     return on.length === 1 && on[0].getAttribute('data-venue') === 'cantine';
   }), 'un seul lieu à la fois');
 
+  /* Question de clarification. La logique de filtrage est couverte par
+     tests/clarification.test.js ; ce qui ne se vérifie qu'ici, c'est qu'elle
+     s'affiche AVANT le chiffre, que « je ne sais pas » la referme sans casser
+     le résultat, et qu'une réponse remplit bien la description. */
+  console.log('\nQuestion de clarification :');
+  /* Repas en mode DESCRIPTION : une relance y est toujours possible, alors
+     qu'après une reprise photo les images ne sont plus en mémoire et la carte
+     est délibérément masquée (un bouton qui ne peut pas tenir sa promesse est
+     pire que pas de bouton). */
+  const question = {
+    question: 'Sous les fruits rouges, c’est du yaourt ou du porridge ?',
+    options: ['Yaourt', 'Porridge'], impactCarbsG: 22
+  };
+  const dateQuestion = await page.evaluate(function (clar) {
+    const h = JSON.parse(localStorage.getItem('diabete.history.v1') || '[]');
+    const date = Date.now() + 5000;
+    h.unshift({
+      date: date, source: 'texte', draft: true, confirmed: false,
+      totalCarbsG: 24, parts: 2, provider: 'gemini', model: 'gemini-3.1-flash-lite',
+      seen: 'Un bol de préparation blanche avec des fruits rouges.',
+      items: [{ name: 'porridge', carbsG: 24, portion: 'un bol' }],
+      input: { notes: 'un bol avec des fruits rouges', extras: '', imageCount: 0 },
+      resultSnapshot: {
+        totalCarbsG: 24, rangeLowG: 18, rangeHighG: 30,
+        overallConfidence: 'medium', model: 'gemini-3.1-flash-lite', fromText: true,
+        seen: 'Un bol de préparation blanche avec des fruits rouges.',
+        items: [{ name: 'porridge', carbsG: 24, estimatedMassG: 200,
+                  carbDensityPer100g: 12, confidence: 'medium' }],
+        clarification: clar
+      }
+    });
+    localStorage.setItem('diabete.history.v1', JSON.stringify(h));
+    return date;
+  }, question);
+  await page.goto('http://localhost:' + PORT + '/');
+  await page.click('.tab[data-tab="history"]');
+  await page.locator('.history-head[data-open="' + dateQuestion + '"]').click();
+  await page.waitForSelector('.history-resume[data-resume="' + dateQuestion + '"]');
+  await page.locator('.history-resume[data-resume="' + dateQuestion + '"]').click();
+  await page.waitForSelector('.clarif-card', { timeout: 5000 });
+
+  verifie(/yaourt/i.test(await page.textContent('.clarif-q')),
+    'la question du modèle est affichée');
+  verifie(/22 g/.test(await page.textContent('.clarif-card')),
+    'et l’enjeu chiffré est montré');
+  verifie(await page.evaluate(function () {
+    const res = document.getElementById('results');
+    const carte = document.querySelector('.clarif-card');
+    const chiffre = document.querySelector('.hero-carbs');
+    if (!carte || !chiffre) return false;
+    // Lire la question APRÈS avoir recopié le chiffre ne sert à rien.
+    return !!(carte.compareDocumentPosition(chiffre) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+           res.contains(carte);
+  }), 'elle est placée avant le chiffre, pas après');
+
+  await page.click('.clarif-skip');
+  verifie(await page.locator('.clarif-card').count() === 0,
+    '« je ne sais pas » referme la question');
+  verifie(/24/.test(await page.textContent('.hero-carbs')),
+    'et le résultat reste utilisable');
+
   verifie(erreursJs.length === 0, 'aucune erreur JavaScript : ' + (erreursJs[0] || '—'));
 
   await nav.close();

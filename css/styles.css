@@ -1241,3 +1241,14 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 .venue-chip.on { background: var(--brand); color: var(--brand-ink);
   border-color: var(--brand); font-weight: 600; }
 .venue-chip:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* ---------- Question de clarification ----------
+   Encadrée et placée AVANT le chiffre : c'est une information qui peut le
+   déplacer de plus de 10 g, la lire après l'avoir recopié ne sert à rien. */
+.clarif-card { border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.clarif-card h2 { margin-top: 0; font-size: 16px; }
+.clarif-q { font-size: 15px; line-height: 1.5; margin: 6px 0 8px; font-weight: 600; }
+.clarif-opts { flex-wrap: wrap; gap: 8px; margin: 10px 0 6px; }
+.clarif-opt { min-height: 44px; }
+.clarif-skip { width: 100%; margin-top: 4px; }
