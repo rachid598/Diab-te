@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '81'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '82'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -37,6 +37,11 @@
      pas pour autant le choix de l'utilisateur. */
   var currentChoiceRequired = false;
   var lastEstimateContext = null;
+  /* Vrai dès qu'une question de clarification a reçu une réponse pour CE repas.
+     Sans ce drapeau, un modèle qui repose la même question après la relance
+     ferait tourner en boucle — et chaque tour est un appel facturé. Remis à
+     zéro par une nouvelle photo ou un nouveau repas, pas par la relance. */
+  var clarificationRepondue = false;
   var lastVerification = null;
   var estimateGeneration = 0;
   var estimateBusy = false;
@@ -498,6 +503,7 @@
   }
 
   function addFiles(files) {
+    clarificationRepondue = false;
     var arr = Array.prototype.slice.call(files);
     var imgs = arr.filter(function (f) { return /^image\//.test(f.type); });
     var vids = arr.filter(function (f) { return /^video\//.test(f.type); });
@@ -727,6 +733,7 @@
       e.target.value = '';
     });
     $('clear-photos').addEventListener('click', function () {
+      clarificationRepondue = false;
       images = [];
       lastDepthShown = null;
       renderDepthResult(null);
@@ -1697,7 +1704,80 @@
     return (r && typeof r.mergedTotalCarbsG === 'number') ? r.mergedTotalCarbsG : (r ? r.totalCarbsG : 0);
   }
 
+  /* ---------- La question qui vaut plus qu'un second modèle ----------
+     Le modèle mesure ce qu'il voit. Il ne peut pas distinguer un yaourt d'un
+     porridge sous des fruits rouges : la photo est identique, l'écart dépasse
+     20 g de glucides. Toi, tu le sais sans réfléchir. C'est l'information la
+     moins chère du système, et aucun second avis à 0,02 $ ne peut la remplacer.
+
+     Elle n'apparaît que si le modèle chiffre lui-même l'enjeu au-dessus de 10 g
+     (filtré et reborné dans estimator.js). Une question posée pour rien fait
+     fermer l'application, et la suivante — celle qui aurait servi — ne sera plus
+     lue. C'est aussi pour ça qu'il n'y en a jamais deux.
+
+     Elle n'est proposée que si la relance est réellement possible : après une
+     reprise depuis l'historique les photos ne sont plus en mémoire, et un bouton
+     qui ne peut pas tenir sa promesse est pire que pas de bouton. */
+  function clarificationPossible(r) {
+    if (!r || !r.clarification || r.clarificationAnswered) return false;
+    return inputMode === 'texte' ? true : images.length > 0;
+  }
+
+  function clarificationHtml(r) {
+    if (!clarificationPossible(r)) return '';
+    var c = r.clarification;
+    var opts = c.options.map(function (o, i) {
+      return '<button class="btn btn-secondary clarif-opt" data-clarif="' + i + '">' +
+             escapeHtml(o) + '</button>';
+    }).join('');
+    return '<div class="card clarif-card">' +
+      '<h2>❓ Une précision changerait le résultat</h2>' +
+      '<p class="clarif-q">' + escapeHtml(c.question) + '</p>' +
+      '<p class="hint tiny">Enjeu estimé : environ <strong>' + c.impactCarbsG +
+      ' g</strong> de glucides. Ta réponse relance l\'analyse avec cette information.</p>' +
+      '<div class="btn-row clarif-opts">' + opts + '</div>' +
+      '<button class="btn btn-ghost clarif-skip">Je ne sais pas — garder l\'estimation</button>' +
+      '</div>';
+  }
+
+  function bindClarification(r) {
+    if (!clarificationPossible(r)) return;
+    var c = r.clarification;
+    var el = $('results');
+
+    el.querySelectorAll('.clarif-opt').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var reponse = c.options[parseInt(b.getAttribute('data-clarif'), 10)];
+        if (!reponse) return;
+        /* La réponse rejoint la description : c'est déjà le canal des
+           « précisions de l'utilisateur (fiables, à intégrer) » du prompt, donc
+           rien de nouveau à apprendre au modèle. */
+        var champ = $('user-notes');
+        var avant = (champ.value || '').trim();
+        champ.value = (avant ? avant + '\n' : '') + c.question + ' → ' + reponse;
+        updateInputSummaries();
+        updateEstimateBtn();
+        /* Marqué AVANT la relance : sans ça, un modèle qui repose la même
+           question à chaque tour ferait tourner l'utilisateur en boucle, et
+           chaque tour est un appel facturé. */
+        if (lastEstimateContext) lastEstimateContext.clarificationAnswered = true;
+        clarificationRepondue = true;
+        runEstimate();
+      });
+    });
+
+    var skip = el.querySelector('.clarif-skip');
+    if (skip) {
+      skip.addEventListener('click', function () {
+        r.clarificationAnswered = true;
+        renderResults(r, true);
+      });
+    }
+  }
+
   function renderResults(r, keepPosition) {
+    // Un seul point d'application : direct, comparaison et reprise passent tous ici.
+    if (clarificationRepondue) r.clarificationAnswered = true;
     var el = $('results');
     var total = shownTotal(r);
     var parts = partsFrom(total);
@@ -1717,6 +1797,7 @@
         ' — un autre modèle, donc un autre chiffre que celui qu\'aurait donné ton réglage habituel.</span>' +
         '</div>';
     }
+    html += clarificationHtml(r);
     if (bloque) {
       /* Résultat retiré, pas seulement signalé. Une incohérence de ce niveau
          veut dire que le nombre ne représente rien : l'afficher en gros avec un
@@ -1848,6 +1929,7 @@
       });
     }
     initRerun();
+    bindClarification(r);
     renderVerificationState();
     autoSaveCurrentResult();
     if (!keepPosition) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
