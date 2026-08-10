@@ -70,5 +70,14 @@ test('le contrôle manuel ?maj contourne volontairement le cache de coquille', a
 });
 
 test('la page peut vérifier la version du worker qui la contrôle', () => {
-  assert.equal(workerEnv().version(), '80');
+  /* Comparé à APP_VERSION plutôt qu'à un numéro écrit en dur : ce test portait
+     « 80 » et échouait à chaque montée de version, ce qui en faisait une corvée
+     et non un contrôle. Ce qui compte est que le worker annonce la MÊME version
+     que l'application — c'est le désaccord entre les deux qui casse les mises à
+     jour, jamais la valeur elle-même. */
+  const source = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'js', 'app.js'), 'utf8');
+  const attendu = /APP_VERSION = '(\d+)'/.exec(source);
+  assert.ok(attendu, 'APP_VERSION doit être lisible dans js/app.js');
+  assert.equal(workerEnv().version(), attendu[1]);
 });

@@ -204,6 +204,8 @@
       lines.push('Ne les cherche pas dans l\'image. Ajoute-les comme aliments à part');
       lines.push('entière avec "fromPhoto": false, en te basant sur les portions usuelles.');
     }
+    var ctxBlock = contextBlock(ctx);
+    if (ctxBlock) lines.push(ctxBlock);
     var cal = calibrationBlock();
     if (cal) lines.push(cal);
     lines.push('Réponds uniquement avec le JSON.');
@@ -222,6 +224,8 @@
     if (ctx.extras && ctx.extras.trim()) {
       lines.push('À compter également : ' + ctx.extras.trim());
     }
+    var ctxBlock = contextBlock(ctx);
+    if (ctxBlock) lines.push(ctxBlock);
     var cal = calibrationBlock();
     if (cal) lines.push(cal);
     lines.push('Réponds uniquement avec le JSON.');
@@ -262,6 +266,69 @@
 
      Le biais PAR CATÉGORIE passe avant le biais global : « je me trompe sur les
      féculents » est exploitable, « je me trompe de 12 % » ne l'est pas. */
+  /* ---------- Contexte du repas ----------
+     Le modèle voit l'assiette et rien d'autre. Il ignore qu'il est 20 h, et
+     surtout il ignore si tu es chez toi ou au restaurant — alors que c'est un
+     des écarts les plus systématiques qui soient : à plat identique, la portion
+     servie au restaurant est plus grosse et la préparation plus riche en matière
+     grasse et en sucre ajouté.
+
+     Le benchmark ACETADA (arXiv 2507.07048) mesure ce gain : ajouter des
+     métadonnées de contexte — horodatage, type de lieu — réduit l'erreur des
+     modèles multimodaux sur l'analyse nutritionnelle. C'est le levier le moins
+     cher qui existe ici, puisqu'il ne demande aucune donnée nouvelle.
+
+     Deux précautions. On ne donne AUCUN pourcentage de correction : inventer
+     « ajoute 20 % au restaurant » serait fabriquer une calibration qu'on n'a pas
+     mesurée, exactement ce qu'on reproche au champ serving_size d'OpenFoodFacts.
+     Et le contexte ne tranche que les cas douteux — ce que montre la photo prime
+     toujours, sinon on apprend au modèle à contredire l'image. */
+  var LIEUX = {
+    maison: {
+      nom: 'à la maison',
+      note: 'Portions de repas fait maison ; les quantités de matière grasse et ' +
+            'de sucre ajouté sont généralement modérées.'
+    },
+    restaurant: {
+      nom: 'au restaurant',
+      note: 'Les portions servies au restaurant sont typiquement plus grandes ' +
+            'qu\'à la maison, et les préparations plus riches en matière grasse ' +
+            'et en sucre ajouté (sauces, cuisson, assaisonnement).'
+    },
+    cantine: {
+      nom: 'à la cantine ou au self',
+      note: 'Portions standardisées de collectivité, servies à la louche ou ' +
+            'préportionnées ; féculents souvent généreux.'
+    }
+  };
+
+  /* Bornes larges et volontairement trouées : entre 15 h et 18 h, ce n'est ni un
+     déjeuner ni un dîner, et « collation » est alors l'information juste. Mieux
+     vaut un créneau honnête qu'un repas nommé au hasard. */
+  function mealMoment(date) {
+    var d = (date instanceof Date) ? date : new Date(date == null ? Date.now() : date);
+    var h = d.getHours();
+    if (!isFinite(h)) return '';
+    if (h >= 5 && h < 11) return 'petit-déjeuner';
+    if (h >= 11 && h < 15) return 'déjeuner';
+    if (h >= 18 && h < 23) return 'dîner';
+    return 'collation';
+  }
+
+  function contextBlock(ctx) {
+    var moment = mealMoment(ctx && ctx.mealAt);
+    var lieu = LIEUX[(ctx && ctx.venue) || ''] || null;
+    if (!moment && !lieu) return '';
+
+    var quoi = [moment, lieu ? lieu.nom : ''].filter(Boolean).join(', ');
+    var lignes = ['CONTEXTE DU REPAS : ' + quoi + '.'];
+    if (lieu) lignes.push(lieu.note);
+    lignes.push('Sers-t\'en pour trancher les portions et les préparations ' +
+      'DOUTEUSES. Ce contexte ne remplace jamais ce que montre la photo : si ' +
+      'l\'image contredit l\'habitude, c\'est l\'image qui a raison.');
+    return lignes.join('\n');
+  }
+
   function calibrationBlock() {
     if (!window.Storage || !Storage.getBiasByCategory) return '';
     var lines = [];
@@ -1029,6 +1096,12 @@
 
   var Estimator = {
     PROVIDER_LABEL: PROVIDER_LABEL,
+    VENUES: LIEUX,
+
+    // Exposés pour être testés sans réseau : ils décident du texte envoyé.
+    mealMoment: mealMoment,
+    contextBlock: contextBlock,
+    buildPhotoPrompt: buildUserPrompt,
 
     /* images: [{base64, mediaType}], ctx: {referenceObject, plateDiameterCm, notes, imageCount},
        settings: {provider, apiKeys, models}. Retourne une Promise du résultat normalisé. */

@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '80'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '81'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -446,6 +446,8 @@
     var extrasSummary = $('extras-summary');
     if (extrasSummary) extrasSummary.textContent = extras.length ? extras.join(' + ') : 'Ajouter';
 
+    renderVenue();
+
     var ref = $('reference-object');
     var refSummary = $('reference-summary');
     if (ref && refSummary) {
@@ -453,6 +455,40 @@
         ? 'Aucun'
         : (ref.options[ref.selectedIndex].textContent || '').replace(/\s*\(.*\)$/, '');
     }
+  }
+
+  /* ---------- Où tu manges ----------
+     Le modèle voit l'assiette et rien d'autre. Il ignore qu'une part de
+     restaurant est plus grosse et plus riche qu'une part faite maison — un des
+     écarts les plus systématiques, et l'un des seuls qu'une photo ne révèle
+     jamais. Un appui suffit, et le choix est retenu : dans la vraie vie on
+     mange plusieurs repas d'affilée au même endroit.
+
+     Un second appui sur la puce active la désélectionne. Ne rien dire est un
+     état légitime : affirmer « maison » un jour où tu es ailleurs enverrait au
+     modèle une information fausse, ce qui est pire que pas d'information. */
+  function renderVenue() {
+    var chips = document.querySelectorAll('.venue-chip');
+    if (!chips.length) return;
+    var actif = settings.venue || '';
+    Array.prototype.forEach.call(chips, function (c) {
+      var on = c.getAttribute('data-venue') === actif;
+      c.classList.toggle('on', on);
+      c.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+
+  function initVenue() {
+    var chips = document.querySelectorAll('.venue-chip');
+    Array.prototype.forEach.call(chips, function (c) {
+      c.addEventListener('click', function () {
+        var v = c.getAttribute('data-venue');
+        settings.venue = (settings.venue === v) ? '' : v;
+        Storage.saveSettings(settings);
+        renderVenue();
+      });
+    });
+    renderVenue();
   }
 
   function setExtractStatus(on) {
@@ -745,7 +781,12 @@
       notes: $('user-notes').value,
       extras: extrasText(),       // dessert / boisson, absents de la photo
       imageCount: sent.length,    // 0 fait basculer l'estimateur en mode description
-      depth: textOnly ? null : depthOfSent(sent)
+      depth: textOnly ? null : depthOfSent(sent),
+      /* Contexte du repas. mealAt est figé ICI, à l'envoi : si l'estimation est
+         mise en file d'attente et rejouée à 2 h du matin, elle doit rester le
+         dîner qu'elle était, pas devenir une collation. */
+      mealAt: Date.now(),
+      venue: settings.venue || ''
     };
     lastEstimateContext = Object.assign({}, ctx);
 
@@ -959,6 +1000,9 @@
               date: item.date,
               queueId: item.id,
               source: 'photo',
+              // Gardé au niveau du repas, pas seulement dans input : c'est ce
+              // qui rendra possible une calibration PAR LIEU plus tard.
+              venue: (item.ctx && item.ctx.venue) || '',
               draft: true,
               confirmed: false,
               blocked: blocked,
@@ -980,7 +1024,9 @@
                 notes: item.ctx.notes || '',
                 extras: item.ctx.extras || '',
                 imageCount: item.ctx.imageCount || 0,
-                depth: item.ctx.depth || null
+                depth: item.ctx.depth || null,
+                mealAt: item.ctx.mealAt || item.ts || Date.now(),
+                venue: item.ctx.venue || ''
               } : null,
               items: (result.items || []).map(function (it) {
                 return { name: it.name, carbsG: it.carbsG,
@@ -5406,6 +5452,7 @@
     initManual();
     initHistory();
     initSettings();
+    initVenue();
     updateCompareToggle();
     renderThumbs();
     updateEstimateBtn();

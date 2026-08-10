@@ -13,7 +13,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=80" />
+  <link rel="stylesheet" href="css/styles.css?v=81" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -169,6 +169,11 @@
             <p class="hint">Un objet de taille connue donne au modèle la seule échelle réelle dont il dispose. Pose-le <strong>à plat, sur le bord de l'assiette</strong> plutôt que sur la table : à la même hauteur que la nourriture, l'échelle est juste.</p>
             <p class="hint tiny"><strong>⚠️ S'il n'est pas vraiment dans le cadre, choisis « Aucun repère ».</strong> Testé sur 24 photos sans pompe, envoyées en affirmant qu'elle y était : les modèles ont répondu <strong>24 fois sur 24</strong> qu'ils l'avaient trouvée et mesurée, en inventant la mesure en pixels. Un repère annoncé mais absent est pire que pas de repère du tout.</p>
             <p class="hint tiny">De combien il réduit l'erreur n'est pas chiffré : les photos du banc d'essai n'en contiennent aucun. Le conseil tient à la géométrie, pas à une mesure.</p>
+            <!-- La paire dessus + côté vient de GoCARB (université de Berne), qui
+                 obtient 12,3 g d'erreur moyenne par repas contre 27,9 g pour les
+                 patients eux-mêmes, avec exactement ce protocole : un objet de
+                 taille connue posé dans le plan de l'assiette, et deux vues. -->
+            <p class="hint tiny">📐 <strong>La paire qui rapporte le plus : une vue de dessus + une vue de côté, le repère visible sur les deux.</strong> Le dessus donne les surfaces, le côté donne la hauteur — la seule dimension qu'une photo unique ne montre jamais.</p>
             <select id="reference-object" class="input">
               <option value="none" selected>Aucun repère</option>
               <option value="pompe à insuline Medtronic MiniMed 780G : boîtier rectangulaire à écran couleur et coins arrondis, d'où sort une fine tubulure ; 96,8 mm de long sur 53,6 mm de large et 24,9 mm d'épaisseur">Ma pompe MiniMed 780G (96,8 × 53,6 × 24,9 mm)</option>
@@ -184,6 +189,16 @@
             </div>
           </div>
         </details>
+
+        <!-- Où tu manges. Le modèle voit l'assiette et rien d'autre : il ignore
+             qu'une part de restaurant est plus grosse et plus riche qu'une part
+             faite maison. Un appui, et c'est retenu jusqu'au prochain choix. -->
+        <div class="venue-row" role="group" aria-label="Où manges-tu ?">
+          <span class="venue-label">Où&nbsp;?</span>
+          <button type="button" class="venue-chip" data-venue="maison">🏠 Maison</button>
+          <button type="button" class="venue-chip" data-venue="restaurant">🍽️ Restaurant</button>
+          <button type="button" class="venue-chip" data-venue="cantine">🥘 Cantine</button>
+        </div>
       </div>
 
       <!-- ----- Volet DESCRIPTION -----
@@ -722,21 +737,21 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=80"></script>
-  <script src="js/native.js?v=80"></script>
-  <script src="js/storage.js?v=80"></script>
-  <script src="js/foods.js?v=80"></script>
-  <script src="js/gi.js?v=80"></script>
-  <script src="js/queue.js?v=80"></script>
-  <script src="js/report.js?v=80"></script>
-  <script src="js/bench.js?v=80"></script>
-  <script src="js/estimator.js?v=80"></script>
-  <script src="js/camera.js?v=80"></script>
-  <script src="js/portion.js?v=80"></script>
-  <script src="js/manual.js?v=80"></script>
-  <script src="js/off.js?v=80"></script>
-  <script src="vendor/zxing.min.js?v=80"></script>
-  <script src="js/barcode.js?v=80"></script>
-  <script src="js/app.js?v=80"></script>
+  <script src="vendor/capacitor-plugins.js?v=81"></script>
+  <script src="js/native.js?v=81"></script>
+  <script src="js/storage.js?v=81"></script>
+  <script src="js/foods.js?v=81"></script>
+  <script src="js/gi.js?v=81"></script>
+  <script src="js/queue.js?v=81"></script>
+  <script src="js/report.js?v=81"></script>
+  <script src="js/bench.js?v=81"></script>
+  <script src="js/estimator.js?v=81"></script>
+  <script src="js/camera.js?v=81"></script>
+  <script src="js/portion.js?v=81"></script>
+  <script src="js/manual.js?v=81"></script>
+  <script src="js/off.js?v=81"></script>
+  <script src="vendor/zxing.min.js?v=81"></script>
+  <script src="js/barcode.js?v=81"></script>
+  <script src="js/app.js?v=81"></script>
 </body>
 </html>
