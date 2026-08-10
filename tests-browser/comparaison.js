@@ -293,9 +293,14 @@ async function ecran(page, liste) {
     return date;
   });
   await page.goto('http://localhost:' + PORT + '/');
+  /* Attente que showVersion() ait tourné, donc que l'initialisation soit finie.
+     Le numéro n'est PAS écrit en dur : il l'était (« Version 80 »), et le test
+     tombait alors à chaque montée de version pour une raison sans rapport avec
+     ce qu'il vérifie. Ce qui fait office de signal, c'est qu'un numéro ait
+     remplacé le « Version… » du HTML statique. */
   await page.waitForFunction(function () {
     const v = document.getElementById('app-version');
-    return v && /Version 80/.test(v.textContent || '');
+    return v && /Version\s+\d+/.test(v.textContent || '');
   }, null, { timeout: 5000 });
   await page.click('.tab[data-tab="history"]');
   await page.locator('.history-head[data-open="' + dateBrouillonB + '"]').click();
@@ -451,6 +456,40 @@ async function ecran(page, liste) {
     'au second scan, le produit est reconnu sans rien redemander');
   verifie(/Gâteau de mamie/.test(await page.textContent('#portion-name')),
     'et c’est bien le produit enregistré');
+
+  /* Lieu du repas. La logique est testée dans tests/contexte-repas.test.js ;
+     ce qui ne peut se vérifier qu'ici, c'est que la puce est branchée, qu'elle
+     survit à un rechargement, et qu'un second appui la désélectionne. */
+  console.log('\nLieu du repas :');
+  await page.goto('http://localhost:' + PORT + '/');
+  await page.waitForSelector('.venue-chip', { timeout: 5000 });
+  verifie(await page.evaluate(function () {
+    return document.querySelectorAll('.venue-chip.on').length === 0;
+  }), 'au départ, aucun lieu n’est affirmé');
+
+  await page.click('.venue-chip[data-venue="restaurant"]');
+  verifie(await page.evaluate(function () {
+    var c = document.querySelector('.venue-chip[data-venue="restaurant"]');
+    return c.classList.contains('on') && c.getAttribute('aria-pressed') === 'true';
+  }), 'un appui sélectionne le lieu, y compris pour un lecteur d’écran');
+
+  await page.goto('http://localhost:' + PORT + '/');
+  await page.waitForSelector('.venue-chip', { timeout: 5000 });
+  verifie(await page.evaluate(function () {
+    return document.querySelector('.venue-chip[data-venue="restaurant"]').classList.contains('on');
+  }), 'le choix survit au rechargement');
+
+  await page.click('.venue-chip[data-venue="restaurant"]');
+  verifie(await page.evaluate(function () {
+    return document.querySelectorAll('.venue-chip.on').length === 0;
+  }), 'un second appui revient à « je ne dis rien »');
+
+  await page.click('.venue-chip[data-venue="maison"]');
+  await page.click('.venue-chip[data-venue="cantine"]');
+  verifie(await page.evaluate(function () {
+    var on = document.querySelectorAll('.venue-chip.on');
+    return on.length === 1 && on[0].getAttribute('data-venue') === 'cantine';
+  }), 'un seul lieu à la fois');
 
   verifie(erreursJs.length === 0, 'aucune erreur JavaScript : ' + (erreursJs[0] || '—'));
 

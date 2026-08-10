@@ -159,6 +159,11 @@
     remindEnabled: false, // rappel de contrôle après repas (APK uniquement)
     remindDelayMin: 0,    // 0 = délai calé sur la vitesse d'absorption estimée
     experimentalDepth: false, // échelle ARCore expérimentale, opt-in explicite
+    /* Où tu manges habituellement. Passé au modèle avec le repas : une part de
+       restaurant est plus grosse et plus riche qu'une part faite maison, et il
+       n'a aucun moyen de le deviner depuis la photo. Vide = on ne dit rien
+       plutôt que d'affirmer un lieu au hasard. */
+    venue: '',
     /* Vérification croisée automatique. Un 2ᵉ modèle bon marché tourne en
        parallèle à chaque estimation ; on n'alerte que si l'écart dépasse le
        seuil. C'est le seul garde-fou capable de rattraper une erreur grossière
@@ -452,6 +457,7 @@
     out.remindEnabled = raw.remindEnabled === true;
     out.remindDelayMin = bounded(raw.remindDelayMin, 0, 1440, DEFAULT_SETTINGS.remindDelayMin);
     out.experimentalDepth = raw.experimentalDepth === true;
+    out.venue = /^(maison|restaurant|cantine)$/.test(raw.venue || '') ? raw.venue : '';
     out.verificationMode = /^(off|ask|auto)$/.test(raw.verificationMode || '')
       ? raw.verificationMode : DEFAULT_SETTINGS.verificationMode;
     out.verifyEnabled = raw.verifyEnabled === true;
@@ -583,6 +589,10 @@
         else e.realCarbsG = Math.round(real);
       }
       e.source = /^(photo|texte|manuel)$/.test(e.source || '') ? e.source : 'manuel';
+      /* Conservé pour pouvoir un jour calibrer PAR LIEU (« au restaurant, tu
+         sous-estimes de 22 % »). Sans stockage aujourd'hui, ce calcul serait
+         impossible demain : on ne rattrape pas un historique qu'on n'a pas. */
+      if (!/^(maison|restaurant|cantine)$/.test(e.venue || '')) delete e.venue;
       e.provider = PROVIDERS.indexOf(e.provider) >= 0 ? e.provider : '';
       e.model = shortText(e.model, 200);
       e.seen = shortText(e.seen, 2000);

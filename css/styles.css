@@ -1226,3 +1226,18 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
     transition-duration: .01ms !important;
   }
 }
+
+/* ---------- Lieu du repas ----------
+   Une rangée d'un seul tenant, sous la capture : c'est un réglage de contexte,
+   pas une étape. Les puces restent tapables à 44 px de haut, taille minimale
+   d'une cible tactile fiable. */
+.venue-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin: 10px 0 2px; }
+.venue-label { font-size: 13px; color: var(--muted); margin-right: 2px; }
+.venue-chip { min-height: 44px; padding: 8px 12px; border-radius: 999px;
+  font-size: 13px; line-height: 1.2; cursor: pointer;
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); }
+.venue-chip.on { background: var(--brand); color: var(--brand-ink);
+  border-color: var(--brand); font-weight: 600; }
+.venue-chip:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }

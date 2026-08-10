@@ -5,7 +5,6 @@ on:
   pull_request:
     branches:
       - codex
-      - codex-2
       - sans-relief
       - avec-relief
     paths:
@@ -33,7 +32,6 @@ on:
   push:
     branches:
       - codex
-      - codex-2
       - sans-relief
       - avec-relief
     paths:
@@ -98,7 +96,7 @@ jobs:
           # cible qui détermine l'identité Android à valider.
           BRANCH="${GITHUB_BASE_REF:-$GITHUB_REF_NAME}"
           case "$BRANCH" in
-            codex|codex-2)
+            codex)
               echo "apk_tag=apk-codex" >> "$GITHUB_OUTPUT"
               echo "ota_tag=ota-codex" >> "$GITHUB_OUTPUT"
               echo "app_id=io.github.rachid598.glucovision" >> "$GITHUB_OUTPUT"
@@ -683,7 +681,6 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/codex' ||
-       github.ref == 'refs/heads/codex-2' ||
        github.ref == 'refs/heads/sans-relief' ||
        github.ref == 'refs/heads/avec-relief')
     runs-on: ubuntu-latest
