@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 rm -rf www
 mkdir -p www
 
-cp index.html manifest.webmanifest www/
+cp index.html manifest.webmanifest glucovision-card.svg www/
 cp -r css js vendor icons www/
 
 # Le service worker est délibérément exclu : dans l'APK les fichiers sont déjà

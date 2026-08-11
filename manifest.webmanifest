@@ -2,7 +2,7 @@
   "id": "diabete-carb-estimator",
   "name": "GlucoVision — Estimateur de glucides",
   "short_name": "GlucoVision",
-  "description": "Estime les glucides d'un repas à partir d'une photo et convertit en parts de glucides pour ta pompe à insuline.",
+  "description": "Aide à estimer les glucides d'un repas par photo libre, carte repère optionnelle ou saisie manuelle. Ne calcule aucune dose d'insuline.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

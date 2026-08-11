@@ -70,6 +70,8 @@ final class DepthMeasure {
         int sourceImageHeightPx;
         double planeRmsCm;
         double tiltDeg;
+        double planeA;
+        double planeB;
         double coverage;
         double parallaxCm;
         long depthTimestamp;
@@ -200,6 +202,8 @@ final class DepthMeasure {
         r.planeInliers = plane.inliers;
         r.planeRmsCm = plane.rmsM * 100.0;
         r.tiltDeg = plane.tiltDeg();
+        r.planeA = plane.a;
+        r.planeB = plane.b;
         r.distanceCm = plane.c * 100.0;
 
         if (plane.rmsM > MAX_PLANE_RMS_M) {

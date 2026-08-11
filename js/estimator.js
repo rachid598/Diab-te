@@ -13,33 +13,22 @@
     "",
     "MÉTHODE OBLIGATOIRE (raisonne étape par étape) :",
     "",
-    "A. CALIBRATION DE L'ÉCHELLE (déterminante).",
-    "   Si un objet-repère de dimension CONNUE est fourni (pompe à insuline, carte 85 mm,",
-    "   pièce, diamètre d'assiette) : repère-le dans l'image et déduis l'échelle réelle",
-    "   (cm par pixel). Puis MESURE chaque aliment en cm (longueur, largeur, et",
-    "   diamètre/épaisseur visibles). Indique ces mesures dans 'assumptions'.",
-    "   Procède DANS CET ORDRE, sans sauter d'étape :",
-    "     1. localise le repère et estime la longueur en PIXELS de sa plus grande arête ;",
-    "     2. échelle = dimension réelle connue ÷ cette longueur en pixels ;",
-    "     3. reporte les deux nombres dans 'referenceUsed' (ex. « pompe 96,8 mm sur",
-    "        ~310 px → 0,031 cm/px »). Un 'referenceUsed' sans ces deux nombres signifie",
-    "        que la calibration n'a pas eu lieu : mets alors 'referenceFound': false.",
-    "   ⚠️ PLAN DE MESURE. Le repère et les aliments doivent être à la MÊME distance de",
-    "   l'objectif. Si le repère est posé sur la table et la nourriture dans une assiette",
-    "   creuse ou surélevée, les aliments sont plus PRÈS de l'objectif : appliquer l'échelle",
-    "   du repère les fait paraître plus gros qu'ils ne sont, et SURESTIME les glucides.",
-    "   Quand tu vois cette configuration, dis-le dans 'notes' et corrige à la baisse.",
+    "A. ÉCHELLE MÉTRIQUE (déterminante).",
+    "   N'invente JAMAIS une échelle à partir d'un objet que tu crois reconnaître dans",
+    "   l'image, même si sa taille habituelle te semble connue. Une carte, une pompe, une",
+    "   pièce, une assiette ou des couverts visibles ne constituent PAS une mesure.",
+    "   La seule échelle métrique autorisée est un bloc intitulé exactement",
+    "   « MESURE NATIVE VÉRIFIÉE POUR IMAGE N/M UNIQUEMENT » dans le message utilisateur.",
+    "   Ce bloc vient d'ARCore et est déjà associé à une image précise. Utilise ses",
+    "   dimensions uniquement pour cette image ; ne les transpose jamais à un autre angle.",
+    "   S'il n'y a aucun bloc natif vérifié, estime visuellement la portion et décris",
+    "   honnêtement les dimensions comme estimées, jamais comme mesurées.",
     "",
     "B. TROISIÈME DIMENSION (hauteur/épaisseur).",
     "   Avec plusieurs angles : croise-les pour juger le volume précisément (confiance haute).",
     "   Avec une seule vue de dessus : tu ne vois pas directement la hauteur — estime-la à",
     "   partir d'indices (ombres, empilement, type d'aliment) et considère-la comme la",
     "   principale inconnue géométrique de cet aliment (une vue de côté la lèverait).",
-    "   ⇒ SAUF si le repère a lui-même une épaisseur connue et repose à plat à côté de",
-    "   l'assiette : c'est alors la seule RÈGLE VERTICALE de l'image. Compare la hauteur",
-    "   des aliments à celle du repère (« le tas de riz monte à environ deux fois",
-    "   l'épaisseur de la pompe ≈ 5 cm ») et dis-le dans 'assumptions'. Une hauteur",
-    "   ainsi rapportée à un objet vaut bien mieux qu'une hauteur devinée.",
     "",
     "C. VOLUME → MASSE via la densité et la consistance (riz aéré vs compact, mie de pain",
     "   aérée vs dense, aliment frit gorgé d'huile, sauce). Recoupe avec des portions types",
@@ -118,14 +107,6 @@
     "     partiellement caché. C'est le texte que l'utilisateur relira pour",
     "     confirmer que tu as bien lu SON repas.",
     "",
-    "J. AS-TU VRAIMENT TROUVÉ LE REPÈRE ? — champ 'referenceFound'.",
-    "   Mets true UNIQUEMENT si tu as effectivement localisé l'objet-repère dans",
-    "   l'image et t'en es servi pour mesurer. Mets false s'il est hors cadre,",
-    "   masqué, flou, ou si tu n'en es pas sûr.",
-    "   Ne dis pas true « pour faire plaisir » : cette information sert à expliquer",
-    "   la méthode employée. Annoncer une mesure qui n'a pas eu lieu produit une",
-    "   fausse précision sur un chiffre destiné au comptage des glucides.",
-    "",
     "SORTIE : réponds UNIQUEMENT avec un objet JSON valide, sans texte ni balises markdown.",
     "Schéma exact :",
     "{",
@@ -133,7 +114,7 @@
     '  "items": [',
     '    {',
     '      "name": "nom précis de ce que tu vois, en français",',
-    '      "portionDescription": "portion + dimensions mesurées (ex: baguette ~55 cm ≈ 220 g)",',
+    '      "portionDescription": "portion + dimensions natives si fournies, sinon dimensions estimées",',
     '      "estimatedMassG": nombre,',
     '      "carbDensityPer100g": nombre,',
     '      "carbsG": nombre,',
@@ -143,7 +124,7 @@
     '      "gi": nombre | null,',
     '      "fromPhoto": true | false,',
     '      "confidence": "low" | "medium" | "high",',
-    '      "assumptions": "mesures via le repère + hypothèses clés, en français"',
+    '      "assumptions": "mesure native fournie pour cette image, s\'il y en a une, + hypothèses clés"',
     '    }',
     '  ],',
     '  "totalCarbsG": nombre,',
@@ -153,8 +134,6 @@
     '  "glycemicSpeed": "rapide" | "moderee" | "lente",',
     '  "glycemicNote": "ce qui, dans ce repas, détermine la vitesse d\'absorption",',
     '  "notes": "LE facteur d\'incertitude dominant + action concrète pour l\'affiner",',
-    '  "referenceFound": true | false,',
-    '  "referenceUsed": "objet-repère utilisé et échelle déduite (ex: pompe 96 mm → 0,3 cm/px)",',
     '  "clarification": null | {',
     '    "question": "UNE question courte, en français, à la personne qui mange",',
     '    "options": ["2 à 4 réponses possibles, courtes"],',
@@ -164,34 +143,26 @@
   ].join('\n');
 
   function buildUserPrompt(ctx) {
+    ctx = ctx && typeof ctx === 'object' ? ctx : {};
     // Mode description : rien à mesurer, tout repose sur le texte.
     if (!ctx.imageCount) return buildTextPrompt(ctx);
 
     var lines = ['Analyse ce repas et estime les glucides selon la méthode.'];
-    var depth = validDepthScale(ctx.depth, ctx.imageCount);
-    if (ctx.referenceObject && ctx.referenceObject !== 'none') {
-      var ref = ctx.referenceObject;
-      if (ctx.plateDiameterCm) {
-        ref = 'assiette de ' + ctx.plateDiameterCm + ' cm de diamètre';
-      }
-      lines.push('OBJET-REPÈRE présent, de dimension connue : ' + ref + '.');
-      lines.push('Calibre l\'échelle à partir de ce repère, MESURE chaque aliment en cm, et');
-      lines.push('reporte les mesures dans "assumptions".');
-      lines.push('Donne dans "referenceUsed" la longueur en pixels de l\'arête que tu as');
-      lines.push('mesurée ET l\'échelle qui en découle, sinon mets "referenceFound": false.');
-      /* Aucune consigne de resserrement. Un test du banc a envoyé 24 photos SANS
-         objet-repère en affirmant qu'il y en avait un : les modèles ont répondu
-         24 fois sur 24 « referenceFound: true », en fabriquant au passage une
-         mesure en pixels. Autoriser ce booléen à resserrer la fourchette revient
-         donc à resserrer sur une déclaration invérifiable. */
-      if (!ctx.plateDiameterCm) {
-        lines.push('Si ce repère a une épaisseur connue et repose à plat, sers-t\'en aussi');
-        lines.push('comme règle VERTICALE pour juger la hauteur de ce qu\'il y a dans l\'assiette.');
+    var referenceMode = ctx.referenceMode === 'glucovision-card-v1'
+      ? 'glucovision-card-v1' : 'none';
+    var measurements = validViewMeasurements(ctx.viewMeasurements, ctx.imageCount, referenceMode);
+    if (referenceMode === 'glucovision-card-v1') {
+      lines.push('MODE CARTE GLUCOVISION demandé. La carte visuelle n\'est jamais une preuve');
+      lines.push('et tu ne dois ni la détecter, ni la mesurer en pixels, ni déduire sa taille.');
+      if (measurements.length) {
+        lines.push(measurements.length + ' vue(s) possèdent une vérification native ARCore ci-dessous.');
+      } else {
+        lines.push('AUCUNE VUE N\'A DE VÉRIFICATION NATIVE : ignore totalement la carte visible');
+        lines.push('et ne prétends pas avoir calibré l\'échelle. Estime les portions à vue.');
       }
     } else {
-      lines.push(depth
-        ? 'Aucun objet-repère visuel : utilise l\'échelle ARCore mesurée ci-dessous.'
-        : 'Aucun objet-repère : estime l\'échelle via l\'assiette/les couverts et baisse la confiance.');
+      lines.push('MODE RAPIDE SANS CARTE : aucune échelle métrique native n\'est fournie.');
+      lines.push('Estime les portions visuellement sans déclarer de mesure réelle.');
     }
     if (ctx.imageCount > 1) {
       lines.push('Il y a ' + ctx.imageCount + ' angles du MÊME repas : croise-les pour le volume (hauteur incluse).');
@@ -199,21 +170,20 @@
       lines.push('Une seule vue : tu ne vois pas directement la hauteur/épaisseur — estime-la et');
       lines.push('signale-la comme seule inconnue géométrique (une photo de côté la lèverait).');
     }
-    if (depth) {
-      var depthScope = ctx.imageCount > 1
-        ? ' POUR L\'IMAGE ' + depth.viewIndex + '/' + ctx.imageCount + ' UNIQUEMENT'
-        : '';
-      lines.push('ÉCHELLE ARCORE EXPÉRIMENTALE VALIDÉE' + depthScope + ' : à ' + depth.distanceCm +
+    measurements.forEach(function (measurement) {
+      var depth = measurement.depth;
+      lines.push('MESURE NATIVE VÉRIFIÉE POUR IMAGE ' + measurement.viewIndex + '/' +
+        ctx.imageCount + ' UNIQUEMENT : à ' + depth.distanceCm +
         ' cm de l\'objectif, le champ de cette image mesure environ ' + depth.fieldWidthCm +
-        ' × ' + depth.fieldHeightCm + ' cm (' + depth.cmPerPixel + ' cm/pixel).');
+        ' × ' + depth.fieldHeightCm + ' cm.');
       lines.push('Utilise cette mesure uniquement comme échelle géométrique horizontale pour');
-      lines.push('les dimensions visibles dans cette image : elle prime sur une échelle devinée.');
-      if (ctx.imageCount > 1) {
-        lines.push('Ne l\'applique à aucun autre angle : leur perspective et leur distance diffèrent.');
-      }
+      lines.push('le plan de la table dans cette image : elle prime sur une échelle devinée.');
+      lines.push('Elle ne mesure pas directement le dessus d’un aliment surélevé : conserve');
+      lines.push('l’incertitude de hauteur et croise les angles au lieu d’inventer une correction.');
+      lines.push('Ne l\'applique à aucun autre angle : leur perspective et leur distance diffèrent.');
       lines.push('Ne déduis JAMAIS une masse ni des glucides');
       lines.push('d\'un éventuel volumeCm3 : cette donnée expérimentale n\'est pas étalonnée.');
-    }
+    });
     if (ctx.notes && ctx.notes.trim()) {
       lines.push('Précisions de l\'utilisateur (fiables, à intégrer) : ' + ctx.notes.trim());
     }
@@ -251,27 +221,83 @@
     return lines.join('\n');
   }
 
-  function validDepthScale(raw, imageCount) {
-    if (!raw || raw.scaleOk !== true || raw.fresh === false) return null;
-    var width = strictNum(raw.fieldWidthCm);
-    var height = strictNum(raw.fieldHeightCm);
-    var distance = strictNum(raw.distanceCm);
-    var scale = strictNum(raw.cmPerPixel);
-    if (!(width > 1 && width <= 250 && height > 1 && height <= 250 &&
-          distance >= 5 && distance <= 500 && scale > 0 && scale <= 5)) return null;
+  /* Frontière de confiance indépendante de l'interface : un historique, une
+     file ou un appel direct peut être forgé. Les trois validations positives
+     (carte, fraîcheur, échelle) doivent être présentes sur CHAQUE vue. */
+  function hasVerifiedCardContract(raw) {
+    if (!raw || typeof raw !== 'object' || raw.cardRequested !== true ||
+        raw.cardVerified !== true || raw.cardFresh !== true ||
+        raw.cardSchema !== 'glucovision-card-v1' || raw.cardName !== 'glucovision-card' ||
+        raw.cardTrackingMethod !== 'FULL_TRACKING' ||
+        !/^(card|card\+depth)$/.test(raw.scaleSource || '')) return false;
+    var observations = strictNum(raw.cardObservations);
+    var width = strictNum(raw.cardWidthCm), height = strictNum(raw.cardHeightCm);
+    if (observations == null || observations !== Math.round(observations) ||
+        observations < 4 || observations > 1000 || width == null || height == null ||
+        Math.abs(width - 8.56) > 0.05 || Math.abs(height - 5.398) > 0.05) return false;
+    return raw.scaleSource !== 'card+depth' ||
+      (raw.cardDepthCompared === true && raw.cardDepthAgrees === true);
+  }
+
+  function validViewMeasurements(raw, imageCount, referenceMode) {
+    if (referenceMode !== 'glucovision-card-v1' || !Array.isArray(raw)) return [];
     var count = strictNum(imageCount);
-    count = count == null ? 1 : Math.round(count);
-    var view = strictNum(raw.viewIndex);
-    if (count > 1 && (view == null || view !== Math.round(view) || view < 1 || view > count)) {
-      return null;
-    }
-    return {
-      fieldWidthCm: Math.round(width * 10) / 10,
-      fieldHeightCm: Math.round(height * 10) / 10,
-      distanceCm: Math.round(distance * 10) / 10,
-      cmPerPixel: Math.round(scale * 10000) / 10000,
-      viewIndex: count > 1 ? view : 1
-    };
+    if (count == null || count !== Math.round(count) || count < 1 || count > 6) return [];
+    var seen = {};
+    return raw.map(function (measurement) {
+      if (!measurement || typeof measurement !== 'object') return null;
+      var depth = measurement.depth;
+      var reference = measurement.reference;
+      var view = strictNum(measurement.viewIndex);
+      if (!depth || typeof depth !== 'object' || !reference || typeof reference !== 'object' ||
+          depth.scaleOk !== true || depth.fresh !== true || depth.cardMode !== true ||
+          !hasVerifiedCardContract(depth) ||
+          reference.mode !== 'glucovision-card-v1' || !hasVerifiedCardContract(reference) ||
+          reference.scaleSource !== depth.scaleSource ||
+          view == null || view !== Math.round(view) || view < 1 || view > count || seen[view]) {
+        return null;
+      }
+      var width = strictNum(depth.fieldWidthCm);
+      var height = strictNum(depth.fieldHeightCm);
+      var distance = strictNum(depth.distanceCm);
+      var scale = strictNum(depth.cmPerPixel);
+      if (!(width > 1 && width <= 250 && height > 1 && height <= 250 &&
+            distance >= 5 && distance <= 500 && scale > 0 && scale <= 5)) return null;
+      seen[view] = true;
+      var cardObservations = strictNum(depth.cardObservations);
+      var tracking = typeof depth.cardTrackingMethod === 'string' &&
+        depth.cardTrackingMethod.length <= 120 ? depth.cardTrackingMethod : '';
+      var cleanReference = {
+        mode: 'glucovision-card-v1', cardVerified: true, cardFresh: true,
+        cardSchema: 'glucovision-card-v1', scaleSource: depth.scaleSource
+      };
+      var cleanDepth = {
+        scaleOk: true,
+        fresh: true,
+        cardMode: true,
+        cardVerified: true,
+        cardFresh: true,
+        cardSchema: 'glucovision-card-v1',
+        scaleSource: depth.scaleSource,
+        fieldWidthCm: Math.round(width * 10) / 10,
+        fieldHeightCm: Math.round(height * 10) / 10,
+        distanceCm: Math.round(distance * 10) / 10,
+        cmPerPixel: Math.round(scale * 10000) / 10000
+      };
+      if (cardObservations != null && cardObservations >= 0 && cardObservations <= 1000000) {
+        cleanReference.cardObservations = cardObservations;
+        cleanDepth.cardObservations = cardObservations;
+      }
+      if (tracking) {
+        cleanReference.cardTrackingMethod = tracking;
+        cleanDepth.cardTrackingMethod = tracking;
+      }
+      return {
+        viewIndex: view,
+        reference: cleanReference,
+        depth: cleanDepth
+      };
+    }).filter(Boolean).sort(function (a, b) { return a.viewIndex - b.viewIndex; });
   }
 
   /* Calibration personnelle : ce que les repas déjà mesurés par l'utilisateur
@@ -582,8 +608,7 @@
     '  "overallConfidence": "low" | "medium" | "high",',
     '  "glycemicSpeed": "rapide" | "moderee" | "lente",',
     '  "glycemicNote": "ce qui, dans ce repas, détermine la vitesse d\'absorption",',
-    '  "notes": "LA question qui resserrerait le plus l\'estimation",',
-    '  "referenceUsed": ""',
+    '  "notes": "LA question qui resserrerait le plus l\'estimation"',
     "}"
   ].join('\n');
 
@@ -828,17 +853,21 @@
   function sanitize(result, ctx) {
     result = result && typeof result === 'object' ? result : {};
     var fromText = !(ctx && ctx.imageCount);
-    var refAsked = !fromText && !!(ctx && ctx.referenceObject && ctx.referenceObject !== 'none');
+    var referenceMode = !fromText && ctx && ctx.referenceMode === 'glucovision-card-v1'
+      ? 'glucovision-card-v1' : 'none';
+    var verifiedViews = validViewMeasurements(ctx && ctx.viewMeasurements,
+      ctx && ctx.imageCount, referenceMode);
+    var refAsked = referenceMode === 'glucovision-card-v1';
 
-    /* Le repère ne compte que si le modèle l'a RÉELLEMENT trouvé.
-       Auparavant on se fiait au réglage de l'utilisateur : dès qu'un repère
-       était sélectionné, la marge d'erreur était resserrée de 6 points — même
-       si la pompe était hors cadre, masquée ou floue, et que le modèle avait
-       donc estimé à vue. C'était une fausse précision affichée au moment
-       exact où une dose d'insuline est calculée.
-       Faute de réponse explicite, on retombe sur « non trouvé » : mieux vaut
-       une marge trop large qu'une marge trop serrée. */
-    var refFound = refAsked && result.referenceFound === true;
+    /* Les champs referenceFound/referenceUsed éventuellement inventés par le
+       modèle sont intentionnellement ignorés. La seule preuve est le contrat
+       natif strict, revalidé ici même si l'appel vient d'une reprise ou file. */
+    var refFound = refAsked && verifiedViews.length > 0;
+    var referenceUsed = refFound
+      ? 'Carte GlucoVision vérifiée nativement — vue' +
+        (verifiedViews.length > 1 ? 's ' : ' ') +
+        verifiedViews.map(function (view) { return view.viewIndex; }).join(', ')
+      : '';
     var clarification = sanitizeClarification(result.clarification);
     var rawBlocking = [];
     var rawTotal = strictNum(result.totalCarbsG);
@@ -921,13 +950,15 @@
       fromText: fromText,
       refAsked: refAsked,
       refFound: refFound,
+      referenceVerifiedViews: verifiedViews.map(function (view) { return view.viewIndex; }),
+      referenceExpectedViews: fromText ? 0 : Math.max(0, Math.round(strictNum(ctx.imageCount) || 0)),
       clarification: clarification,
       seen: (result.seen || '').toString().trim(),
       glycemicSpeed: result.glycemicSpeed,
       _modelGlycemicSpeed: result.glycemicSpeed,
       glycemicNote: result.glycemicNote || '',
       notes: result.notes || '',
-      referenceUsed: result.referenceUsed || '',
+      referenceUsed: referenceUsed,
       /* Les contradictions de la réponse BRUTE ne doivent pas disparaître à la
          première édition. Elles restent séparées des garde-fous recalculables
          afin qu'une reprise manuelle puisse les lever explicitement, jamais
@@ -1238,7 +1269,7 @@
     CLARIF_SEUIL_G: CLARIF_SEUIL_G,
     buildPhotoPrompt: buildUserPrompt,
 
-    /* images: [{base64, mediaType}], ctx: {referenceObject, plateDiameterCm, notes, imageCount},
+    /* images: [{base64, mediaType}], ctx: {referenceMode, viewMeasurements, notes, imageCount},
        settings: {provider, apiKeys, models}. Retourne une Promise du résultat normalisé. */
     estimate: function (images, ctx, settings) {
       return estimateProvider(settings.provider || 'claude', images, ctx, settings);

@@ -109,6 +109,53 @@ test('une disponibilité ARCore transitoire est retentée', async () => {
   assert.equal(calls, 2);
 });
 
+test('le mode carte est transmis au natif et toutes ses preuves sont conservées', async () => {
+  let request = null;
+  const sandbox = env({
+    depth: {
+      available: () => Promise.resolve({ supported: true, installed: true }),
+      capture: (value) => {
+        request = value;
+        return Promise.resolve({
+          jpegBase64: 'aGVsbG8=', scaleOk: true, fresh: true,
+          fieldWidthCm: 30, fieldHeightCm: 20, distanceCm: 60, cmPerPixel: 0.02,
+          cardRequested: true, cardVerified: true, cardFresh: true,
+          cardSchema: 'glucovision-card-v1', scaleSource: 'card',
+          cardTrackingMethod: 'augmented-image', cardObservations: 8,
+          cardWidthCm: 8.56, cardHeightCm: 5.398,
+          cardDepthCompared: true, cardDepthAgrees: true
+        });
+      }
+    }
+  });
+  const got = await sandbox.Native.depth.capture({ cardMode: true, forgedOption: 'ignored' });
+  assert.deepEqual(JSON.parse(JSON.stringify(request)), { cardMode: true });
+  assert.equal(got.depth.cardMode, true);
+  assert.equal(got.depth.cardVerified, true);
+  assert.equal(got.depth.cardFresh, true);
+  assert.equal(got.depth.cardSchema, 'glucovision-card-v1');
+  assert.equal(got.depth.scaleSource, 'card');
+  assert.equal(got.depth.cardObservations, 8);
+  assert.equal(got.depth.cardWidthCm, 8.56);
+});
+
+test('des validations de carte absentes restent strictement fausses', async () => {
+  const sandbox = env({
+    depth: {
+      available: () => Promise.resolve({ supported: true, installed: true }),
+      capture: () => Promise.resolve({
+        jpegBase64: 'aGVsbG8=', scaleOk: true,
+        fieldWidthCm: 30, fieldHeightCm: 20, distanceCm: 60, cmPerPixel: 0.02
+      })
+    }
+  });
+  const got = await sandbox.Native.depth.capture({ cardMode: true });
+  assert.equal(got.depth.fresh, false);
+  assert.equal(got.depth.cardVerified, false);
+  assert.equal(got.depth.cardFresh, false);
+  assert.equal(got.depth.cardSchema, '');
+});
+
 test('une erreur de lecture du Keystore n’est jamais confondue avec une clé absente', async () => {
   const sandbox = env({ secureGet: () => Promise.reject(new Error('keystore locked')) });
   await assert.rejects(sandbox.Native.secure.load(['gemini']), /keystore locked/i);
@@ -145,7 +192,7 @@ test('une erreur de lecture photo ne devient pas zéro octet rassurant', async (
   await assert.rejects(sandbox.Native.photos.size(), /EACCES/);
 });
 
-test('l’APK v80 exclut les données de santé du cloud et du transfert Android', () => {
+test('l’APK v84 exclut les données de santé et impose le contrat natif de la carte', () => {
   const workflow = fs.readFileSync(path.join(ROOT, '.github/workflows/android.yml'), 'utf8');
   const modern = fs.readFileSync(
     path.join(ROOT, 'android-res/xml/data_extraction_rules.xml'), 'utf8');
@@ -153,8 +200,8 @@ test('l’APK v80 exclut les données de santé du cloud et du transfert Android
   const app = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
   assert.match(workflow, /android:dataExtractionRules="@xml\/data_extraction_rules"/);
   assert.match(workflow, /android:fullBackupContent="@xml\/backup_rules"/);
-  assert.match(workflow, /minimum_native_floor=2080/);
-  assert.match(app, /MIN_NATIVE_BUILD = 2080/);
+  assert.match(workflow, /minimum_native_floor=2084/);
+  assert.match(app, /MIN_NATIVE_BUILD = 2084/);
   assert.match(modern, /<cloud-backup/);
   assert.match(modern, /<device-transfer>/);
   assert.ok((modern.match(/<exclude /g) || []).length >= 10);

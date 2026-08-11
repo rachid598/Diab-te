@@ -17,27 +17,50 @@ application Android.
 | | |
 |---|---|
 | **Web (PWA)** | **[rachid598.github.io/Diab-te](https://rachid598.github.io/Diab-te/)** — installable depuis le navigateur |
-| **Android (APK de test ARCore)** | **[glucovision.apk](https://github.com/rachid598/Diab-te/releases/download/apk-codex/glucovision.apk)** — canal `codex`/`codex-2`, signé comme l'application existante |
+| **Android (APK de test ARCore)** | **[glucovision.apk](https://github.com/rachid598/Diab-te/releases/download/apk-codex/glucovision.apk)** — branche et canal uniques `codex`, signé comme l'application existante |
 
 L'APK se met à jour **tout seul** : il vérifie au lancement s'il existe une version plus
 récente du contenu web, la télécharge et propose « Actualiser ». Une réinstallation n'est
 nécessaire que si une capacité **native** est ajoutée. Un bouton
 *Réglages → Vérifier les mises à jour* force le contrôle et dit précisément où ça bloque.
 
+Le dépôt ne maintient plus deux versions concurrentes « avec » et « sans » relief. La
+branche unique **`codex`** produit la même application Android et conserve le même
+`applicationId`, la même clé de signature et le même canal OTA. ARCore est une capacité
+**optionnelle** dans cet APK : le parcours photo classique reste disponible si le téléphone
+n'est pas compatible, si la carte n'est pas suivie ou si l'utilisateur ne l'active pas.
+
 ---
 
-## Trois façons d'estimer
+## Trois modes, dont deux parcours photo
 
-**📷 Photo** — une à six vues du repas. Aucun repère n'est sélectionné par défaut. Un
-**objet-repère de taille connue** peut être posé à côté de l'assiette, mais il ne réduit pas
-à lui seul la fourchette d'incertitude : le modèle doit d'abord déclarer qu'il l'a réellement
-retrouvé, et l'échelle reste une aide visuelle, pas une mesure certifiée.
+**📷 Photo libre** — une à six vues du repas, sans matériel particulier. Deux angles
+complémentaires — dessus puis vue oblique — restent plus utiles qu'une rafale presque
+identique. Ce parcours ne revendique aucune échelle métrique : les portions restent estimées
+visuellement.
 
-Dans l'APK Android compatible, le bouton optionnel **Photo mesurée** utilise ARCore Depth
-après un balayage du téléphone. Il transmet au modèle l'échelle métrique du champ
-photographié seulement si plusieurs observations fraîches et stables concordent. Le relief
-et le volume restent expérimentaux et ne sont jamais convertis directement en masse ou en
-glucides.
+**▰ Photo avec carte repère (bêta)** — télécharge
+**[la carte GlucoVision imprimable](glucovision-card.svg)**, imprime-la sur papier mat à
+**100 % sans ajustement**, puis vérifie avec une règle que sa ligne témoin mesure exactement
+50 mm. Pose-la entièrement visible, à plat et sur le même plan que le repas ; ne la tiens pas
+en main et ne la masque pas avec l'assiette. Elle fournit au traitement un motif connu et une
+taille physique de 85,60 × 53,98 mm. Elle ne pèse pas les aliments, ne connaît pas leur
+densité et ne transforme pas une photo en mesure médicale. Si elle n'est pas détectée de
+façon fiable, le résultat doit rester une estimation photo libre.
+
+Le motif est volontairement asymétrique, mat et riche en détails non répétitifs. L'outil
+officiel ARCore `arcoreimg` 1.54.0 lui attribue **95/100** (seuil recommandé : 75) : ce score
+évalue la facilité de suivi du motif, **pas** la précision des glucides ni des portions.
+
+- SVG imprimable : `008fd2ac738425f3fec2d2005f1b7e75dbf0d27f96b5909c2fe85f1c8cb79bc9`
+- PNG embarqué : `55e41e95feafe666b6fb245ac8e0df5669e2f49e9b62d61f7359c7b9112a15ae`
+
+Dans l'APK Android compatible, le bouton optionnel **Photo mesurée** suit la carte avec
+ARCore et calcule le plan métrique à partir de sa pose. Il transmet l'échelle du champ
+photographié seulement si la carte est encore visible, en suivi complet, fraîche et stable
+sur plusieurs observations pour cette vue précise. Si la profondeur ARCore est aussi
+disponible, elle doit concorder avec la carte avant que le relief expérimental soit conservé.
+Le volume n'est jamais converti directement en masse ou en glucides.
 
 **✍️ Description** — aucune photo : tu écris ce que tu manges. Le modèle interprète les
 portions courantes françaises. La marge d'erreur est structurellement plus large, et l'app
@@ -59,8 +82,9 @@ scannés et les corrections personnelles enrichissent la recherche locale du té
 La difficulté n'est pas de reconnaître l'aliment, c'est d'**estimer la portion**. La méthode
 est imposée au modèle comme consigne :
 
-1. **Chercher une échelle exploitable** (repère visible ou mesure ARCore acceptée), sinon
-   annoncer honnêtement que la portion reste estimée à vue.
+1. **N'accepter que l'échelle native de la carte vérifiée pour la vue concernée** ; une carte
+   simplement visible n'est pas une mesure. Sans preuve native, annoncer que la portion reste
+   estimée à vue.
 2. **Croiser les angles** pour la hauteur, invisible sur une vue de dessus seule.
 3. **Volume → masse** via la densité et la consistance (riz aéré ou tassé, mie dense, friture).
 4. **Masse × densité glucidique**, sans oublier les glucides cachés (sauces, panure, sucre).
@@ -77,9 +101,10 @@ saura mauvaise vingt secondes plus tard, sans savoir que la cause était la phot
 vue : c'est la principale source d'erreur sur une portion. L'app le dit dès la première
 vue, au moment où l'on peut encore agir.
 
-**Le repère doit être réellement trouvé.** Le modèle déclare s'il a effectivement localisé
-l'objet-repère. Sinon la marge d'erreur reste large et un bandeau le signale — plutôt
-qu'une fausse précision affichée au moment exact où une dose se calcule.
+**Le modèle ne décide jamais si le repère est valide.** ARCore doit confirmer localement la
+carte, son identité, sa pose, sa fraîcheur et sa stabilité dans la photo concernée. Les champs
+`referenceFound` ou `referenceUsed` que le modèle pourrait inventer sont ignorés. Sans cette
+preuve native, la marge d'erreur reste celle d'une photo libre.
 
 **Contrôle de vraisemblance.** Le total brut, sa fourchette et la somme des aliments sont
 validés avant affichage. Une réponse incohérente ou supérieure à 400 g est bloquée au lieu
@@ -193,8 +218,9 @@ L'APK n'est pas qu'un habillage : il lève des limites réelles du navigateur.
 - **File d'attente hors-ligne** — au restaurant sans réseau, le repas est gardé et analysé
   au retour de la connexion.
 - **Raccourcis** — appui long sur l'icône pour ouvrir directement l'appareil photo.
-- **ARCore Depth expérimental** — échelle métrique acceptée uniquement avec profondeur
-  fraîche, confiance suffisante, déplacement réel et plusieurs observations concordantes.
+- **Carte ARCore expérimentale** — échelle issue de la pose d'une carte dédiée, acceptée
+  uniquement en suivi complet, frais et stable. La profondeur n'ajoute un relief que si sa
+  géométrie concorde avec celle de la carte.
 
 ## Suivi de la consommation
 
@@ -230,10 +256,11 @@ node scripts/render-icons.mjs     # régénère les PNG d'icônes depuis icons/*
 ```
 
 JavaScript sans dépendance à l'exécution (modules IIFE exposant des globales), aucun
-transpileur, aucun framework. L'APK est produit par GitHub Actions (Capacitor 8, Node 22) :
-sur les branches `codex` et `codex-2`, l'APK est publié sous `apk-codex` et le manifeste web sous
-`ota-codex`. Chaque archive OTA versionnée (`ota-v73`, etc.) est immuable et vérifiée par
-SHA-256 avant installation.
+transpileur, aucun framework. L'APK est produit par GitHub Actions (Capacitor 8, Node 22)
+**uniquement depuis `codex`**. Toute autre branche est refusée avant le build. L'APK est
+publié sous `apk-codex` et le manifeste web sous `ota-codex`. Chaque archive OTA versionnée
+(`ota-v73`, etc.) est immuable et vérifiée par SHA-256 avant installation. Les anciens
+canaux de variantes restent des archives de téléchargement ; ils ne sont plus alimentés.
 
 | Fichier | Rôle |
 |---|---|
@@ -248,6 +275,8 @@ SHA-256 avant installation.
 | `js/report.js` | synthèse pour la consultation |
 | `js/bench.js` | banc d'essai sur les repas de l'utilisateur |
 | `js/app.js` | interface |
+| `glucovision-card.svg` | carte repère à imprimer à 100 %, format physique 85,60 × 53,98 mm |
+| `android-card/glucovision-card.png` | même motif haute définition embarqué dans l'APK |
 | `bench/` | banc d'essai hors ligne sur Nutrition5k (voir [BENCHMARK.md](BENCHMARK.md)) |
 
 ---

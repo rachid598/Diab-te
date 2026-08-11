@@ -90,11 +90,14 @@
         .then(function (imgs) {
           var ctx = c.ctx || {};
           return Estimator.estimateWith(entry.provider, imgs, {
-            referenceObject: ctx.referenceObject || 'none',
-            plateDiameterCm: ctx.plateDiameterCm || null,
+            /* Le banc ne recharge qu'une photo, alors que le contexte peut
+               provenir d'un repas multi-vues. Il ne peut donc pas rattacher
+               honnêtement une ancienne mesure à cette image : parcours rapide
+               explicite, sans conversion du contrat legacy. */
+            referenceMode: 'none',
+            viewMeasurements: [],
             notes: ctx.notes || '',
             extras: ctx.extras || '',
-            depth: ctx.depth || null,
             imageCount: imgs.length
           }, forced);
         })
