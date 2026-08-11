@@ -8,6 +8,7 @@ const { ManualCalc } = loadScript('js/manual.js');
 
 test('le mode manuel refuse les grammes négatifs, infinis ou démesurés', () => {
   assert.equal(ManualCalc.normalizeGrams('-1'), null);
+  assert.equal(ManualCalc.normalizeGrams('0'), null, 'une ligne vide ne peut pas confirmer 0 g');
   assert.equal(ManualCalc.normalizeGrams(Infinity), null);
   assert.equal(ManualCalc.normalizeGrams('5001'), null);
   assert.equal(ManualCalc.normalizeGrams('12,5'), 12.5);

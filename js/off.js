@@ -1,5 +1,5 @@
 /* off.js — accès à OpenFoodFacts (base ouverte et gratuite de produits du commerce).
-   Sert à récupérer les glucides EXACTS d'un produit emballé, par recherche de nom
+   Sert à récupérer les glucides renseignés pour un produit emballé, par recherche de nom
    ou par code-barres. Rien n'est stocké côté serveur ; on interroge l'API publique.
 
    IMPORTANT — choix des serveurs :
@@ -17,22 +17,17 @@
 
   var BASE = 'https://world.openfoodfacts.org';
   /* quantity / product_quantity servent au calcul de portion : ils disent ce que
-     PÈSE le paquet, ce qu'aucune photo ne peut donner. serving_size n'est PAS
-     repris : il est saisi par les contributeurs et souvent absurde (le Prince au
-     chocolat annonce une portion de 250 g, soit la moitié du paquet). Un chiffre
-     faux qui a l'air officiel est pire que pas de chiffre. */
-  var FIELDS = 'code,product_name,product_name_fr,brands,nutriments,serving_quantity,' +
+     PÈSE le paquet. Un nombre trouvé dans le texte reste une suggestion, jamais
+     une unité consommable confirmée. */
+  var FIELDS = 'code,product_name,product_name_fr,brands,nutriments,nutrition_data_per,' +
     'quantity,product_quantity,product_quantity_unit';
   var native = window.Native && window.Native.isApp;
+  var USER_AGENT = 'GlucoVision/1.81 (https://github.com/rachid598/Diab-te)';
 
   var SEARCH_URLS = [
     function (q) {
       return BASE + '/cgi/search.pl?search_terms=' + encodeURIComponent(q) +
         '&search_simple=1&action=process&json=1&page_size=50&fields=' + FIELDS;
-    },
-    function (q) {
-      return BASE + '/api/v2/search?search_terms=' + encodeURIComponent(q) +
-        '&fields=' + FIELDS + '&page_size=50';
     }
   ];
 
@@ -48,7 +43,7 @@
 
     // APK : requête native, aucun blocage d'origine croisée.
     if (native) {
-      return window.Native.httpJson(url, ms).then(function (res) {
+      return window.Native.httpJson(url, ms, { 'User-Agent': USER_AGENT }).then(function (res) {
         if (!res || res.status >= 400) {
           var err = new Error('HTTP ' + ((res && res.status) || 0));
           err.status = (res && res.status) || 0;
@@ -107,55 +102,60 @@
     if (s === 408) {
       return new Error('Délai dépassé : réseau lent. Réessaie, ou utilise le scan code-barres.');
     }
+    if (s === 429) {
+      return new Error('OpenFoodFacts reçoit trop de demandes. Attends une minute puis réessaie.');
+    }
     return new Error('Recherche en ligne injoignable (pas de connexion ?). ' +
       'Le mode manuel hors-ligne et tes aliments perso restent disponibles.');
   }
 
-  // Transforme un produit OFF en aliment { n, brand, carb, code, serving }.
+  // Transforme un produit OFF en aliment { n, brand, carb, code, pack }.
   // Accepte les deux formats (brands = "A, B" ou ["A","B"]).
   function parse(p) {
     if (!p) return null;
     var nutr = p.nutriments || {};
+    /* Le champ sans suffixe dépend de nutrition_data_per et peut être exprimé
+       PAR PORTION. Seul carbohydrates_100g est une base sûre et normalisée. */
     var carb = nutr['carbohydrates_100g'];
-    if (carb == null) carb = nutr['carbohydrates'];
     carb = parseFloat(carb);
     if (!isFinite(carb) || carb < 0 || carb > 100) return null; // sans glucides exploitables
     var name = (p.product_name_fr || p.product_name || '').trim();
     if (!name) return null;
     var brand = Array.isArray(p.brands) ? (p.brands[0] || '') : (p.brands || '').split(',')[0];
-    var serving = parseFloat(p.serving_quantity);
     return {
       n: name,
       brand: (brand || '').trim(),
       carb: Math.round(carb * 10) / 10,
-      code: p.code || '',
-      serving: (isFinite(serving) && serving > 0) ? Math.round(serving) : null,
+      code: (window.Storage && window.Storage.canonicalBarcode)
+        ? (window.Storage.canonicalBarcode(p.code || '') || '') : (p.code || ''),
+      serving: null,
       pack: readPack(p)
     };
   }
 
-  /* Ce que pèse le paquet, et — quand l'emballage l'annonce lui-même sous la
-     forme « 12 x 25 g » — combien d'unités il contient.
-
-     Deux sources, dans cet ordre : le champ numérique product_quantity, propre
-     mais qui ne dit jamais le nombre d'unités ; puis le texte libre quantity,
-     moins sûr mais seul à porter parfois le multipack. On garde le nombre
-     d'unités du texte même quand le poids vient du champ numérique. */
+  /* product_quantity est déjà normalisé par OFF en g ou ml. quantity peut
+     suggérer un compte, mais « 2 × 250 g » peut désigner deux sachets et non
+     deux biscuits : cette suggestion ne devient jamais une confirmation. */
   function readPack(p) {
     var libre = window.Portion ? window.Portion.parseQuantity(p.quantity) : null;
     var total = parseFloat(p.product_quantity);
     var unite = String(p.product_quantity_unit || '').toLowerCase();
-    if (!(isFinite(total) && total > 0)) {
-      if (!libre) return null;
-      return { total: libre.total, unites: libre.unites, unite: libre.unite };
-    }
+    if (!(isFinite(total) && total > 0)) total = libre && libre.total;
+    if (!(isFinite(total) && total > 0)) return null;
+    var baseUnit = unite === 'ml' ? 'ml' : (libre ? libre.unite : 'g');
+    var suggere = libre && libre.unitesSuggerees;
+    var parTexte = libre && libre.parUniteSuggeree;
+    var ratio = suggere > 0 ? total / suggere : null;
     return {
       total: Math.round(total * 100) / 100,
-      unites: (libre && libre.unites) || null,
-      // Le champ d'unité est parfois vide : on retombe sur ce que dit le texte.
-      unite: (unite === 'ml' || unite === 'l' || unite === 'cl') ? 'ml'
-             : (unite === 'g' || unite === 'kg') ? 'g'
-             : (libre ? libre.unite : 'g')
+      unitesSuggerees: suggere || null,
+      parUniteSuggeree: ratio || parTexte || null,
+      labelSuggere: (libre && libre.label) || '',
+      suggestionConflit: !!(ratio && parTexte &&
+        Math.abs(ratio - parTexte) / Math.max(ratio, parTexte) > 0.05),
+      rawQuantity: String(p.quantity || '').slice(0, 80),
+      unite: baseUnit,
+      confirme: false
     };
   }
 
@@ -177,8 +177,6 @@
        sur le suivant au lieu d'échouer. Renvoie une Promise d'un tableau. */
     search: function (query) {
       query = (query || '').trim();
-      if (query.length < 2) return Promise.resolve([]);
-
       var lastErr = null;
       var attempt = function (i) {
         if (i >= SEARCH_URLS.length) {
@@ -203,7 +201,8 @@
 
     // Recherche par code-barres : renvoie une Promise d'un aliment ou null.
     lookupBarcode: function (code) {
-      code = (code || '').replace(/\D/g, '');
+      code = (window.Storage && window.Storage.canonicalBarcode)
+        ? window.Storage.canonicalBarcode(code) : String(code || '').replace(/\D/g, '');
       if (!code) return Promise.resolve(null);
       var url = BASE + '/api/v2/product/' + encodeURIComponent(code) + '?fields=' + FIELDS;
       return fetchJson(url).then(function (data) {

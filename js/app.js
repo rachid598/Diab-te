@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '80'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '81'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -102,7 +102,7 @@
     });
   }
 
-  function hideModal(id) {
+  function hideModal(id, restoreFocus) {
     var modal = $(id);
     if (!modal) return;
     modal.hidden = true;
@@ -111,7 +111,7 @@
     activeModal = null;
     var target = modalReturnFocus;
     modalReturnFocus = null;
-    if (target && target.isConnected && !target.hidden) {
+    if (restoreFocus !== false && target && target.isConnected && !target.hidden) {
       requestAnimationFrame(function () { try { target.focus(); } catch (e) {} });
     }
   }
@@ -2892,6 +2892,7 @@
 
   // ---------- Recherche en ligne (OpenFoodFacts) + code-barres ----------
   var scanBusy = false, lastScanCode = null, lastScanAt = 0;
+  var scanGeneration = 0, offSearchGeneration = 0;
 
   function initOnlineTools() {
     var offGo = function () { runOffSearch($('off-search').value); };
@@ -2903,13 +2904,26 @@
     $('barcode-btn').addEventListener('click', openBarcode);
     $('close-barcode').addEventListener('click', closeBarcode);
     $('barcode-manual-go').addEventListener('click', function () {
-      var code = ($('barcode-manual').value || '').replace(/\D/g, '');
-      if (code) processBarcode(code);
-      else toast('Saisis un code-barres.');
+      var brut = $('barcode-manual').value || '';
+      var code = Storage.canonicalBarcode ? Storage.canonicalBarcode(brut) : String(brut).trim();
+      if (code) {
+        $('barcode-manual').removeAttribute('aria-invalid');
+        processBarcode(code);
+      } else {
+        $('barcode-manual').setAttribute('aria-invalid', 'true');
+        showBarcodeStatus('Saisis uniquement les chiffres d’un code EAN/UPC, pas un QR code ou une URL.');
+      }
+    });
+    $('barcode-manual').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); $('barcode-manual-go').click(); }
     });
   }
 
   function runOffSearch(query) {
+    /* Une nouvelle intention invalide immédiatement la précédente, y compris si
+       la nouvelle saisie est trop courte. Sans ce jeton, une réponse lente à A
+       pouvait remplacer les résultats déjà affichés pour B. */
+    var generation = ++offSearchGeneration;
     query = (query || '').trim();
     if (query.length < 2) { toast('Tape au moins 2 lettres avant de chercher en ligne.'); return; }
     var status = $('off-status'), box = $('off-results');
@@ -2917,9 +2931,11 @@
     status.hidden = false;
     status.innerHTML = '<div class="spinner"></div>Recherche « ' + escapeHtml(query) + ' » dans OpenFoodFacts…';
     OFF.search(query).then(function (list) {
+      if (generation !== offSearchGeneration) return;
       status.hidden = true;
       renderOffResults(list);
     }).catch(function (e) {
+      if (generation !== offSearchGeneration) return;
       status.hidden = true;
       /* OpenFoodFacts injoignable ou en panne. Les produits déjà rencontrés
          restent trouvables : c'est le seul moment où ce repli sert vraiment,
@@ -2960,10 +2976,14 @@
     });
   }
 
-  // Ajoute un produit OFF au repas (portion = taille de service si connue).
+  // Ouvre une vraie saisie en grammes. La « portion » contributive d'OFF
+  // n'est pas utilisée : elle peut être exprimée par portion, mal renseignée,
+  // ou valoir 100 g par défaut. L'utilisateur donne donc lui-même le poids.
   function addOffFood(f) {
-    var portions = f.serving ? [['1 portion', f.serving]] : [];
-    addFoodToMeal({ n: offName(f), carb: f.carb, portions: portions, custom: false });
+    addFoodToMeal({
+      n: offName(f), carb: f.carb, portions: [], custom: false,
+      startGrams: 0, focusGrams: true
+    });
   }
 
   function offName(f) {
@@ -2984,56 +3004,131 @@
      saisi par les contributeurs et régulièrement faux (le Prince au chocolat y
      annonce une portion de 250 g, soit la moitié du paquet). */
   var portionProduit = null;
+  var portionDefinitionConfirmed = false;
+  var portionSuggestionPending = false;
+
+  function portionNombre(id) {
+    var el = $(id);
+    return parseFloat(((el && el.value) || '').replace(',', '.'));
+  }
+
+  function portionMode() {
+    var direct = $('portion-mode-unit');
+    return direct && direct.checked ? 'unite' : 'paquet';
+  }
+
+  function setPortionMode(mode) {
+    var direct = mode === 'unite';
+    if ($('portion-mode-unit')) $('portion-mode-unit').checked = direct;
+    if ($('portion-mode-pack')) $('portion-mode-pack').checked = !direct;
+    if ($('portion-unit-fields')) $('portion-unit-fields').hidden = !direct;
+    if ($('portion-pack-fields')) $('portion-pack-fields').hidden = direct;
+  }
+
+  function portionFingerprint(total, unite) {
+    if (Storage.packageFingerprint) return Storage.packageFingerprint(total, unite);
+    var n = parseFloat(total);
+    return (isFinite(n) && n > 0) ? String(unite || 'g') + ':' + Math.round(n * 100) / 100 : '';
+  }
+
+  function packagingStillMatches(memoire, pack, unite) {
+    if (!memoire || memoire.confirmed === false) return false;
+    /* Un poids saisi/pesé directement pour une unité ne dépend pas du poids
+       total du paquet. Seule la méthode « total ÷ compte » est invalidée par
+       un changement de format. */
+    if (memoire.methode === 'unite') return memoire.parUnite > 0;
+    if (!pack || !(pack.total > 0)) return true;
+    var actuel = portionFingerprint(pack.total, unite);
+    var ancien = memoire.fingerprint || memoire.packageFingerprint ||
+      portionFingerprint(memoire.fingerprintTotal || memoire.total, memoire.fingerprintUnit || memoire.unite);
+    return !ancien || ancien === actuel;
+  }
+
+  function updatePortionSuggestion(message) {
+    var box = $('portion-suggestion');
+    if (!box) return;
+    box.hidden = !portionSuggestionPending;
+    if ($('portion-suggestion-text') && message) $('portion-suggestion-text').textContent = message;
+  }
 
   function showPortionCard(f) {
     var carte = $('portion-card');
     if (!carte) { addOffFood(f); return; }
     portionProduit = f;
 
-    /* Tout produit qui arrive jusqu'ici est gardé : c'est ce qui rend l'app
-       utilisable quand OpenFoodFacts est en panne ou qu'il n'y a pas de réseau.
-       setProduct refuse d'écraser une saisie personnelle par une réponse de la
-       base publique, la source est donc sûre. */
+    /* Le produit est conservé hors ligne, sans qu'une réponse OFF puisse
+       remplacer une correction personnelle déjà enregistrée. */
     if (f.code && Storage.setProduct) Storage.setProduct(f.code, f, f.source || 'off');
     renderLocalNote();
 
     var memoire = (f.code && Storage.getPackaging) ? Storage.getPackaging(f.code) : null;
     var pack = f.pack || null;
-    // La mémoire l'emporte : c'est TOI qui as compté, la base publique a deviné.
-    var total = (memoire && memoire.total) || (pack && pack.total) || '';
-    var unites = (memoire && memoire.unites) || (pack && pack.unites) || '';
-    var unite = (memoire && memoire.unite) || (pack && pack.unite) || 'g';
+    var unite = (pack && pack.unite) || (memoire && memoire.unite) || 'g';
+    var memoireValide = packagingStillMatches(memoire, pack, unite);
+    /* Le poids courant d'OFF gagne sur un ancien poids mémorisé. Ce qui est
+       personnel et durable, c'est le compte de biscuits, pas une fiche produit
+       qui peut avoir changé de format. */
+    var total = (pack && pack.total) || (memoireValide && memoire.total) || '';
+    var unites = (memoireValide && memoire.unites) ||
+      (pack && pack.unitesSuggerees) || '';
+    var poidsUnite = (memoireValide && memoire.parUnite) ||
+      (pack && pack.parUniteSuggeree) || '';
+    var mode = memoireValide && memoire.methode === 'unite' ? 'unite' : 'paquet';
+    var label = (memoireValide && memoire.label) || (pack && pack.labelSuggere) ||
+      (Portion.labelFromText && Portion.labelFromText(f.n)) || 'unité';
 
     $('portion-name').textContent = offName(f);
     $('portion-carb').textContent = fr(f.carb) + ' g de glucides pour 100 ' + unite +
-      (f.code ? ' · code ' + f.code : '');
+      ' · valeur d’étiquette à vérifier' + (f.code ? ' · code ' + f.code : '');
     $('portion-total').value = total;
     $('portion-units').value = unites;
-    $('portion-label').value = (memoire && memoire.label) || '';
+    $('portion-label').value = label;
     $('portion-eat').value = 1;
     $('portion-unite').textContent = unite;
+    if ($('portion-unit-weight')) $('portion-unit-weight').value = poidsUnite;
+    if ($('portion-unit-weight-unit')) $('portion-unit-weight-unit').textContent = unite;
+    setPortionMode(mode);
+
+    portionDefinitionConfirmed = !!memoireValide;
+    portionSuggestionPending = !portionDefinitionConfirmed && !!(
+      (pack && (pack.unitesSuggerees > 0 || pack.parUniteSuggeree > 0)) ||
+      (total > 0 && unites > 0)
+    );
+    var suggestionMessage = pack && pack.suggestionConflit
+      ? 'Les nombres trouvés sur la fiche se contredisent. Regarde le paquet et corrige-les avant de confirmer.'
+      : 'Suggestion lue sur la fiche produit. Vérifie le nombre d’unités sur ton paquet avant de confirmer.';
+    updatePortionSuggestion(suggestionMessage);
 
     carte.hidden = false;
     updatePortion();
-    /* Le champ manquant reçoit le curseur : après un scan, c'est presque
-       toujours le nombre d'unités, la seule chose que la base ignore. */
-    var vide = !total ? $('portion-total') : (!unites ? $('portion-units') : $('portion-eat'));
+    var vide = mode === 'unite'
+      ? (!(poidsUnite > 0) ? $('portion-unit-weight') : $('portion-eat'))
+      : (!(total > 0) ? $('portion-total') : (!(unites > 0) ? $('portion-units') : $('portion-eat')));
     carte.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    try { vide.focus(); } catch (e) {}
+    /* La fermeture du scanner ne restaure pas son propre focus. On attend le
+       rendu de la carte avant de cibler le premier champ utile. */
+    requestAnimationFrame(function () {
+      if (!portionProduit || !vide) return;
+      try { vide.focus(); } catch (e) {}
+    });
   }
 
   function hidePortionCard() {
     var carte = $('portion-card');
     if (carte) carte.hidden = true;
     portionProduit = null;
+    portionDefinitionConfirmed = false;
+    portionSuggestionPending = false;
   }
 
   function portionSaisie() {
     return {
-      total: parseFloat(($('portion-total').value || '').replace(',', '.')),
-      unites: parseFloat(($('portion-units').value || '').replace(',', '.')),
-      mange: parseFloat(($('portion-eat').value || '').replace(',', '.')),
-      label: ($('portion-label').value || '').trim()
+      methode: portionMode(),
+      total: portionNombre('portion-total'),
+      unites: portionNombre('portion-units'),
+      parUnite: portionNombre('portion-unit-weight'),
+      mange: portionNombre('portion-eat'),
+      label: ($('portion-label').value || '').trim() || 'unité'
     };
   }
 
@@ -3051,38 +3146,58 @@
     var unite = $('portion-unite').textContent || 'g';
     var res = $('portion-result');
     var btn = $('portion-add');
-    $('portion-eat-unit').textContent = nomUnite(s.label, s.mange || 1) + '(s)';
+    $('portion-eat-unit').textContent = nomUnite(s.label, s.mange || 1);
 
-    var r = Portion.calcule(s.total, s.unites, s.mange, portionProduit.carb);
+    var r = Portion.calculeUnites({
+      methode: s.methode, total: s.total, unites: s.unites,
+      parUnite: s.parUnite, mange: s.mange, pour100: portionProduit.carb
+    });
     if (!r) {
       btn.disabled = true;
+      btn.textContent = 'Complète les informations';
       res.className = 'portion-result';
-      res.textContent = !(s.total > 0)
-        ? 'Indique le poids du paquet (il est écrit sur l’emballage).'
-        : !(s.unites > 0)
-          ? 'Combien d’unités contient le paquet ? Compte-les une fois, c’est retenu.'
-          : 'Indique combien tu en manges.';
+      res.textContent = s.methode === 'unite'
+        ? (!(s.parUnite > 0) ? 'Indique le poids d’un ' + nomUnite(s.label, 1) + '.'
+          : 'Indique combien tu en manges.')
+        : (!(s.total > 0) ? 'Indique le poids total du paquet.'
+          : !(s.unites > 0 && Math.floor(s.unites) === s.unites)
+            ? 'Combien d’unités entières contient le paquet ?'
+            : 'Indique combien tu en manges.');
       return;
     }
-    btn.disabled = false;
-    res.className = 'portion-result ok';
+    btn.disabled = !portionDefinitionConfirmed;
+    res.className = 'portion-result ok' + (!portionDefinitionConfirmed ? ' needs-confirmation' : '');
     res.innerHTML =
       '1 ' + escapeHtml(nomUnite(s.label, 1)) + ' = <strong>' + fr(r.parUnite) + ' ' + unite + '</strong><br>' +
       fr(s.mange) + ' ' + escapeHtml(nomUnite(s.label, s.mange)) + ' = <strong>' +
-      fr(r.quantite) + ' ' + unite + '</strong> → <strong>' + Math.round(r.glucides) +
-      ' g de glucides</strong>';
+      fr(r.quantite) + ' ' + unite + '</strong> → <strong>' + fr(r.glucides) +
+      ' g de glucides</strong>' +
+      (!portionDefinitionConfirmed ? '<br><span>Vérifie puis confirme les données du paquet.</span>' : '') +
+      (r.depassePaquet ? '<br><span class="portion-warning">Attention : cela dépasse un paquet complet.</span>' : '');
+    if (portionDefinitionConfirmed) {
+      btn.textContent = 'Ajouter ' + fr(s.mange) + ' ' + nomUnite(s.label, s.mange) +
+        ' · ' + fr(r.glucides) + ' g';
+    } else {
+      btn.textContent = 'Vérifie le paquet pour continuer';
+    }
   }
 
   function ajouterPortion() {
     if (!portionProduit) return;
     var s = portionSaisie();
-    var r = Portion.calcule(s.total, s.unites, s.mange, portionProduit.carb);
-    if (!r) return;
+    var r = Portion.calculeUnites({
+      methode: s.methode, total: s.total, unites: s.unites,
+      parUnite: s.parUnite, mange: s.mange, pour100: portionProduit.carb
+    });
+    if (!r || !portionDefinitionConfirmed) return;
 
     if (portionProduit.code && Storage.setPackaging) {
       Storage.setPackaging(portionProduit.code, {
-        total: s.total, unites: s.unites, label: s.label,
-        unite: $('portion-unite').textContent
+        methode: s.methode, total: s.total, unites: s.unites,
+        parUnite: r.parUnite, label: s.label,
+        unite: $('portion-unite').textContent, confirmed: true,
+        fingerprintTotal: s.methode === 'paquet' ? s.total : null,
+        fingerprintUnit: $('portion-unite').textContent
       });
     }
 
@@ -3105,17 +3220,68 @@
     var el = $('off-local-note');
     if (!el || !Storage.countProducts) return;
     var n = Storage.countProducts();
-    el.textContent = n
-      ? 'Nécessite une connexion — sauf pour les ' + n +
-        ' produit(s) déjà scannés, gardés sur le téléphone.'
-      : 'Nécessite une connexion. Chaque produit scanné est ensuite gardé sur le téléphone.';
+    var reperes = Foods && Foods.all ? Foods.all.length : 0;
+    el.textContent = reperes + ' repères alimentaires fonctionnent hors ligne. ' +
+      (n
+        ? n + ' produit(s) scanné(s) sont aussi gardés sur ce téléphone.'
+        : 'Chaque produit scanné sera ensuite gardé sur ce téléphone.');
   }
 
   function initPortionCard() {
     if (!$('portion-card')) return;
-    ['portion-total', 'portion-units', 'portion-eat', 'portion-label'].forEach(function (id) {
-      $(id).addEventListener('input', updatePortion);
+    ['portion-total', 'portion-units', 'portion-unit-weight'].forEach(function (id) {
+      if (!$(id)) return;
+      $(id).addEventListener('input', function () {
+        /* Modifier le compte (ou le poids direct) vaut vérification explicite.
+           Modifier seulement le poids total ne valide jamais un compte suggéré
+           par OFF : « 2 × 250 g » peut encore être deux sous-paquets. */
+        if (id === 'portion-units' || id === 'portion-unit-weight' || !portionSuggestionPending) {
+          portionDefinitionConfirmed = true;
+          portionSuggestionPending = false;
+        }
+        updatePortionSuggestion();
+        updatePortion();
+      });
     });
+    ['portion-eat', 'portion-label'].forEach(function (id) {
+      if ($(id)) $(id).addEventListener('input', updatePortion);
+    });
+    ['portion-mode-pack', 'portion-mode-unit'].forEach(function (id) {
+      if (!$(id)) return;
+      $(id).addEventListener('change', function () {
+        setPortionMode(portionMode());
+        portionDefinitionConfirmed = false;
+        var s = portionSaisie();
+        portionSuggestionPending = s.methode === 'unite'
+          ? s.parUnite > 0
+          : s.total > 0 && s.unites > 0;
+        updatePortionSuggestion('Vérifie le poids utilisé par ce mode, puis confirme.');
+        updatePortion();
+      });
+    });
+    Array.from(document.querySelectorAll('[data-portion-eat]')).forEach(function (b) {
+      b.addEventListener('click', function () {
+        $('portion-eat').value = b.dataset.portionEat;
+        updatePortion();
+      });
+    });
+    if ($('portion-confirm-suggestion')) {
+      $('portion-confirm-suggestion').addEventListener('click', function () {
+        var s = portionSaisie();
+        var definitionComplete = s.methode === 'unite'
+          ? s.parUnite > 0
+          : s.total > 0 && s.unites > 0 && Math.floor(s.unites) === s.unites;
+        if (!definitionComplete) {
+          toast('Complète d’abord les informations du paquet.');
+          updatePortion();
+          return;
+        }
+        portionDefinitionConfirmed = true;
+        portionSuggestionPending = false;
+        updatePortionSuggestion();
+        updatePortion();
+      });
+    }
     $('portion-add').addEventListener('click', ajouterPortion);
     $('portion-close').addEventListener('click', hidePortionCard);
     // Sortie de secours : un produit qu'on pèse (pâte à tartiner, riz) n'a pas
@@ -3128,6 +3294,9 @@
 
   function openBarcode() {
     $('barcode-manual').value = '';
+    $('barcode-manual').removeAttribute('aria-invalid');
+    scanGeneration++;
+    codeEnCours = null;
     scanBusy = false; lastScanCode = null; lastScanAt = 0;
     $('barcode-status').hidden = true;
     $('barcode-unknown').hidden = true;
@@ -3141,17 +3310,21 @@
         lastScanCode = code; lastScanAt = now;
         processBarcode(code);
       }, function (err) {
-        showBarcodeStatus('📷 ' + err.message);
+        if (!scanBusy && activeModal === $('barcode-modal')) {
+          showBarcodeStatus('📷 ' + err.message);
+        }
       });
     } else {
       showBarcodeStatus('Scan caméra indisponible ici. Saisis le code-barres à la main ci-dessous.');
     }
   }
 
-  function closeBarcode() {
+  function closeBarcode(restoreFocus) {
     try { Barcode.stop(); } catch (e) {}
     scanBusy = false;
-    hideModal('barcode-modal');
+    scanGeneration++;
+    codeEnCours = null;
+    hideModal('barcode-modal', restoreFocus !== false);
   }
 
   function showBarcodeStatus(msg) {
@@ -3174,37 +3347,79 @@
      grosse, c'est celle qui contient ce que tu achètes. */
   var codeEnCours = null;
 
-  function processBarcode(code) {
+  function scanToujoursActif(generation, code) {
+    return generation === scanGeneration && code === codeEnCours &&
+      activeModal === $('barcode-modal') && !$('barcode-modal').hidden;
+  }
+
+  function ouvrirPortionDepuisScan(f, generation, code, message) {
+    if (!scanToujoursActif(generation, code)) return false;
+    closeBarcode(false);
+    showPortionCard(f);
+    if (message) toast(message);
+    return true;
+  }
+
+  function processBarcode(rawCode) {
+    var code = Storage.canonicalBarcode
+      ? Storage.canonicalBarcode(rawCode) : String(rawCode || '').trim();
+    if (!code) {
+      scanBusy = false;
+      showBarcodeStatus('Ce contenu n’est pas un code-barres EAN/UPC utilisable.');
+      return Promise.resolve(false);
+    }
+
+    /* La caméra est coupée dès la première lecture : elle ne consomme plus de
+       batterie et ne peut pas lancer un second code pendant la requête. */
+    try { Barcode.stop(); } catch (e) {}
     scanBusy = true;
     codeEnCours = code;
+    var generation = ++scanGeneration;
     $('barcode-unknown').hidden = true;
-    showBarcodeStatus('<div class="spinner"></div>Recherche du produit ' + escapeHtml(code) + '…');
+    var checksumWarning = Storage.barcodeChecksumValid &&
+      Storage.barcodeChecksumValid(code) === false
+      ? '<br><span class="tiny">Le chiffre de contrôle paraît inhabituel ; recherche quand même.</span>' : '';
+    showBarcodeStatus('<div class="spinner"></div>Recherche du produit ' + escapeHtml(code) + '…' + checksumWarning);
 
     var connu = Storage.getProduct ? Storage.getProduct(code) : null;
 
+    /* Une valeur recopiée sur l'étiquette est un choix explicite : le réseau
+       ne doit pas la remplacer visuellement par une ancienne fiche publique. */
+    if (connu && connu.source === 'perso') {
+      ouvrirPortionDepuisScan(connu, generation, code,
+        'Valeur personnelle reprise pour ce produit.');
+      return Promise.resolve(connu);
+    }
+
     return OFF.lookupBarcode(code).then(function (f) {
+      if (!scanToujoursActif(generation, code)) return null;
       if (f) {
-        closeBarcode();
-        showPortionCard(f);
-        return;
+        ouvrirPortionDepuisScan(f, generation, code);
+        return f;
       }
       // Réseau bon, produit réellement absent d'OpenFoodFacts.
-      if (connu) { closeBarcode(); showPortionCard(connu); return; }
-      demanderProduit(code, 'Ce produit n’est pas dans OpenFoodFacts.');
+      if (connu) {
+        ouvrirPortionDepuisScan(connu, generation, code);
+        return connu;
+      }
+      demanderProduit(code, 'Ce produit n’est pas dans OpenFoodFacts.', generation);
+      return null;
     }).catch(function (e) {
+      if (!scanToujoursActif(generation, code)) return null;
       /* Réseau en panne. Un produit déjà connu localement doit continuer à
          marcher : c'est tout l'intérêt de l'avoir gardé. */
       if (connu) {
-        closeBarcode();
-        showPortionCard(connu);
-        toast('Hors ligne : ' + connu.n + ' repris de ta base locale.');
-        return;
+        ouvrirPortionDepuisScan(connu, generation, code,
+          'Hors ligne : ' + connu.n + ' repris de ta base locale.');
+        return connu;
       }
-      demanderProduit(code, e.message);
+      demanderProduit(code, e.message, generation);
+      return null;
     });
   }
 
-  function demanderProduit(code, raison) {
+  function demanderProduit(code, raison, generation) {
+    if (generation != null && !scanToujoursActif(generation, code)) return;
     scanBusy = false;
     showBarcodeStatus(escapeHtml(raison));
     var bloc = $('barcode-unknown');
@@ -3213,7 +3428,11 @@
     $('bu-name').value = '';
     $('bu-carb').value = '';
     $('bu-pack').value = '';
-    try { $('bu-name').focus(); } catch (e) {}
+    requestAnimationFrame(function () {
+      if (codeEnCours === code && !bloc.hidden) {
+        try { $('bu-name').focus(); } catch (e) {}
+      }
+    });
   }
 
   function initUnknownProduct() {
@@ -3231,10 +3450,13 @@
       var f = {
         n: nom, brand: '', carb: Math.round(carb * 10) / 10,
         code: codeEnCours || '', serving: null, source: 'perso',
-        pack: (pack > 0 && isFinite(pack)) ? { total: pack, unites: null, unite: 'g' } : null
+        pack: (pack > 0 && isFinite(pack)) ? {
+          total: pack, unitesSuggerees: null, parUniteSuggeree: null,
+          labelSuggere: '', unite: 'g', confirme: false
+        } : null
       };
       if (codeEnCours && Storage.setProduct) Storage.setProduct(codeEnCours, f, 'perso');
-      closeBarcode();
+      closeBarcode(false);
       showPortionCard(f);
       toast(nom + ' enregistré : ce code-barres est maintenant reconnu.');
     });
@@ -3284,22 +3506,34 @@
       list = Foods.search(q, currentCat);
     }
     if (!list.length) {
-      box.innerHTML = '<p class="empty">Aucun aliment. Essaie une autre recherche ou ajoute un aliment personnalisé ci-dessous.</p>';
+      box.innerHTML = '<p class="empty">Aucun repère local pour cette recherche.</p>' +
+        ((q || '').trim().length >= 2
+          ? '<button type="button" class="btn btn-secondary food-online-fallback">Chercher ce produit en ligne</button>'
+          : '<p class="hint tiny">Essaie un autre mot ou ajoute un aliment personnalisé.</p>');
+      var online = box.querySelector('.food-online-fallback');
+      if (online) online.addEventListener('click', function () {
+        selectPane('tab-manual', 'produit');
+        $('off-search').value = q;
+        runOffSearch(q);
+      });
       return;
     }
     box.innerHTML = '';
     list.forEach(function (f) {
       var el = document.createElement('div');
       el.className = 'food-item';
-      var perso = f.custom ? ' <span class="tag">perso</span>' : '';
+      var perso = f.custom ? ' <span class="tag">perso</span>' :
+        (f.packaged ? ' <span class="tag">produit connu</span>' : '');
+      var approx = f.meta && f.meta.approximate ? '≈ ' : '';
       var del = f.custom ? '<button class="food-del" aria-label="Supprimer">🗑️</button>' : '';
       el.innerHTML =
         '<button type="button" class="food-label">' + escapeHtml(f.n) + perso +
-        ' <span class="item-detail">(' + f.carb + ' g/100 g)</span></button>' +
+        ' <span class="item-detail">(' + approx + f.carb + ' g/100 g)</span></button>' +
         '<span class="food-actions">' + del + '<button type="button" class="food-add" aria-label="Ajouter ' +
         escapeHtml(f.n) + '">＋</button></span>';
-      el.querySelector('.food-label').addEventListener('click', function () { addFoodToMeal(f); });
-      el.querySelector('.food-add').addEventListener('click', function (e) { e.stopPropagation(); addFoodToMeal(f); });
+      var choose = function () { if (f.packaged) showPortionCard(f); else addFoodToMeal(f); };
+      el.querySelector('.food-label').addEventListener('click', choose);
+      el.querySelector('.food-add').addEventListener('click', function (e) { e.stopPropagation(); choose(); });
       if (f.custom) {
         el.querySelector('.food-del').addEventListener('click', function (e) {
           e.stopPropagation();
@@ -3315,6 +3549,9 @@
 
   function addFoodToMeal(f) {
     var portions = (f.portions && f.portions.length) ? f.portions.slice() : [];
+    var itemIndex = manualItems.length;
+    var startGrams = Number(f.startGrams);
+    if (!isFinite(startGrams) || startGrams < 0) startGrams = 100;
     manualItems.push({
       name: f.n, carb: f.carb, custom: !!f.custom,
       portions: portions,
@@ -3322,12 +3559,19 @@
       portionIndex: 0,
       // qty vient du calcul de portion (« j'en mange 2 ») ; 1 partout ailleurs.
       qty: (portions.length && f.qty > 0) ? f.qty : 1,
-      grams: portions.length ? 0 : 100
+      grams: portions.length ? 0 : startGrams
     });
     Storage.addRecentFood(f); // mémorise pour la catégorie « Récents »
     renderChips();            // fait apparaître/rafraîchir la puce « Récents »
     renderManualItems();
     toast(f.n + ' ajouté.');
+    if (f.focusGrams && !portions.length) {
+      requestAnimationFrame(function () {
+        var input = document.querySelector('.manual-grams[data-i="' + itemIndex + '"]');
+        if (!input) return;
+        try { input.focus(); input.select(); } catch (e) {}
+      });
+    }
   }
 
   function initCustomFoodForm() {
@@ -3382,7 +3626,7 @@
       // Contrôle de quantité : stepper (mode portion) ou champ grammes (mode grammes)
       var control;
       if (it.mode === 'grams') {
-        control = '<span class="grams-field"><input class="input small manual-grams" type="number" inputmode="decimal" min="0" max="' +
+        control = '<span class="grams-field"><input class="input small manual-grams" type="number" inputmode="decimal" min="0.1" max="' +
                   ManualCalc.MAX_ITEM_GRAMS + '" step="5" value="' + (Math.round(grams * 10) / 10) + '" data-i="' + idx +
                   '" aria-label="Quantité de ' + escapeHtml(it.name) + ' en grammes"> g</span>';
       } else {
@@ -3445,7 +3689,7 @@
         var grams = ManualCalc.normalizeGrams(inp.value);
         if (grams == null) {
           inp.setAttribute('aria-invalid', 'true');
-          toast('Quantité invalide : indique entre 0 et ' + ManualCalc.MAX_ITEM_GRAMS + ' g.');
+          toast('Quantité invalide : indique plus de 0 g, jusqu’à ' + ManualCalc.MAX_ITEM_GRAMS + ' g.');
           inp.value = Math.round(itemGrams(manualItems[index]) * 10) / 10;
           return;
         }

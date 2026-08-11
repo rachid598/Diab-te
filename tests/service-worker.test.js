@@ -70,5 +70,5 @@ test('le contrôle manuel ?maj contourne volontairement le cache de coquille', a
 });
 
 test('la page peut vérifier la version du worker qui la contrôle', () => {
-  assert.equal(workerEnv().version(), '80');
+  assert.equal(workerEnv().version(), '81');
 });

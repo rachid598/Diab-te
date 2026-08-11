@@ -13,7 +13,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=80" />
+  <link rel="stylesheet" href="css/styles.css?v=81" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -297,57 +297,112 @@
       <div id="pane-produit" class="mode-pane" data-pane="produit" role="tabpanel">
         <div class="card">
           <h2>Produit emballé</h2>
-          <p class="hint">Glucides <strong>exacts</strong> lus sur l'emballage, via la base ouverte OpenFoodFacts. Le scan du code-barres est le plus rapide et le plus sûr.</p>
-          <button id="barcode-btn" class="btn btn-primary btn-lg">📷 Scanner le code-barres</button>
+          <p class="hint">Les valeurs nutritionnelles viennent de l'étiquette enregistrée dans Open Food Facts. <strong>Vérifie qu'elles correspondent bien à ton emballage</strong> avant de les utiliser.</p>
+          <button id="barcode-btn" class="btn btn-primary btn-lg" type="button">📷 Scanner le code-barres</button>
 
           <label for="off-search">Ou chercher par nom</label>
           <div class="off-search-row">
             <input id="off-search" class="input" type="search" placeholder="ex. Prince, Nutella, St Michel…" />
-            <button id="off-search-btn" class="btn btn-ghost">🌐</button>
+            <button id="off-search-btn" class="btn btn-ghost" type="button" aria-label="Rechercher le produit par nom">🌐</button>
           </div>
           <div id="off-status" class="status" hidden></div>
           <div id="off-results" class="food-results off-results" hidden></div>
           <p class="hint tiny" id="off-local-note">Nécessite une connexion. Hors ligne, utilise l'onglet Aliments.</p>
+          <p class="off-attribution">Données produits : Open Food Facts, base ouverte sous licence ODbL.</p>
         </div>
 
         <!-- Calcul de portion. L'emballage donne des glucides pour 100 g, mais
              on ne mange pas 100 g : on mange deux biscuits. La conversion
              demande le poids du paquet, le nombre d'unités, une division et une
              multiplication — au moment précis où on est en train de manger. -->
-        <div id="portion-card" class="card portion-card" hidden>
+        <div id="portion-card" class="card portion-card" role="region" aria-labelledby="portion-name" hidden>
           <div class="portion-head">
-            <h2 id="portion-name">Produit</h2>
-            <button id="portion-close" class="icon-btn" aria-label="Fermer">✕</button>
+            <div>
+              <p class="portion-eyebrow">Quantité consommée</p>
+              <h2 id="portion-name">Produit</h2>
+            </div>
+            <button id="portion-close" class="icon-btn" type="button" aria-label="Fermer le calcul de portion">✕</button>
           </div>
-          <p id="portion-carb" class="hint tiny"></p>
+          <p id="portion-carb" class="portion-product-meta"></p>
+          <p class="portion-safety">Valeur issue de l'étiquette enregistrée dans Open Food Facts : vérifie-la sur ton paquet.</p>
 
-          <div class="portion-grid">
-            <label for="portion-total">Le paquet fait</label>
-            <span class="portion-field">
-              <input id="portion-total" class="input small" type="number" inputmode="decimal" min="1" step="1" />
-              <span id="portion-unite" class="portion-unit">g</span>
-            </span>
+          <section class="portion-primary" aria-labelledby="portion-eat-title">
+            <h3 id="portion-eat-title">Combien en manges-tu ?</h3>
+            <div class="portion-eat-row">
+              <label class="sr-only" for="portion-eat">Quantité consommée</label>
+              <input id="portion-eat" class="input portion-eat-input" type="number" inputmode="decimal" min="0" step="any" value="1" aria-describedby="portion-eat-help" />
+              <span id="portion-eat-unit" class="portion-eat-unit">unité</span>
+            </div>
+            <div class="portion-quick-actions" role="group" aria-label="Choisir rapidement une quantité">
+              <button class="portion-quick" type="button" data-portion-eat="0.5" aria-label="Une demi-unité">½</button>
+              <button class="portion-quick" type="button" data-portion-eat="1">1</button>
+              <button class="portion-quick" type="button" data-portion-eat="2">2</button>
+              <button class="portion-quick" type="button" data-portion-eat="3">3</button>
+            </div>
+            <p id="portion-eat-help" class="field-help">Tu peux aussi saisir une fraction, par exemple 0,5.</p>
+          </section>
 
-            <label for="portion-units">et contient</label>
-            <span class="portion-field">
-              <input id="portion-units" class="input small" type="number" inputmode="numeric" min="1" step="1" />
-              <input id="portion-label" class="input small portion-name-field" type="text" placeholder="biscuits" maxlength="24" />
-            </span>
+          <fieldset class="portion-settings">
+            <legend>Comment connais-tu le poids d'une unité ?</legend>
+            <div class="portion-mode-switch">
+              <input id="portion-mode-unit" class="portion-mode-input sr-only" type="radio" name="portion-mode" value="unit" />
+              <label for="portion-mode-unit">
+                <span>À l'unité</span>
+                <small>Poids d'un biscuit</small>
+              </label>
+              <input id="portion-mode-pack" class="portion-mode-input sr-only" type="radio" name="portion-mode" value="pack" checked />
+              <label for="portion-mode-pack">
+                <span>Poids total du paquet</span>
+                <small>Poids ÷ nombre d'unités</small>
+              </label>
+            </div>
 
-            <label for="portion-eat">J'en mange</label>
-            <span class="portion-field">
-              <input id="portion-eat" class="input small" type="number" inputmode="decimal" min="0" step="1" value="1" />
-              <span id="portion-eat-unit" class="portion-unit">unité(s)</span>
-            </span>
+            <div class="portion-common-field">
+              <label for="portion-label">Nom de l'unité</label>
+              <input id="portion-label" class="input portion-name-field" type="text" placeholder="ex. biscuit" maxlength="24" autocomplete="off" />
+              <p class="field-help">Par exemple : biscuit, tranche ou capsule.</p>
+            </div>
+
+            <div id="portion-unit-fields" class="portion-method-fields" hidden>
+              <label for="portion-unit-weight">Poids d'une unité</label>
+              <span class="portion-field">
+                <input id="portion-unit-weight" class="input small" type="number" inputmode="decimal" min="0.1" step="0.1" placeholder="ex. 20" />
+                <span id="portion-unit-weight-unit" class="portion-unit">g</span>
+              </span>
+              <p class="field-help">Recopie le poids indiqué sur le paquet ou pèse une unité.</p>
+            </div>
+
+            <div id="portion-pack-fields" class="portion-method-fields portion-pack-grid">
+              <div class="portion-control">
+                <label for="portion-total">Poids total du paquet</label>
+                <span class="portion-field">
+                  <input id="portion-total" class="input small" type="number" inputmode="decimal" min="0.1" step="0.1" placeholder="ex. 300" />
+                  <span id="portion-unite" class="portion-unit">g</span>
+                </span>
+              </div>
+              <div class="portion-control">
+                <label for="portion-units">Nombre d'unités dans le paquet</label>
+                <input id="portion-units" class="input small" type="number" inputmode="numeric" min="1" step="1" placeholder="ex. 15" aria-describedby="portion-units-help" />
+              </div>
+              <p id="portion-units-help" class="field-help portion-pack-help">Le nombre doit être entier. Il sera mémorisé pour ce produit.</p>
+            </div>
+
+            <div id="portion-suggestion" class="portion-suggestion" role="status" hidden>
+              <div>
+                <strong>Suggestion trouvée sur l'emballage</strong>
+                <p id="portion-suggestion-text">Vérifie cette valeur avant de l'utiliser.</p>
+              </div>
+              <button id="portion-confirm-suggestion" class="btn btn-secondary" type="button">Confirmer la valeur</button>
+            </div>
+          </fieldset>
+
+          <p id="portion-result" class="portion-result" role="status" aria-live="polite" aria-atomic="true">Indique le poids du paquet et le nombre d'unités.</p>
+
+          <div class="btn-row portion-actions">
+            <button id="portion-add" class="btn btn-primary" type="button" disabled>Ajouter au repas</button>
+            <button id="portion-whole" class="btn btn-ghost" type="button">Je pèse ce que je mange</button>
           </div>
-
-          <p id="portion-result" class="portion-result">Indique le poids du paquet et le nombre d'unités.</p>
-
-          <div class="btn-row">
-            <button id="portion-add" class="btn btn-primary" disabled>Ajouter au repas</button>
-            <button id="portion-whole" class="btn btn-ghost">Saisir en grammes</button>
-          </div>
-          <p class="hint tiny">Le nombre d'unités est retenu pour ce code-barres : au prochain scan, il sera déjà rempli.</p>
+          <p class="hint tiny portion-memory-note">Les informations que tu confirmes sont retenues pour ce code-barres.</p>
         </div>
       </div>
 
@@ -680,37 +735,44 @@
   </div>
 
   <!-- ============ Scan code-barres (modale) ============ -->
-  <div id="barcode-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="barcode-title" hidden>
+  <div id="barcode-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="barcode-title" aria-describedby="barcode-help" hidden>
     <div class="modal-card scan-card">
       <div class="modal-head">
         <h2 id="barcode-title">Scanner un code-barres</h2>
-        <button id="close-barcode" class="icon-btn" aria-label="Fermer">✕</button>
+        <button id="close-barcode" class="icon-btn" type="button" aria-label="Fermer le scanner">✕</button>
       </div>
-      <div class="scan-frame">
-        <video id="barcode-video" class="scan-video" playsinline muted></video>
+      <p id="barcode-help" class="scan-intro">Place le code-barres dans le cadre. La recherche démarre automatiquement dès qu'il est reconnu.</p>
+      <div class="scan-frame" aria-hidden="true">
+        <video id="barcode-video" class="scan-video" playsinline muted tabindex="-1"></video>
+        <div class="scan-reticle"></div>
         <div class="scan-line"></div>
       </div>
-      <p class="hint tiny">Vise le code-barres du produit. Rien ne fonctionne ? Saisis-le à la main :</p>
-      <div class="btn-row">
-        <input id="barcode-manual" class="input" type="text" inputmode="numeric" placeholder="ex. 3017620422003" autocomplete="off" />
-        <button id="barcode-manual-go" class="btn btn-primary">OK</button>
+      <div class="barcode-manual-block" role="group" aria-labelledby="barcode-manual-label">
+        <label id="barcode-manual-label" for="barcode-manual">Ou saisir le code manuellement</label>
+        <p id="barcode-manual-help" class="field-help">Le numéro se trouve sous les barres du produit.</p>
+        <div class="barcode-manual-row">
+          <input id="barcode-manual" class="input" type="text" inputmode="numeric" pattern="[0-9 -]*" maxlength="24" placeholder="ex. 3017620422003" autocomplete="off" enterkeyhint="search" aria-describedby="barcode-manual-help" />
+          <button id="barcode-manual-go" class="btn btn-primary" type="button">Rechercher</button>
+        </div>
       </div>
-      <div id="barcode-status" class="status" hidden></div>
+      <div id="barcode-status" class="status barcode-status" role="status" aria-live="polite" aria-atomic="true" hidden></div>
 
       <!-- Produit absent d'OpenFoodFacts. Recopier l'étiquette une fois vaut
            mieux que de renoncer : au scan suivant, le produit est reconnu, y
            compris sans réseau. C'est ce qui fait grandir la base utile — celle
            des produits que TU achètes. -->
-      <div id="barcode-unknown" class="barcode-unknown" hidden>
-        <p class="hint tiny">Recopie l'étiquette une seule fois : ce code-barres sera reconnu ensuite, même hors ligne.</p>
+      <div id="barcode-unknown" class="barcode-unknown" role="group" aria-labelledby="barcode-unknown-title" hidden>
+        <h3 id="barcode-unknown-title">Produit non renseigné</h3>
+        <p class="hint tiny">Recopie les valeurs de ton étiquette. Elles seront conservées pour ce code-barres, même hors ligne.</p>
         <label for="bu-name">Nom du produit</label>
         <input id="bu-name" class="input" type="text" placeholder="ex. Biscuits sablés" maxlength="80" />
-        <label for="bu-carb">Glucides pour 100 g</label>
-        <input id="bu-carb" class="input small" type="number" inputmode="decimal" min="0" max="100" step="0.1" placeholder="g / 100 g" />
-        <label for="bu-pack">Poids du paquet <span class="tag">optionnel</span></label>
-        <input id="bu-pack" class="input small" type="number" inputmode="decimal" min="1" step="1" placeholder="ex. 500" />
+        <label for="bu-carb">Glucides indiqués sur l'étiquette, pour 100 g</label>
+        <input id="bu-carb" class="input small" type="number" inputmode="decimal" min="0" max="100" step="0.1" placeholder="ex. 70" aria-describedby="bu-carb-help" />
+        <p id="bu-carb-help" class="field-help">Vérifie la ligne « glucides », et non seulement « dont sucres ».</p>
+        <label for="bu-pack">Poids total du paquet <span class="tag">facultatif</span></label>
+        <input id="bu-pack" class="input small" type="number" inputmode="decimal" min="0.1" step="0.1" placeholder="ex. 500" />
         <div class="btn-row">
-          <button id="bu-save" class="btn btn-primary">Enregistrer ce produit</button>
+          <button id="bu-save" class="btn btn-primary" type="button">Enregistrer et continuer</button>
         </div>
       </div>
     </div>
@@ -722,21 +784,21 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=80"></script>
-  <script src="js/native.js?v=80"></script>
-  <script src="js/storage.js?v=80"></script>
-  <script src="js/foods.js?v=80"></script>
-  <script src="js/gi.js?v=80"></script>
-  <script src="js/queue.js?v=80"></script>
-  <script src="js/report.js?v=80"></script>
-  <script src="js/bench.js?v=80"></script>
-  <script src="js/estimator.js?v=80"></script>
-  <script src="js/camera.js?v=80"></script>
-  <script src="js/portion.js?v=80"></script>
-  <script src="js/manual.js?v=80"></script>
-  <script src="js/off.js?v=80"></script>
-  <script src="vendor/zxing.min.js?v=80"></script>
-  <script src="js/barcode.js?v=80"></script>
-  <script src="js/app.js?v=80"></script>
+  <script src="vendor/capacitor-plugins.js?v=81"></script>
+  <script src="js/native.js?v=81"></script>
+  <script src="js/storage.js?v=81"></script>
+  <script src="js/foods.js?v=81"></script>
+  <script src="js/gi.js?v=81"></script>
+  <script src="js/queue.js?v=81"></script>
+  <script src="js/report.js?v=81"></script>
+  <script src="js/bench.js?v=81"></script>
+  <script src="js/estimator.js?v=81"></script>
+  <script src="js/camera.js?v=81"></script>
+  <script src="js/portion.js?v=81"></script>
+  <script src="js/manual.js?v=81"></script>
+  <script src="js/off.js?v=81"></script>
+  <script src="vendor/zxing.min.js?v=81"></script>
+  <script src="js/barcode.js?v=81"></script>
+  <script src="js/app.js?v=81"></script>
 </body>
 </html>

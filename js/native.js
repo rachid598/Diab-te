@@ -214,12 +214,19 @@
 
      Renvoie une Promise de { status, data } où data est déjà l'objet JSON.
      Sur le web : null, l'appelant garde son fetch() habituel. */
-  function httpJson(url, ms) {
+  function httpJson(url, ms, extraHeaders) {
     if (!isApp) return resolved(null);
+    var headers = { Accept: 'application/json' };
+    if (extraHeaders && typeof extraHeaders === 'object') {
+      Object.keys(extraHeaders).forEach(function (name) {
+        var value = extraHeaders[name];
+        if (typeof value === 'string' && value.length <= 300) headers[name] = value;
+      });
+    }
     return Cap.CapacitorHttp.request({
       url: url,
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: headers,
       connectTimeout: ms || 15000,
       readTimeout: ms || 15000
     }).then(function (res) {

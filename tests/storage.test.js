@@ -38,12 +38,14 @@ test('les rôles v66-v72 et experimentalDepth restent normalisés', () => {
   assert.equal(settings.experimentalDepth, false);
 });
 
-test('foodKey et sameFood distinguent strictement pomme et pomme de terre', () => {
+test('foodKey et sameFood gardent les variantes nutritionnellement distinctes', () => {
   const { Storage } = env();
   assert.equal(Storage.foodKey('Pommes de terre rôties'), 'pomme_de_terre');
-  assert.equal(Storage.foodKey('riz blanc long grain'), 'riz');
+  assert.equal(Storage.foodKey('riz blanc long grain'), 'blanc|riz');
   assert.equal(Storage.sameFood('pomme', 'pomme de terre'), false);
-  assert.equal(Storage.sameFood('riz blanc', 'riz basmati'), true);
+  assert.equal(Storage.sameFood('frites', 'pomme de terre'), false);
+  assert.equal(Storage.sameFood('pain blanc', 'pain complet'), false);
+  assert.equal(Storage.sameFood('riz blanc', 'riz basmati'), false);
   assert.equal(Storage.sameFood('poulet grillé', 'filet de poulet'), true);
 });
 

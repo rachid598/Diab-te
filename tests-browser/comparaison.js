@@ -295,7 +295,7 @@ async function ecran(page, liste) {
   await page.goto('http://localhost:' + PORT + '/');
   await page.waitForFunction(function () {
     const v = document.getElementById('app-version');
-    return v && /Version 80/.test(v.textContent || '');
+    return v && /Version 81/.test(v.textContent || '');
   }, null, { timeout: 5000 });
   await page.click('.tab[data-tab="history"]');
   await page.locator('.history-head[data-open="' + dateBrouillonB + '"]').click();
@@ -366,12 +366,24 @@ async function ecran(page, liste) {
      ce soit bien elle qui soit branchée aux champs et au bouton. */
   console.log('\nCalcul de portion :');
   await page.route('**/world.openfoodfacts.org/**', function (route) {
+    const url = new URL(route.request().url());
+    const query = url.searchParams.get('search_terms') || '';
+    const raceProduct = query === 'ancienne' ? {
+      code: '1111111111111', product_name_fr: 'Ancien résultat', brands: 'Test',
+      quantity: '100 g', product_quantity: 100, product_quantity_unit: 'g',
+      nutriments: { carbohydrates_100g: 10 }
+    } : query === 'nouvelle' ? {
+      code: '2222222222222', product_name_fr: 'Nouveau résultat', brands: 'Test',
+      quantity: '100 g', product_quantity: 100, product_quantity_unit: 'g',
+      nutriments: { carbohydrates_100g: 20 }
+    } : null;
     return route.fulfill({
+      delay: query === 'ancienne' ? 250 : 10,
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
-        products: [{
+        products: raceProduct ? [raceProduct] : [{
           code: '7622210449283', product_name_fr: 'Biscuits test', brands: 'Marque',
-          quantity: '500 g e', product_quantity: 500, product_quantity_unit: 'g',
+          quantity: '300 g e', product_quantity: 300, product_quantity_unit: 'g',
           nutriments: { carbohydrates_100g: 70 }
         }]
       })
@@ -380,6 +392,21 @@ async function ecran(page, liste) {
   await page.goto('http://localhost:' + PORT + '/');
   await page.click('.tab[data-tab="manual"]');
   await page.click('.mode-btn[data-mode="produit"]');
+
+  // La réponse lente de l'ancienne recherche ne doit jamais écraser la plus récente.
+  await page.fill('#off-search', 'ancienne');
+  await page.click('#off-search-btn');
+  await page.fill('#off-search', 'nouvelle');
+  await page.click('#off-search-btn');
+  await page.waitForFunction(function () {
+    const box = document.getElementById('off-results');
+    return box && /Nouveau résultat/.test(box.textContent);
+  }, null, { timeout: 5000 });
+  await page.waitForTimeout(350);
+  const rechercheFinale = await page.textContent('#off-results');
+  verifie(/Nouveau résultat/.test(rechercheFinale) && !/Ancien résultat/.test(rechercheFinale),
+    'une ancienne recherche lente ne remplace pas les résultats de la plus récente');
+
   await page.fill('#off-search', 'biscuits');
   await page.click('#off-search-btn');
   await page.waitForSelector('.off-item', { timeout: 5000 });
@@ -387,33 +414,32 @@ async function ecran(page, liste) {
   await page.waitForSelector('#portion-card:not([hidden])', { timeout: 5000 });
 
   const poids = await page.inputValue('#portion-total');
-  verifie(poids === '500', 'le poids du paquet est prérempli depuis la base : ' + poids);
+  verifie(poids === '300', 'le poids du paquet est prérempli depuis la base : ' + poids);
   verifie(await page.isDisabled('#portion-add'),
     'sans nombre d’unités, on ne peut rien ajouter');
 
-  await page.fill('#portion-units', '12');
+  await page.fill('#portion-units', '15');
   await page.fill('#portion-label', 'biscuits');
   await page.fill('#portion-eat', '2');
   const calcul = await page.textContent('#portion-result');
-  /* 500/12 = 41,666… g par biscuit ; 2 biscuits = 83,3 g ; à 70 g/100 g → 58 g.
-     L'affichage arrondit au dixième comme partout ailleurs dans l'app, mais le
-     calcul, lui, garde la valeur exacte — d'où 58 et non 59. */
-  verifie(/41,7 g/.test(calcul), 'le poids d’une unité est calculé : ' + calcul.replace(/\s+/g, ' '));
-  verifie(/58 g de glucides/.test(calcul), 'et les glucides des 2 unités aussi');
+  /* Cas demandé : 300 g / 15 biscuits = 20 g ; deux biscuits = 40 g ;
+     à 70 g/100 g, le résultat exact est 28 g de glucides. */
+  verifie(/20 g/.test(calcul), 'le poids d’une unité est calculé : ' + calcul.replace(/\s+/g, ' '));
+  verifie(/28 g de glucides/.test(calcul), 'et les glucides des 2 unités aussi');
   verifie(/1 biscuit =/.test(calcul) && /2 biscuits =/.test(calcul),
     'le singulier et le pluriel sont corrects');
 
   await page.click('#portion-add');
   await page.waitForSelector('.manual-row', { timeout: 5000 });
   const ligne = await page.textContent('.manual-row');
-  verifie(/58 g/.test(ligne), 'la ligne du repas porte les mêmes glucides : ' + ligne.replace(/\s+/g, ' '));
+  verifie(/28 g/.test(ligne), 'la ligne du repas porte les mêmes glucides : ' + ligne.replace(/\s+/g, ' '));
   verifie(await page.isHidden('#portion-card'), 'la carte se referme après ajout');
 
   // Le second scan du même produit doit déjà connaître le nombre d'unités.
   await page.click('.off-item .food-label');
   await page.waitForSelector('#portion-card:not([hidden])', { timeout: 5000 });
   const memoire = await page.inputValue('#portion-units');
-  verifie(memoire === '12', 'le nombre d’unités est retenu pour ce code-barres : ' + memoire);
+  verifie(memoire === '15', 'le nombre d’unités est retenu pour ce code-barres : ' + memoire);
 
   /* Code-barres inconnu. Jusqu'ici c'était un cul-de-sac : « introuvable », et
      débrouille-toi. Le produit recopié une fois doit être reconnu ensuite. */
