@@ -21,6 +21,34 @@ function raw(total) {
   };
 }
 
+function verifiedView(viewIndex, changes) {
+  const base = {
+    viewIndex,
+    depth: {
+      scaleOk: true, fresh: true, cardMode: true,
+      cardRequested: true, cardVerified: true, cardFresh: true,
+      cardSchema: 'glucovision-card-v1', scaleSource: 'card',
+      cardName: 'glucovision-card', cardWidthCm: 8.56, cardHeightCm: 5.398,
+      cardObservations: 8, cardTrackingMethod: 'FULL_TRACKING',
+      fieldWidthCm: 32.4, fieldHeightCm: 24.1,
+      distanceCm: 62, cmPerPixel: 0.02, volumeCm3: 1234
+    },
+    reference: {
+      mode: 'glucovision-card-v1', cardRequested: true,
+      cardVerified: true, cardFresh: true,
+      cardSchema: 'glucovision-card-v1', scaleSource: 'card',
+      cardName: 'glucovision-card', cardWidthCm: 8.56, cardHeightCm: 5.398,
+      cardObservations: 8, cardTrackingMethod: 'FULL_TRACKING'
+    }
+  };
+  changes = changes || {};
+  return {
+    viewIndex: changes.viewIndex == null ? base.viewIndex : changes.viewIndex,
+    depth: Object.assign({}, base.depth, changes.depth || {}),
+    reference: Object.assign({}, base.reference, changes.reference || {})
+  };
+}
+
 function env(extra) {
   return loadScript('js/estimator.js', Object.assign({
     Storage: {
@@ -38,7 +66,7 @@ test('le total brut contradictoire reste bloquant après normalisation', () => {
   value.totalCarbsG = 120;
   value.rangeLowG = 100;
   value.rangeHighG = 140;
-  const got = Estimator.sanitize(value, { imageCount: 1, referenceObject: 'none' });
+  const got = Estimator.sanitize(value, { imageCount: 1, referenceMode: 'none' });
   assert.equal(got.totalCarbsG, 50);
   assert.match(got.blocking.join(' '), /somme des aliments/i);
 });
@@ -49,7 +77,7 @@ test('une simple édition ne gomme pas les contradictions brutes', () => {
   value.totalCarbsG = 120;
   value.rangeLowG = 100;
   value.rangeHighG = 140;
-  const got = Estimator.sanitize(value, { imageCount: 1, referenceObject: 'none' });
+  const got = Estimator.sanitize(value, { imageCount: 1, referenceMode: 'none' });
   got.items[0].carbsG = 40;
   got.humanEdited = true;
   Estimator.refresh(got);
@@ -66,7 +94,7 @@ test('une contradiction 100 g × 50 % contre 80 g est bloquante', () => {
   const value = raw(80);
   value.items[0].estimatedMassG = 100;
   value.items[0].carbDensityPer100g = 50;
-  const got = Estimator.sanitize(value, { imageCount: 1, referenceObject: 'none' });
+  const got = Estimator.sanitize(value, { imageCount: 1, referenceMode: 'none' });
   assert.match(got.blocking.join(' '), /en donnent 50/i);
 });
 
@@ -74,14 +102,14 @@ test('une fourchette brute invalide bloque mais ne devient jamais la fourchette 
   const { Estimator } = env();
   const invalid = raw(100);
   invalid.rangeLowG = 'environ 90';
-  const got = Estimator.sanitize(invalid, { imageCount: 1, referenceObject: 'none' });
+  const got = Estimator.sanitize(invalid, { imageCount: 1, referenceMode: 'none' });
   assert.deepEqual([got.rangeLowG, got.rangeHighG], [62, 166]);
   assert.match(got.blocking.join(' '), /fourchette brute/i);
 
   const narrow = raw(100);
   narrow.rangeLowG = 99;
   narrow.rangeHighG = 101;
-  const empirical = Estimator.sanitize(narrow, { imageCount: 1, referenceObject: 'none' });
+  const empirical = Estimator.sanitize(narrow, { imageCount: 1, referenceMode: 'none' });
   assert.deepEqual([empirical.rangeLowG, empirical.rangeHighG], [62, 166]);
 
   const excludesItems = raw(50);
@@ -89,7 +117,7 @@ test('une fourchette brute invalide bloque mais ne devient jamais la fourchette 
   excludesItems.rangeLowG = 55;
   excludesItems.rangeHighG = 60;
   const contradictory = Estimator.sanitize(excludesItems,
-    { imageCount: 1, referenceObject: 'none' });
+    { imageCount: 1, referenceMode: 'none' });
   assert.match(contradictory.blocking.join(' '), /somme des aliments.*hors de la fourchette/i);
 });
 
@@ -100,21 +128,23 @@ test('la confiance IA et le repère ne resserrent pas la bande empirique', () =>
   high.referenceFound = true;
   const low = raw(100);
   low.overallConfidence = 'low';
-  const a = Estimator.sanitize(high, { imageCount: 1, referenceObject: 'pompe' });
-  const b = Estimator.sanitize(low, { imageCount: 1, referenceObject: 'none' });
+  const a = Estimator.sanitize(high, {
+    imageCount: 1, referenceMode: 'glucovision-card-v1', viewMeasurements: [verifiedView(1)]
+  });
+  const b = Estimator.sanitize(low, { imageCount: 1, referenceMode: 'none' });
   assert.deepEqual([a.rangeLowG, a.rangeHighG], [62, 166]);
   assert.deepEqual([b.rangeLowG, b.rangeHighG], [62, 166]);
 });
 
 test('un total recalculé supérieur à 400 g est bloquant', () => {
   const { Estimator } = env();
-  const got = Estimator.sanitize(raw(401), { imageCount: 1, referenceObject: 'none' });
+  const got = Estimator.sanitize(raw(401), { imageCount: 1, referenceMode: 'none' });
   assert.match(got.blocking.join(' '), /supérieur à 400/i);
 });
 
 test('refresh réapplique les mêmes garde-fous et permet une correction humaine', () => {
   const { Estimator } = env();
-  const got = Estimator.sanitize(raw(50), { imageCount: 1, referenceObject: 'none' });
+  const got = Estimator.sanitize(raw(50), { imageCount: 1, referenceMode: 'none' });
   got.items[0].carbsG = -2;
   Estimator.refresh(got);
   assert.match(got.blocking.join(' '), /quantité de glucides invalide/i);
@@ -145,47 +175,94 @@ test('un repas composé uniquement d’extras est accepté et envoyé au modèle
   assert.equal(got.totalCarbsG, 20);
 });
 
-test('l’échelle ARCore valide entre dans le prompt, jamais son volume expérimental', () => {
+test('seule une Carte GlucoVision fraîche et vérifiée entre dans le prompt', () => {
   const { Estimator } = env();
   const prompt = Estimator.buildPrompt({
     imageCount: 1,
-    referenceObject: 'none',
-    depth: {
-      scaleOk: true, fieldWidthCm: 32.4, fieldHeightCm: 24.1,
-      distanceCm: 30, cmPerPixel: 0.02, volumeCm3: 1234
-    }
+    referenceMode: 'glucovision-card-v1',
+    viewMeasurements: [verifiedView(1)]
   });
-  assert.match(prompt, /ÉCHELLE ARCORE EXPÉRIMENTALE VALIDÉE/);
+  assert.match(prompt, /MESURE NATIVE VÉRIFIÉE POUR IMAGE 1\/1 UNIQUEMENT/);
   assert.match(prompt, /32\.4 × 24\.1 cm/);
   assert.match(prompt, /Ne déduis JAMAIS une masse ni des glucides/);
   assert.doesNotMatch(prompt, /1234/);
 
-  const ignored = Estimator.buildPrompt({
-    imageCount: 1, referenceObject: 'none',
-    depth: { scaleOk: true, fieldWidthCm: -1, fieldHeightCm: 20,
-      distanceCm: 30, cmPerPixel: 0.02 }
+  const absent = Estimator.buildPrompt({
+    imageCount: 1, referenceMode: 'glucovision-card-v1', viewMeasurements: []
   });
-  assert.doesNotMatch(ignored, /ÉCHELLE ARCORE/);
+  assert.match(absent, /AUCUNE VUE N'A DE VÉRIFICATION NATIVE/);
+  assert.doesNotMatch(absent, /MESURE NATIVE VÉRIFIÉE POUR IMAGE/);
 
   const stale = Estimator.buildPrompt({
-    imageCount: 1, referenceObject: 'none',
-    depth: { scaleOk: true, fresh: false, fieldWidthCm: 30, fieldHeightCm: 20,
-      distanceCm: 30, cmPerPixel: 0.02 }
+    imageCount: 1, referenceMode: 'glucovision-card-v1',
+    viewMeasurements: [verifiedView(1, { depth: { fresh: false } })]
   });
-  assert.doesNotMatch(stale, /ÉCHELLE ARCORE/);
+  assert.doesNotMatch(stale, /MESURE NATIVE VÉRIFIÉE POUR IMAGE/);
 
-  const multi = Estimator.buildPrompt({
-    imageCount: 3, referenceObject: 'none',
-    depth: { scaleOk: true, fresh: true, viewIndex: 2,
-      fieldWidthCm: 30, fieldHeightCm: 20, distanceCm: 30, cmPerPixel: 0.02 }
+  const forged = Estimator.buildPrompt({
+    imageCount: 1, referenceMode: 'glucovision-card-v1',
+    viewMeasurements: [verifiedView(1, {
+      depth: { cardSchema: 'evil-card', scaleSource: 'depth' }
+    })]
   });
-  assert.match(multi, /IMAGE 2\/3 UNIQUEMENT/);
-  assert.match(multi, /aucun autre angle/i);
+  assert.doesNotMatch(forged, /MESURE NATIVE VÉRIFIÉE POUR IMAGE/);
 
-  const ambiguousMulti = Estimator.buildPrompt({
-    imageCount: 3, referenceObject: 'none',
-    depth: { scaleOk: true, fresh: true,
-      fieldWidthCm: 30, fieldHeightCm: 20, distanceCm: 30, cmPerPixel: 0.02 }
+  const incompleteView = verifiedView(1);
+  delete incompleteView.depth.cardObservations;
+  delete incompleteView.depth.cardTrackingMethod;
+  delete incompleteView.depth.cardWidthCm;
+  delete incompleteView.reference.cardObservations;
+  delete incompleteView.reference.cardTrackingMethod;
+  delete incompleteView.reference.cardWidthCm;
+  const incomplete = Estimator.buildPrompt({
+    imageCount: 1, referenceMode: 'glucovision-card-v1',
+    viewMeasurements: [incompleteView]
   });
-  assert.doesNotMatch(ambiguousMulti, /ÉCHELLE ARCORE/);
+  assert.doesNotMatch(incomplete, /MESURE NATIVE VÉRIFIÉE POUR IMAGE/);
+
+  const disagree = Estimator.buildPrompt({
+    imageCount: 1, referenceMode: 'glucovision-card-v1',
+    viewMeasurements: [verifiedView(1, {
+      depth: { scaleSource: 'card+depth', cardDepthCompared: true, cardDepthAgrees: false },
+      reference: { scaleSource: 'card+depth', cardDepthCompared: true, cardDepthAgrees: false }
+    })]
+  });
+  assert.doesNotMatch(disagree, /MESURE NATIVE VÉRIFIÉE POUR IMAGE/);
+});
+
+test('deux vues natives restent associées à leurs images et ne s’annulent pas', () => {
+  const { Estimator } = env();
+  const prompt = Estimator.buildPrompt({
+    imageCount: 3, referenceMode: 'glucovision-card-v1',
+    viewMeasurements: [
+      verifiedView(1),
+      verifiedView(3, { depth: { fieldWidthCm: 28.7, cmPerPixel: 0.018 } })
+    ]
+  });
+  assert.match(prompt, /IMAGE 1\/3 UNIQUEMENT/);
+  assert.match(prompt, /IMAGE 3\/3 UNIQUEMENT/);
+  assert.equal((prompt.match(/MESURE NATIVE VÉRIFIÉE POUR IMAGE/g) || []).length, 2);
+  assert.match(prompt, /aucun autre angle/i);
+});
+
+test('referenceFound/referenceUsed forgés par l’IA ne sont jamais une preuve', () => {
+  const { Estimator } = env();
+  const answer = raw(50);
+  answer.referenceFound = true;
+  answer.referenceUsed = 'carte inventée 400 px → 0,02 cm/px';
+  const withoutNative = Estimator.sanitize(answer, {
+    imageCount: 1, referenceMode: 'glucovision-card-v1', viewMeasurements: []
+  });
+  assert.equal(withoutNative.refFound, false);
+  assert.equal(withoutNative.referenceUsed, '');
+
+  answer.referenceFound = false;
+  answer.referenceUsed = 'mensonge contradictoire';
+  const withNative = Estimator.sanitize(answer, {
+    imageCount: 1, referenceMode: 'glucovision-card-v1',
+    viewMeasurements: [verifiedView(1)]
+  });
+  assert.equal(withNative.refFound, true);
+  assert.match(withNative.referenceUsed, /vérifiée nativement/);
+  assert.doesNotMatch(withNative.referenceUsed, /mensonge/);
 });

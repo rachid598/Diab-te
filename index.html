@@ -13,7 +13,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=83" />
+  <link rel="stylesheet" href="css/styles.css?v=84" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -162,30 +162,35 @@
 
         <details class="card compact-card" id="reference-card">
           <summary>
-            <span class="compact-title">Repère d'échelle <span class="tag">optionnel</span></span>
-            <span class="compact-value" id="reference-summary">Aucun repère</span>
+            <span class="compact-title">Mode de mesure <span class="tag">optionnel</span></span>
+            <span class="compact-value" id="reference-summary">Rapide</span>
           </summary>
           <div class="compact-content">
-            <p class="hint">Un objet de taille connue donne au modèle la seule échelle réelle dont il dispose. Pose-le <strong>à plat, sur le bord de l'assiette</strong> plutôt que sur la table : à la même hauteur que la nourriture, l'échelle est juste.</p>
-            <p class="hint tiny"><strong>⚠️ S'il n'est pas vraiment dans le cadre, choisis « Aucun repère ».</strong> Testé sur 24 photos sans pompe, envoyées en affirmant qu'elle y était : les modèles ont répondu <strong>24 fois sur 24</strong> qu'ils l'avaient trouvée et mesurée, en inventant la mesure en pixels. Un repère annoncé mais absent est pire que pas de repère du tout.</p>
-            <p class="hint tiny">De combien il réduit l'erreur n'est pas chiffré : les photos du banc d'essai n'en contiennent aucun. Le conseil tient à la géométrie, pas à une mesure.</p>
-            <!-- La paire dessus + côté vient de GoCARB (université de Berne), qui
-                 obtient 12,3 g d'erreur moyenne par repas contre 27,9 g pour les
-                 patients eux-mêmes, avec exactement ce protocole : un objet de
-                 taille connue posé dans le plan de l'assiette, et deux vues. -->
-            <p class="hint tiny">📐 <strong>La paire qui rapporte le plus : une vue de dessus + une vue de côté, le repère visible sur les deux.</strong> Le dessus donne les surfaces, le côté donne la hauteur — la seule dimension qu'une photo unique ne montre jamais.</p>
-            <select id="reference-object" class="input">
-              <option value="none" selected>Aucun repère</option>
-              <option value="pompe à insuline Medtronic MiniMed 780G : boîtier rectangulaire à écran couleur et coins arrondis, d'où sort une fine tubulure ; 96,8 mm de long sur 53,6 mm de large et 24,9 mm d'épaisseur">Ma pompe MiniMed 780G (96,8 × 53,6 × 24,9 mm)</option>
-              <option value="carte bancaire : rectangle de 85,6 mm de long sur 54 mm de large, 0,76 mm d'épaisseur">Carte bancaire (8,6 cm)</option>
-              <option value="fourchette de table standard, environ 19 cm de long">Fourchette (~19 cm)</option>
-              <option value="cuillère à soupe standard, environ 19 cm de long, cuilleron d'environ 4 cm de large">Cuillère à soupe (~19 cm)</option>
-              <option value="pièce de 2 € : disque de 25,75 mm de diamètre et 2,20 mm d'épaisseur">Pièce de 2 € (2,6 cm)</option>
-              <option value="assiette">Assiette (préciser Ø)</option>
+            <label for="reference-mode">Choisis ton parcours</label>
+            <select id="reference-mode" class="input">
+              <option value="none" selected>Estimation rapide — sans carte</option>
+              <option value="glucovision-card-v1">Carte GlucoVision — mesure ARCore guidée</option>
             </select>
-            <div id="plate-diameter-wrap" class="inline-field" hidden>
-              <label for="plate-diameter">Diamètre de l'assiette (cm)</label>
-              <input id="plate-diameter" class="input small" type="number" inputmode="decimal" min="10" max="40" step="0.5" placeholder="ex. 26" />
+
+            <div id="glucovision-card-guide" class="reference-guide" hidden>
+              <div class="reference-guide-head">
+                <span class="reference-guide-icon" aria-hidden="true">▦</span>
+                <div>
+                  <strong>Carte GlucoVision</strong>
+                  <span>Un repère imprimé, reconnu et vérifié par l'application.</span>
+                </div>
+              </div>
+              <a class="btn btn-secondary reference-download" href="glucovision-card.svg"
+                 download="glucovision-card.svg">Télécharger la carte à imprimer</a>
+              <ol class="reference-steps">
+                <li>Imprime-la à <strong>100 %</strong>, sans « adapter à la page ».</li>
+                <li>Pose-la <strong>à côté du repas, sur la même table</strong>, entièrement visible et immobile.</li>
+                <li>Au démarrage, approche le téléphone : la carte doit occuper environ <strong>un quart du cadre</strong> pour être reconnue.</li>
+                <li>Sans déplacer la carte, recule ensuite à <strong>50–75 cm</strong>.</li>
+                <li>Prends une vue de dessus, puis une vue oblique d'environ <strong>15° par rapport à la verticale</strong> — légèrement inclinée depuis la vue du dessus, pas une vue latérale — avec « Photo mesurée ».</li>
+              </ol>
+              <p class="reference-safety"><strong>Vie privée :</strong> n'utilise jamais une carte bancaire, un document d'identité ou un autre objet portant des données sensibles.</p>
+              <p class="hint tiny">La carte visible ne suffit jamais à elle seule : l'échelle n'est transmise au modèle que si ARCore l'a vérifiée pour la vue correspondante.</p>
             </div>
           </div>
         </details>
@@ -679,7 +684,8 @@
           <input id="set-experimental" type="checkbox" />
           <span>Afficher le bouton <strong>Photo mesurée</strong></span>
         </label>
-        <p class="hint tiny">ARCore mesure l'échelle et le relief après un balayage d'au moins 20 cm, à 50–85 cm de la table. La mesure reste expérimentale : elle accompagne la photo, mais <strong>ne calcule jamais directement les glucides</strong>.</p>
+        <p class="hint tiny">ARCore vérifie la Carte GlucoVision à 50–75 cm. Un déplacement d'au moins 20 cm n'est demandé que pour tenter de recouper le relief avec la profondeur. La mesure reste expérimentale : elle accompagne la photo, mais <strong>ne calcule jamais directement les glucides</strong>.</p>
+        <p class="hint tiny">Cette fonctionnalité utilise <strong>Google Play Services for AR (ARCore)</strong>, fourni par Google LLC. <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Règles de confidentialité de Google</a>.</p>
         <p class="hint tiny" id="depth-why"></p>
         </div>
 
@@ -799,21 +805,21 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=83"></script>
-  <script src="js/native.js?v=83"></script>
-  <script src="js/storage.js?v=83"></script>
-  <script src="js/foods.js?v=83"></script>
-  <script src="js/gi.js?v=83"></script>
-  <script src="js/queue.js?v=83"></script>
-  <script src="js/report.js?v=83"></script>
-  <script src="js/bench.js?v=83"></script>
-  <script src="js/estimator.js?v=83"></script>
-  <script src="js/camera.js?v=83"></script>
-  <script src="js/portion.js?v=83"></script>
-  <script src="js/manual.js?v=83"></script>
-  <script src="js/off.js?v=83"></script>
-  <script src="vendor/zxing.min.js?v=83"></script>
-  <script src="js/barcode.js?v=83"></script>
-  <script src="js/app.js?v=83"></script>
+  <script src="vendor/capacitor-plugins.js?v=84"></script>
+  <script src="js/native.js?v=84"></script>
+  <script src="js/storage.js?v=84"></script>
+  <script src="js/foods.js?v=84"></script>
+  <script src="js/gi.js?v=84"></script>
+  <script src="js/queue.js?v=84"></script>
+  <script src="js/report.js?v=84"></script>
+  <script src="js/bench.js?v=84"></script>
+  <script src="js/estimator.js?v=84"></script>
+  <script src="js/camera.js?v=84"></script>
+  <script src="js/portion.js?v=84"></script>
+  <script src="js/manual.js?v=84"></script>
+  <script src="js/off.js?v=84"></script>
+  <script src="vendor/zxing.min.js?v=84"></script>
+  <script src="js/barcode.js?v=84"></script>
+  <script src="js/app.js?v=84"></script>
 </body>
 </html>

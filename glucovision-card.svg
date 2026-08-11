@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="85.60mm" height="53.98mm" viewBox="0 0 4280 2699"
+     role="img" aria-labelledby="title desc"
+     shape-rendering="geometricPrecision" text-rendering="geometricPrecision">
+  <title id="title">Carte repère GlucoVision</title>
+  <desc id="desc">Repère visuel asymétrique à imprimer à cent pour cent, avec une ligne témoin de cinquante millimètres.</desc>
+
+  <!-- Aplats uniquement : le papier doit rester mat, sans reflet ni effet métallisé. -->
+  <rect width="4280" height="2699" rx="118" fill="#f5f1e7"/>
+  <rect x="38" y="38" width="4204" height="2623" rx="88"
+        fill="none" stroke="#080b10" stroke-width="76"/>
+
+  <!-- Silhouette gauche volontairement irrégulière. -->
+  <path d="M76 76H1040L1270 342L1130 660L1288 1018L1094 1346L1252 1692L1032 2030L1196 2623H76Z"
+        fill="#080b10"/>
+  <path d="M76 76H694L816 252L694 432L816 610L694 786L816 962L694 1138L816 1314L694 1490L816 1666L694 1842L816 2018L694 2194L816 2370L694 2623H76Z"
+        fill="#00cfa8"/>
+
+  <!-- Mosaïque non répétitive : coins, orientations et tailles tous différents. -->
+  <rect x="158" y="152" width="214" height="214" rx="18" fill="#080b10"/>
+  <path d="M199 321L263 181L339 294Z" fill="#ffd23f"/>
+  <circle cx="314" cy="216" r="31" fill="#f5f1e7"/>
+
+  <path d="M452 144H653V260L558 348L452 294Z" fill="#f5f1e7"/>
+  <rect x="492" y="184" width="57" height="128" fill="#f04f78"/>
+  <rect x="570" y="184" width="46" height="49" fill="#080b10"/>
+
+  <circle cx="270" cy="532" r="112" fill="#080b10"/>
+  <circle cx="246" cy="510" r="49" fill="#00cfa8"/>
+  <circle cx="311" cy="570" r="27" fill="#ffd23f"/>
+  <path d="M444 444L652 482L607 670L475 624Z" fill="#080b10"/>
+  <path d="M501 492L603 511L561 606L486 579Z" fill="#f5f1e7"/>
+
+  <path d="M146 780L364 710L412 872L288 1000L150 942Z" fill="#ffd23f"/>
+  <path d="M205 805L329 768L347 857L272 925L208 899Z" fill="#080b10"/>
+  <rect x="479" y="752" width="173" height="241" rx="42" fill="#f04f78"/>
+  <path d="M511 941L567 786L624 941Z" fill="#f5f1e7"/>
+
+  <path d="M138 1114H374L415 1212L335 1328H158L112 1235Z" fill="#080b10"/>
+  <circle cx="203" cy="1198" r="34" fill="#f5f1e7"/>
+  <rect x="263" y="1167" width="92" height="45" fill="#00cfa8"/>
+  <rect x="282" y="1232" width="55" height="52" fill="#ffd23f"/>
+  <path d="M470 1080L668 1153L620 1334L438 1280Z" fill="#f5f1e7"/>
+  <path d="M492 1127L613 1171L548 1290Z" fill="#080b10"/>
+
+  <path d="M132 1450L350 1402L429 1538L326 1704L150 1660Z" fill="#f04f78"/>
+  <path d="M183 1490L321 1459L363 1536L291 1641L188 1615Z" fill="#080b10"/>
+  <rect x="481" y="1430" width="184" height="238" transform="rotate(7 573 1549)" fill="#080b10"/>
+  <circle cx="554" cy="1515" r="39" fill="#ffd23f"/>
+  <path d="M521 1615L594 1542L631 1636Z" fill="#f5f1e7"/>
+
+  <circle cx="245" cy="1900" r="119" fill="#080b10"/>
+  <path d="M164 1906L238 1818L321 1840L344 1932L275 1997L183 1972Z" fill="#f5f1e7"/>
+  <circle cx="262" cy="1915" r="28" fill="#00cfa8"/>
+  <path d="M462 1786H670L635 2019L516 2057L438 1942Z" fill="#ffd23f"/>
+  <path d="M505 1833L617 1851L584 1984L505 1963Z" fill="#080b10"/>
+
+  <path d="M132 2156L381 2102L429 2261L352 2417L146 2386Z" fill="#080b10"/>
+  <path d="M183 2195L316 2168L365 2251L309 2355L193 2339Z" fill="#00cfa8"/>
+  <path d="M473 2150L658 2116L690 2314L561 2427L453 2326Z" fill="#f5f1e7"/>
+  <circle cx="582" cy="2259" r="54" fill="#f04f78"/>
+  <path d="M548 2306L609 2188L630 2332Z" fill="#080b10"/>
+
+  <!-- Signature visuelle centrale : asymétrique, lisible et riche en arêtes. -->
+  <text x="1378" y="324" font-family="DejaVu Sans, Arial, sans-serif"
+        font-size="226" font-weight="800" letter-spacing="11" fill="#080b10">GLUCOVISION</text>
+  <text x="1388" y="509" font-family="DejaVu Sans, Arial, sans-serif"
+        font-size="88" font-weight="700" letter-spacing="8" fill="#2f3842">CARTE REPÈRE • BÊTA</text>
+
+  <path d="M1376 642H2020L2090 780L1942 915L2146 1090L1980 1284L2180 1466L2010 1664H1376Z"
+        fill="#080b10"/>
+  <text x="1458" y="1128" font-family="DejaVu Sans, Arial, sans-serif"
+        font-size="340" font-weight="900" letter-spacing="-16" fill="#f5f1e7">G84</text>
+  <path d="M1452 1375L1683 1259L1882 1398L1760 1588L1517 1570Z" fill="#00cfa8"/>
+  <circle cx="1887" cy="1459" r="69" fill="#ffd23f"/>
+
+  <path d="M2260 664L2583 611L2738 805L2632 1031L2348 1063L2209 858Z" fill="#00cfa8"/>
+  <path d="M2319 710L2548 670L2656 817L2575 978L2385 991L2282 850Z" fill="#080b10"/>
+  <path d="M2380 770L2519 746L2588 836L2538 923L2424 933L2358 846Z" fill="#f5f1e7"/>
+  <circle cx="2481" cy="838" r="29" fill="#f04f78"/>
+
+  <path d="M2825 635H3205L3272 789L3162 927L3260 1075H2850L2752 918L2838 790Z" fill="#ffd23f"/>
+  <path d="M2906 716H3127L3174 800L3095 888L3160 988H2922L2835 908L2918 815Z" fill="#080b10"/>
+  <path d="M3001 757L3104 829L3032 943L2907 869Z" fill="#f5f1e7"/>
+
+  <circle cx="3729" cy="829" r="225" fill="#080b10"/>
+  <circle cx="3678" cy="790" r="139" fill="#f5f1e7"/>
+  <circle cx="3762" cy="850" r="72" fill="#00cfa8"/>
+  <circle cx="3814" cy="791" r="29" fill="#f04f78"/>
+  <path d="M3596 925L3661 840L3720 934Z" fill="#ffd23f"/>
+
+  <path d="M2250 1194L2524 1132L2705 1277L2640 1547L2400 1650L2188 1483Z" fill="#f04f78"/>
+  <path d="M2309 1247L2490 1206L2619 1309L2565 1487L2414 1560L2261 1453Z" fill="#080b10"/>
+  <path d="M2380 1305L2494 1280L2554 1367L2492 1491L2357 1434Z" fill="#f5f1e7"/>
+
+  <path d="M2824 1190H3151L3278 1332L3197 1599L2889 1637L2733 1463Z" fill="#080b10"/>
+  <circle cx="2919" cy="1335" r="61" fill="#00cfa8"/>
+  <path d="M3051 1245L3210 1374L3075 1531L2894 1460Z" fill="#f5f1e7"/>
+  <path d="M3048 1322L3137 1382L3067 1467L2987 1416Z" fill="#ffd23f"/>
+
+  <path d="M3405 1177L3918 1128L4074 1294L3965 1635L3606 1682L3357 1480Z" fill="#00cfa8"/>
+  <path d="M3486 1239L3844 1207L3972 1325L3891 1567L3630 1601L3446 1442Z" fill="#080b10"/>
+  <path d="M3578 1303L3785 1283L3880 1360L3811 1504L3651 1531L3530 1413Z" fill="#f5f1e7"/>
+  <circle cx="3725" cy="1401" r="47" fill="#f04f78"/>
+
+  <!-- Trajet brisé : évite les grandes zones uniformes et aide le suivi visuel. -->
+  <path d="M1405 1831L1692 1732L1917 1858L2183 1749L2420 1886L2724 1725L2968 1874L3277 1731L3522 1897L3960 1778"
+        fill="none" stroke="#080b10" stroke-width="46" stroke-linecap="square" stroke-linejoin="miter"/>
+  <circle cx="1405" cy="1831" r="58" fill="#ffd23f" stroke="#080b10" stroke-width="32"/>
+  <path d="M1882 1800L1959 1911L1835 1930Z" fill="#f04f78"/>
+  <rect x="2651" y="1668" width="143" height="143" transform="rotate(19 2722 1740)" fill="#00cfa8" stroke="#080b10" stroke-width="30"/>
+  <path d="M3449 1812L3522 1718L3614 1849L3501 1914Z" fill="#ffd23f" stroke="#080b10" stroke-width="25"/>
+
+  <!-- Ligne témoin : 2500 unités à 50 unités/mm = exactement 50 mm. -->
+  <text x="1378" y="2138" font-family="DejaVu Sans, Arial, sans-serif"
+        font-size="88" font-weight="700" fill="#080b10">LIGNE TÉMOIN 50 mm</text>
+  <line x1="1380" y1="2250" x2="3880" y2="2250" stroke="#080b10" stroke-width="34"/>
+  <line x1="1380" y1="2175" x2="1380" y2="2325" stroke="#080b10" stroke-width="34"/>
+  <line x1="3880" y1="2175" x2="3880" y2="2325" stroke="#080b10" stroke-width="34"/>
+  <path d="M1380 2250L1485 2192V2308Z" fill="#080b10"/>
+  <path d="M3880 2250L3775 2192V2308Z" fill="#080b10"/>
+
+  <text x="1378" y="2508" font-family="DejaVu Sans, Arial, sans-serif"
+        font-size="82" font-weight="800" letter-spacing="3" fill="#080b10">IMPRIMER À 100 % • SANS AJUSTEMENT</text>
+  <text x="1382" y="2607" font-family="DejaVu Sans, Arial, sans-serif"
+        font-size="60" font-weight="600" fill="#3b444d">Vérifier que la ligne mesure 50 mm avant utilisation.</text>
+</svg>

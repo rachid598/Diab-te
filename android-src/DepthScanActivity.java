@@ -34,10 +34,14 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.ar.core.ArCoreApk;
+import com.google.ar.core.AugmentedImage;
+import com.google.ar.core.AugmentedImageDatabase;
+import com.google.ar.core.CameraIntrinsics;
 import com.google.ar.core.CameraConfig;
 import com.google.ar.core.CameraConfigFilter;
 import com.google.ar.core.Config;
 import com.google.ar.core.Frame;
+import com.google.ar.core.Pose;
 import com.google.ar.core.Session;
 import com.google.ar.core.TrackingState;
 import com.google.ar.core.exceptions.CameraNotAvailableException;
@@ -48,6 +52,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -77,6 +82,13 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
     private static final long PHOTO_CAPTURE_WAIT_MS = 1500;
     private static final long PHOTO_GIVE_UP_EXTRA_MS = 3000;
 
+    private static final String CARD_ASSET = "glucovision-card.png";
+    private static final String CARD_NAME = "glucovision-card";
+    private static final String CARD_SCHEMA = "glucovision-card-v1";
+    private static final double CARD_DEPTH_MAX_RELATIVE_FIELD_ERROR = 0.08;
+    private static final double CARD_DEPTH_MAX_DISTANCE_ERROR_CM = 5.0;
+    private static final double CARD_DEPTH_MAX_NORMAL_ANGLE_DEG = 8.0;
+
     private GLSurfaceView surfaceView;
     private TextView statusView;
     private TextView debugView;
@@ -84,6 +96,15 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
     private final CameraQuadRenderer background = new CameraQuadRenderer();
 
     private Session session;
+    private boolean cardMode;
+    private boolean depthModeSupported;
+    private int cardImageIndex = -1;
+    private String cardSetupError = "";
+    private final CardTrackingGate cardTracking = new CardTrackingGate();
+    private CardGeometry.Result currentCardMeasurement;
+    private long currentCardFrameTimestamp = Long.MIN_VALUE;
+    private String currentCardTrackingMethod = "NOT_TRACKING";
+    private String currentCardNote = "Carte non detectee.";
     private volatile boolean activityResumed;
     private volatile boolean sessionResumed;
     private boolean surfaceResumed;
@@ -118,6 +139,7 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        cardMode = getIntent() != null && getIntent().getBooleanExtra("cardMode", false);
         setContentView(buildUi());
         ensureCameraPermission();
     }
@@ -148,7 +170,9 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
         statusView.setTextSize(15f);
         statusView.setGravity(Gravity.CENTER);
         statusView.setShadowLayer(6f, 0f, 2f, Color.BLACK);
-        statusView.setText("Place l'assiette dans le cadre, laisse de la table autour, puis balaye de 20 cm.");
+        statusView.setText(cardMode
+                ? "Place la carte GlucoVision a plat a cote de l'assiette et garde-la visible."
+                : "Place l'assiette dans le cadre, laisse de la table autour, puis balaye de 20 cm.");
         panel.addView(statusView);
 
         debugView = new TextView(this);
@@ -267,16 +291,18 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
             if (!configs.isEmpty()) session.setCameraConfig(configs.get(0));
 
             Config config = session.getConfig();
-            if (!session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) {
+            depthModeSupported = session.isDepthModeSupported(Config.DepthMode.AUTOMATIC);
+            if (!depthModeSupported && !cardMode) {
                 session.close();
                 session = null;
                 fail("Cet appareil suit ARCore, mais ne fournit pas l'API Depth.");
                 return false;
             }
-            config.setDepthMode(Config.DepthMode.AUTOMATIC);
+            if (depthModeSupported) config.setDepthMode(Config.DepthMode.AUTOMATIC);
             config.setPlaneFindingMode(Config.PlaneFindingMode.DISABLED);
             config.setFocusMode(Config.FocusMode.AUTO);
             config.setUpdateMode(Config.UpdateMode.LATEST_CAMERA_IMAGE);
+            if (cardMode) configureCardDatabase(config);
             session.configure(config);
             readCameraOrientation();
             bindGeometryOnGlThread();
@@ -288,6 +314,32 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
             }
             fail("ARCore indisponible : " + safeMessage(e));
             return false;
+        }
+    }
+
+    /** Cree la base a l'execution afin que la largeur physique fasse partie du contrat signe. */
+    private void configureCardDatabase(Config config) {
+        cardImageIndex = -1;
+        cardSetupError = "";
+        Bitmap bitmap = null;
+        try (InputStream input = getAssets().open(CARD_ASSET)) {
+            bitmap = BitmapFactory.decodeStream(input);
+            if (bitmap == null || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0) {
+                throw new IOException("asset carte illisible");
+            }
+            double expectedRatio = CardGeometry.CARD_WIDTH_M / CardGeometry.CARD_HEIGHT_M;
+            double actualRatio = (double) bitmap.getWidth() / bitmap.getHeight();
+            if (Math.abs(actualRatio - expectedRatio) / expectedRatio > 0.03) {
+                throw new IOException("rapport largeur/hauteur de l'asset carte invalide");
+            }
+            AugmentedImageDatabase database = new AugmentedImageDatabase(session);
+            cardImageIndex = database.addImage(CARD_NAME, bitmap, (float) CardGeometry.CARD_WIDTH_M);
+            config.setAugmentedImageDatabase(database);
+        } catch (IOException | RuntimeException error) {
+            cardImageIndex = -1;
+            cardSetupError = "Carte etalon indisponible : " + safeMessage(error);
+        } finally {
+            if (bitmap != null) bitmap.recycle();
         }
     }
 
@@ -391,7 +443,7 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
             if (trackingPreviously) resetTrackingState();
             trackingPreviously = false;
             if (capturePending && now >= captureDeadline) {
-                tryFinishPhoto(frame, null, now);
+                tryFinishPhoto(frame, null, null, now);
             } else {
                 setStatus("Initialisation du suivi ARCore... bouge doucement le telephone.", false, null);
             }
@@ -404,10 +456,41 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
 
         float[] pose = frame.getCamera().getPose().getTranslation();
         updateBaseline(pose);
+        CardGeometry.Result cardMeasurement = cardMode ? updateCardTracking(frame, now) : null;
 
         if (capturePending) {
+            if (cardMode) {
+                DepthMeasure.Result depthMeasurement = null;
+                boolean cardCurrent = captureWantsScale && cardMeasurement != null
+                        && currentCardFrameTimestamp == frame.getTimestamp()
+                        && cardTracking.ready(now) && now < captureDeadline;
+                if (cardCurrent && depthModeSupported && maxBaselineM >= MIN_BASELINE_M) {
+                    MeasurePacket packet = measureOnce(frame);
+                    if (packet != null && packet.result != null) {
+                        if (packet.result.scaleOk) addObservation(packet.result, pose, now);
+                        else lastFailure = packet.result;
+                        if (packet.result.scaleOk && measurementReady(now)
+                                && candidateCompatible(packet.result, now)) {
+                            depthMeasurement = packet.result;
+                        }
+                    }
+                }
+                if (cardCurrent) {
+                    tryFinishPhoto(frame, depthMeasurement, cardMeasurement, now);
+                } else if (!captureWantsScale || now >= captureDeadline) {
+                    // Carte jamais prete, ou perdue pendant la synchronisation :
+                    // la photo reste possible mais aucune ancienne pose ne voyage.
+                    tryFinishPhoto(frame, null, null, now);
+                } else {
+                    setStatus("Carte perdue : recadre-la pour une mesure, sinon la photo sera conservee seule.",
+                            false, currentCardNote);
+                }
+                return;
+            }
+
             DepthMeasure.Result measurement = null;
-            if (captureWantsScale && maxBaselineM >= MIN_BASELINE_M && now < captureDeadline) {
+            if (captureWantsScale && depthModeSupported
+                    && maxBaselineM >= MIN_BASELINE_M && now < captureDeadline) {
                 MeasurePacket packet = measureOnce(frame);
                 if (packet != null && packet.result != null) {
                     if (packet.result.scaleOk) addObservation(packet.result, pose, now);
@@ -419,7 +502,7 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
                 }
             }
             if (!captureWantsScale || measurement != null || now >= captureDeadline) {
-                tryFinishPhoto(frame, measurement, now);
+                tryFinishPhoto(frame, measurement, null, now);
             } else {
                 setStatus("Synchronisation de la photo et de la profondeur...", false,
                         stableDebug(now));
@@ -427,14 +510,25 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
             return;
         }
 
-        if (now - lastLiveMeasurementAt < LIVE_MEASURE_PERIOD_MS) return;
-        lastLiveMeasurementAt = now;
-        MeasurePacket packet = measureOnce(frame);
+        MeasurePacket packet = null;
+        boolean depthTick = false;
+        if (depthModeSupported && now - lastLiveMeasurementAt >= LIVE_MEASURE_PERIOD_MS) {
+            depthTick = true;
+            lastLiveMeasurementAt = now;
+            packet = measureOnce(frame);
+        }
 
         if (packet != null && packet.result != null) {
             if (packet.result.scaleOk) addObservation(packet.result, pose, now);
             else lastFailure = packet.result;
         }
+
+        if (cardMode) {
+            renderCardStatus(now, packet);
+            return;
+        }
+
+        if (!depthTick) return;
 
         if (maxBaselineM < MIN_BASELINE_M) {
             setStatus("Balaye lentement de gauche a droite : "
@@ -467,6 +561,123 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
                         + Math.round(ready.fieldWidthCm) + " cm de large, a "
                         + Math.round(ready.distanceCm) + " cm.",
                 true, packet.debug);
+    }
+
+    /**
+     * Lit l'etat ACTUEL de l'AugmentedImage. LAST_KNOWN_POSE est volontairement
+     * traite comme une perte : seule FULL_TRACKING prouve que la carte est encore
+     * visible dans la Frame qui pourra etre photographiee.
+     */
+    private CardGeometry.Result updateCardTracking(Frame frame, long now) {
+        if (cardImageIndex < 0 || session == null) {
+            loseCard("NOT_TRACKING", cardSetupError.isEmpty()
+                    ? "Carte etalon non configuree." : cardSetupError);
+            return null;
+        }
+
+        AugmentedImage expected = null;
+        try {
+            for (AugmentedImage image : session.getAllTrackables(AugmentedImage.class)) {
+                if (image.getIndex() == cardImageIndex && CARD_NAME.equals(image.getName())) {
+                    expected = image;
+                    if (image.getTrackingState() == TrackingState.TRACKING
+                            && image.getTrackingMethod()
+                            == AugmentedImage.TrackingMethod.FULL_TRACKING) break;
+                }
+            }
+        } catch (RuntimeException error) {
+            loseCard("NOT_TRACKING", "Lecture du suivi carte impossible : " + safeMessage(error));
+            return null;
+        }
+
+        if (expected == null) {
+            loseCard("NOT_TRACKING", "Carte non detectee dans l'image courante.");
+            return null;
+        }
+        currentCardTrackingMethod = expected.getTrackingMethod().name();
+        if (expected.getTrackingState() != TrackingState.TRACKING
+                || expected.getTrackingMethod() != AugmentedImage.TrackingMethod.FULL_TRACKING) {
+            loseCard(currentCardTrackingMethod,
+                    "Carte non suivie par l'image courante (" + currentCardTrackingMethod + ").");
+            return null;
+        }
+
+        float extentX = expected.getExtentX();
+        float extentZ = expected.getExtentZ();
+        if (!(extentX > 0) || Math.abs(extentX - CardGeometry.CARD_WIDTH_M)
+                / CardGeometry.CARD_WIDTH_M > 0.20
+                || !(extentZ > 0) || Math.abs(extentZ - CardGeometry.CARD_HEIGHT_M)
+                / CardGeometry.CARD_HEIGHT_M > 0.25) {
+            loseCard("FULL_TRACKING", "Dimensions ARCore de la carte incoherentes.");
+            return null;
+        }
+
+        CameraIntrinsics intrinsics = frame.getCamera().getImageIntrinsics();
+        int[] dimensions = intrinsics == null ? null : intrinsics.getImageDimensions();
+        float[] focal = intrinsics == null ? null : intrinsics.getFocalLength();
+        float[] principal = intrinsics == null ? null : intrinsics.getPrincipalPoint();
+        if (dimensions == null || dimensions.length < 2 || focal == null || focal.length < 2
+                || principal == null || principal.length < 2) {
+            loseCard("FULL_TRACKING", "Intrinseques photo indisponibles pour la carte.");
+            return null;
+        }
+
+        Pose cameraFromCard = frame.getCamera().getPose().inverse().compose(expected.getCenterPose());
+        CardGeometry.Result measured = CardGeometry.measure(
+                cameraFromCard.getTranslation(), cameraFromCard.getRotationQuaternion(),
+                focal[0], focal[1], principal[0], principal[1],
+                dimensions[0], dimensions[1]);
+        if (!measured.ok) {
+            loseCard("FULL_TRACKING", measured.note);
+            return null;
+        }
+
+        currentCardTrackingMethod = "FULL_TRACKING";
+        currentCardNote = measured.note;
+        currentCardMeasurement = measured;
+        currentCardFrameTimestamp = frame.getTimestamp();
+        cardTracking.observe(measured, now);
+        return measured;
+    }
+
+    private void loseCard(String method, String note) {
+        cardTracking.lost();
+        currentCardMeasurement = null;
+        currentCardFrameTimestamp = Long.MIN_VALUE;
+        currentCardTrackingMethod = method == null ? "NOT_TRACKING" : method;
+        currentCardNote = note == null ? "Carte non detectee." : note;
+    }
+
+    private void renderCardStatus(long now, MeasurePacket packet) {
+        String debug = packet == null ? null : packet.debug;
+        if (!cardSetupError.isEmpty()) {
+            setStatus(cardSetupError + " La photo seule reste disponible.", false, debug);
+            return;
+        }
+        if (currentCardMeasurement == null) {
+            String guide = "NOT_TRACKING".equals(currentCardTrackingMethod)
+                    ? " Approche jusqu'a ce qu'elle occupe environ 1/4 du cadre, puis recule sans la perdre."
+                    : " Garde toute la carte visible, a plat sur la table.";
+            setStatus(currentCardNote + guide,
+                    false, debug);
+            return;
+        }
+        int count = cardTracking.observations(now);
+        if (!cardTracking.ready(now)) {
+            setStatus("Carte detectee : stabilisation " + count + " / "
+                            + CardTrackingGate.REQUIRED_OBSERVATIONS + ". Ne la masque pas.",
+                    false, debug);
+            return;
+        }
+        String depth = depthModeSupported && measurementReady(now)
+                ? " La profondeur est aussi stable et sera recoupee a la capture."
+                : " L'echelle carte fonctionne meme sans profondeur fiable.";
+        setStatus("Carte stable : champ estime a "
+                        + Math.round(currentCardMeasurement.fieldWidthCm) + " x "
+                        + Math.round(currentCardMeasurement.fieldHeightCm)
+                        + " cm. Garde 50-75 cm de recul avec carte et repas visibles."
+                        + depth,
+                true, debug);
     }
 
     /** Raw, confiance et dense sont acquis depuis le meme Frame et toujours fermes ensemble. */
@@ -605,21 +816,34 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
         synchronized (observationLock) {
             observations.clear();
         }
+        resetCardTracking("Carte non detectee.");
+    }
+
+    private void resetCardTracking(String note) {
+        cardTracking.lost();
+        currentCardMeasurement = null;
+        currentCardFrameTimestamp = Long.MIN_VALUE;
+        currentCardTrackingMethod = "NOT_TRACKING";
+        currentCardNote = note == null ? "Carte non detectee." : note;
     }
 
     private void requestCapture() {
         if (capturePending || finishing.get()) return;
         long now = SystemClock.elapsedRealtime();
-        captureWantsScale = measurementReady(now);
+        captureWantsScale = cardMode ? cardTracking.ready(now) : measurementReady(now);
         capturePending = true;
         captureDeadline = now + (captureWantsScale ? DEPTH_CAPTURE_WAIT_MS : PHOTO_CAPTURE_WAIT_MS);
         captureGiveUp = captureDeadline + PHOTO_GIVE_UP_EXTRA_MS;
         captureButton.setEnabled(false);
-        captureButton.setText(captureWantsScale ? "Synchronisation..." : "Photo...");
+        captureButton.setText(captureWantsScale
+                ? (cardMode ? "Verification carte..." : "Synchronisation...")
+                : "Photo...");
     }
 
     /** Capture la photo du meme Frame que la mesure retenue, sinon une photo seule. */
-    private boolean tryFinishPhoto(Frame frame, DepthMeasure.Result measurement, long now) {
+    private boolean tryFinishPhoto(
+            Frame frame, DepthMeasure.Result measurement,
+            CardGeometry.Result cardMeasurement, long now) {
         Image camera = null;
         try {
             camera = frame.acquireCameraImage();
@@ -628,33 +852,71 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
                 return false;
             }
             Rect crop = camera.getCropRect();
+            boolean fullCrop = crop.left == 0 && crop.top == 0
+                    && crop.width() == camera.getWidth() && crop.height() == camera.getHeight();
             if (measurement != null && (camera.getWidth() != measurement.sourceImageWidthPx
-                    || camera.getHeight() != measurement.sourceImageHeightPx
-                    || crop.left != 0 || crop.top != 0
-                    || crop.width() != camera.getWidth() || crop.height() != camera.getHeight())) {
+                    || camera.getHeight() != measurement.sourceImageHeightPx || !fullCrop)) {
                 // La photo reste valable, mais l'echelle calculee pour un autre
                 // cadrage ne doit pas voyager avec elle.
                 measurement = null;
             }
+            boolean cardVerified = cardMode && cardMeasurement != null
+                    && currentCardFrameTimestamp == frame.getTimestamp()
+                    && cardTracking.ready(now)
+                    && camera.getWidth() == cardMeasurement.sourceImageWidthPx
+                    && camera.getHeight() == cardMeasurement.sourceImageHeightPx
+                    && fullCrop;
+            if (cardMode && !cardVerified) {
+                cardMeasurement = null;
+                // En mode carte, une profondeur seule n'est jamais promue si la
+                // carte demandee n'est plus visible sur CETTE photo.
+                measurement = null;
+            }
+
+            boolean depthCompared = cardVerified && measurement != null && measurement.scaleOk;
+            boolean depthAgrees = depthCompared && CardGeometry.agreesWithDepth(
+                    cardMeasurement,
+                    measurement.fieldWidthCm, measurement.fieldHeightCm, measurement.distanceCm,
+                    measurement.planeA, measurement.planeB,
+                    CARD_DEPTH_MAX_RELATIVE_FIELD_ERROR,
+                    CARD_DEPTH_MAX_DISTANCE_ERROR_CM,
+                    CARD_DEPTH_MAX_NORMAL_ANGLE_DEG);
+            int cardObservations = cardVerified ? cardTracking.observations(now) : 0;
             int rotation = jpegRotationDegrees();
             JpegData jpeg = toJpeg(camera, rotation);
             if (jpeg == null || jpeg.bytes.length == 0) throw new IOException("image YUV illisible");
             File path = writeTemporaryJpeg(jpeg.bytes);
 
-            if (measurement != null && measurement.scaleOk) {
-                measurement.observations = observationCount(now);
-                measurement.parallaxCm = maxBaselineM * 100.0;
-                measurement.fresh = true;
-                measurement.orientForPhoto(rotation, jpeg.width, jpeg.height);
+            DepthMeasure.Result output;
+            CardCaptureInfo cardInfo;
+            if (cardMode && cardVerified) {
+                cardMeasurement.orientForPhoto(rotation, jpeg.width, jpeg.height);
+                if (measurement != null && measurement.scaleOk) {
+                    measurement.orientForPhoto(rotation, jpeg.width, jpeg.height);
+                }
+                output = buildCardScale(
+                        cardMeasurement, measurement, depthCompared, depthAgrees, cardObservations);
+                cardInfo = CardCaptureInfo.verified(
+                        cardMeasurement, cardObservations, depthCompared, depthAgrees, output.note);
+            } else {
+                if (measurement != null && measurement.scaleOk) {
+                    measurement.observations = observationCount(now);
+                    measurement.parallaxCm = maxBaselineM * 100.0;
+                    measurement.fresh = true;
+                    measurement.orientForPhoto(rotation, jpeg.width, jpeg.height);
+                }
+                output = measurement;
+                cardInfo = CardCaptureInfo.unverified(
+                        cardMode, currentCardTrackingMethod,
+                        cardSetupError.isEmpty() ? currentCardNote : cardSetupError);
             }
-            DepthMeasure.Result output = measurement;
             if (!finishing.compareAndSet(false, true)) {
                 //noinspection ResultOfMethodCallIgnored
                 path.delete();
                 return true;
             }
             capturePending = false;
-            runOnUiThread(() -> deliver(path, output, jpeg.width, jpeg.height));
+            runOnUiThread(() -> deliver(path, output, cardInfo, jpeg.width, jpeg.height));
             return true;
         } catch (NotYetAvailableException e) {
             if (now >= captureGiveUp) failOnUi("La camera n'a pas fourni de photo a temps.");
@@ -667,7 +929,53 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
         }
     }
 
-    private void deliver(File jpeg, DepthMeasure.Result result, int photoWidthPx, int photoHeightPx) {
+    private DepthMeasure.Result buildCardScale(
+            CardGeometry.Result card, DepthMeasure.Result depth,
+            boolean depthCompared, boolean depthAgrees, int cardObservations) {
+        DepthMeasure.Result out = new DepthMeasure.Result();
+        out.scaleOk = true;
+        out.fresh = true;
+        out.fieldWidthCm = card.fieldWidthCm;
+        out.fieldHeightCm = card.fieldHeightCm;
+        out.distanceCm = card.distanceCm;
+        out.cmPerPixel = card.cmPerPixel;
+        out.planeA = card.planeA;
+        out.planeB = card.planeB;
+        out.sourceImageWidthPx = card.sourceImageWidthPx;
+        out.sourceImageHeightPx = card.sourceImageHeightPx;
+        out.observations = cardObservations;
+
+        if (depthCompared && depthAgrees && depth != null) {
+            out.ok = depth.ok;
+            out.volumeCm3 = depth.volumeCm3;
+            out.areaCm2 = depth.areaCm2;
+            out.heightMaxCm = depth.heightMaxCm;
+            out.heightMeanCm = depth.heightMeanCm;
+            out.samples = depth.samples;
+            out.confidentPixels = depth.confidentPixels;
+            out.coverage = depth.coverage;
+            out.parallaxCm = depth.parallaxCm > 0 ? depth.parallaxCm : maxBaselineM * 100.0;
+            out.diag = "carte+depth | " + depth.diag;
+            out.note = depth.ok
+                    ? "Echelle carte verifiee. Profondeur concordante ; relief experimental disponible."
+                    : "Echelle carte verifiee. Profondeur concordante, relief non retenu.";
+        } else if (depthCompared) {
+            // L'echelle carte reste valide, mais aucune valeur Depth en desaccord
+            // ne peut activer le relief ni remplacer cette echelle.
+            out.ok = false;
+            out.diag = "carte valide | depth en desaccord";
+            out.note = "Echelle carte verifiee. Profondeur en desaccord, donc relief refuse.";
+        } else {
+            out.ok = false;
+            out.diag = "carte valide | depth indisponible";
+            out.note = "Echelle carte verifiee. Profondeur indisponible ou non stabilisee.";
+        }
+        return out;
+    }
+
+    private void deliver(
+            File jpeg, DepthMeasure.Result result, CardCaptureInfo card,
+            int photoWidthPx, int photoHeightPx) {
         Intent out = new Intent();
         out.putExtra("jpegPath", jpeg.getAbsolutePath());
         out.putExtra("photoWidthPx", photoWidthPx);
@@ -691,8 +999,32 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
         out.putExtra("observations", result == null ? 0 : result.observations);
         out.putExtra("parallaxCm", result == null ? 0 : result.parallaxCm);
         out.putExtra("fresh", result != null && result.fresh);
+        out.putExtra("scaleSource", scaleOk
+                ? (card.verified
+                    ? (card.depthCompared && card.depthAgrees ? "card+depth" : "card")
+                    : "depth")
+                : "none");
+        out.putExtra("cardRequested", card.requested);
+        out.putExtra("cardVerified", card.verified);
+        out.putExtra("cardFresh", card.fresh);
+        out.putExtra("cardName", CARD_NAME);
+        out.putExtra("cardSchema", CARD_SCHEMA);
+        out.putExtra("cardWidthCm", card.verified ? CardGeometry.CARD_WIDTH_M * 100.0 : 0);
+        out.putExtra("cardHeightCm", card.verified ? CardGeometry.CARD_HEIGHT_M * 100.0 : 0);
+        out.putExtra("cardDistanceCm", card.verified ? card.distanceCm : 0);
+        out.putExtra("cardFieldWidthCm", card.verified ? card.fieldWidthCm : 0);
+        out.putExtra("cardFieldHeightCm", card.verified ? card.fieldHeightCm : 0);
+        out.putExtra("cardCmPerPixel", card.verified ? card.cmPerPixel : 0);
+        out.putExtra("cardIncidenceDeg", card.verified ? card.incidenceDeg : 0);
+        out.putExtra("cardTrackingMethod", card.trackingMethod);
+        out.putExtra("cardObservations", card.verified ? card.observations : 0);
+        out.putExtra("cardDepthCompared", card.depthCompared);
+        out.putExtra("cardDepthAgrees", card.depthAgrees);
+        out.putExtra("cardNote", card.note);
         out.putExtra("note", result == null
-                ? "Photo conservee sans mesure de profondeur."
+                ? (card.requested
+                    ? "Photo conservee sans mesure : carte non verifiee sur la Frame capturee."
+                    : "Photo conservee sans mesure de profondeur.")
                 : result.note);
         out.putExtra("diag", result == null ? "" : result.diag);
         setResult(RESULT_OK, out);
@@ -846,7 +1178,9 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
             if (debug != null) debugView.setText(debug);
             if (!capturePending) {
                 captureButton.setEnabled(true);
-                captureButton.setText(ready ? "Capturer avec l'echelle" : "Capturer la photo seule");
+                captureButton.setText(ready
+                        ? (cardMode ? "Capturer avec la carte" : "Capturer avec l'echelle")
+                        : "Capturer la photo seule");
             }
         });
     }
@@ -894,6 +1228,60 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
         MeasurePacket(DepthMeasure.Result result, String debug) {
             this.result = result;
             this.debug = debug;
+        }
+    }
+
+    private static final class CardCaptureInfo {
+        final boolean requested;
+        final boolean verified;
+        final boolean fresh;
+        final double distanceCm;
+        final double fieldWidthCm;
+        final double fieldHeightCm;
+        final double cmPerPixel;
+        final double incidenceDeg;
+        final String trackingMethod;
+        final int observations;
+        final boolean depthCompared;
+        final boolean depthAgrees;
+        final String note;
+
+        private CardCaptureInfo(
+                boolean requested, boolean verified, boolean fresh,
+                double distanceCm, double fieldWidthCm, double fieldHeightCm,
+                double cmPerPixel, double incidenceDeg, String trackingMethod,
+                int observations, boolean depthCompared, boolean depthAgrees,
+                String note) {
+            this.requested = requested;
+            this.verified = verified;
+            this.fresh = fresh;
+            this.distanceCm = distanceCm;
+            this.fieldWidthCm = fieldWidthCm;
+            this.fieldHeightCm = fieldHeightCm;
+            this.cmPerPixel = cmPerPixel;
+            this.incidenceDeg = incidenceDeg;
+            this.trackingMethod = trackingMethod;
+            this.observations = observations;
+            this.depthCompared = depthCompared;
+            this.depthAgrees = depthAgrees;
+            this.note = note == null ? "" : note;
+        }
+
+        static CardCaptureInfo verified(
+                CardGeometry.Result card, int observations,
+                boolean depthCompared, boolean depthAgrees, String note) {
+            return new CardCaptureInfo(
+                    true, true, true,
+                    card.centerDistanceCm, card.fieldWidthCm, card.fieldHeightCm,
+                    card.cmPerPixel, card.incidenceDeg, "FULL_TRACKING",
+                    observations, depthCompared, depthAgrees, note);
+        }
+
+        static CardCaptureInfo unverified(boolean requested, String method, String note) {
+            return new CardCaptureInfo(
+                    requested, false, false, 0, 0, 0, 0, 0,
+                    method == null ? "NOT_TRACKING" : method,
+                    0, false, false, note);
         }
     }
 

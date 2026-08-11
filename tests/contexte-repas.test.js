@@ -70,7 +70,8 @@ test('le bloc arrive réellement dans le prompt photo', () => {
   // Une fonction juste mais non branchée ne sert à rien : c'est le défaut que
   // le test navigateur a déjà attrapé une fois sur l'écran de comparaison.
   const prompt = Estimator.buildPhotoPrompt({
-    imageCount: 1, referenceObject: 'none', mealAt: a(20), venue: 'restaurant'
+    imageCount: 1, referenceMode: 'none', viewMeasurements: [],
+    mealAt: a(20), venue: 'restaurant'
   });
   assert.match(prompt, /CONTEXTE DU REPAS : dîner, au restaurant/);
   assert.match(prompt, /Réponds uniquement avec le JSON\.$/,
@@ -80,6 +81,8 @@ test('le bloc arrive réellement dans le prompt photo', () => {
 test('le prompt photo reste inchangé quand rien n\'est connu du contexte', () => {
   // mealAt absent → l'heure courante s'applique : le bloc existe toujours, mais
   // il ne doit jamais nommer de lieu non choisi.
-  const prompt = Estimator.buildPhotoPrompt({ imageCount: 1, referenceObject: 'none' });
+  const prompt = Estimator.buildPhotoPrompt({
+    imageCount: 1, referenceMode: 'none', viewMeasurements: []
+  });
   assert.doesNotMatch(prompt, /au restaurant|à la maison|à la cantine/);
 });

@@ -61,6 +61,9 @@ public class DepthScanPlugin extends Plugin {
             return;
         }
         Intent intent = new Intent(activity, DepthScanActivity.class);
+        /* Le mode carte est une intention native explicite. L'activite ne le
+           deduit jamais d'un prompt ni du contenu renvoye par un modele. */
+        intent.putExtra("cardMode", Boolean.TRUE.equals(call.getBoolean("cardMode", false)));
         startActivityForResult(call, intent, "captureResult");
     }
 
@@ -103,6 +106,24 @@ public class DepthScanPlugin extends Plugin {
             ret.put("observations", data.getIntExtra("observations", 0));
             ret.put("parallaxCm", data.getDoubleExtra("parallaxCm", 0));
             ret.put("fresh", data.getBooleanExtra("fresh", false));
+            ret.put("scaleSource", data.getStringExtra("scaleSource"));
+            ret.put("cardRequested", data.getBooleanExtra("cardRequested", false));
+            ret.put("cardVerified", data.getBooleanExtra("cardVerified", false));
+            ret.put("cardFresh", data.getBooleanExtra("cardFresh", false));
+            ret.put("cardName", data.getStringExtra("cardName"));
+            ret.put("cardSchema", data.getStringExtra("cardSchema"));
+            ret.put("cardWidthCm", data.getDoubleExtra("cardWidthCm", 0));
+            ret.put("cardHeightCm", data.getDoubleExtra("cardHeightCm", 0));
+            ret.put("cardDistanceCm", data.getDoubleExtra("cardDistanceCm", 0));
+            ret.put("cardFieldWidthCm", data.getDoubleExtra("cardFieldWidthCm", 0));
+            ret.put("cardFieldHeightCm", data.getDoubleExtra("cardFieldHeightCm", 0));
+            ret.put("cardCmPerPixel", data.getDoubleExtra("cardCmPerPixel", 0));
+            ret.put("cardIncidenceDeg", data.getDoubleExtra("cardIncidenceDeg", 0));
+            ret.put("cardTrackingMethod", data.getStringExtra("cardTrackingMethod"));
+            ret.put("cardObservations", data.getIntExtra("cardObservations", 0));
+            ret.put("cardDepthCompared", data.getBooleanExtra("cardDepthCompared", false));
+            ret.put("cardDepthAgrees", data.getBooleanExtra("cardDepthAgrees", false));
+            ret.put("cardNote", data.getStringExtra("cardNote"));
             ret.put("note", data.getStringExtra("note"));
             ret.put("diag", data.getStringExtra("diag"));
             call.resolve(ret);

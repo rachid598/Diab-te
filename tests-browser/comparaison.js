@@ -49,6 +49,24 @@ function avis(provider, model, total, nomAliment) {
   };
 }
 
+function mesureCarte(viewIndex, width) {
+  const shared = {
+    cardRequested: true, cardVerified: true, cardFresh: true,
+    cardSchema: 'glucovision-card-v1', cardName: 'glucovision-card',
+    scaleSource: 'card', cardTrackingMethod: 'FULL_TRACKING', cardObservations: 4,
+    cardWidthCm: 8.56, cardHeightCm: 5.398
+  };
+  return {
+    viewIndex: viewIndex,
+    depth: Object.assign({
+      scaleOk: true, fresh: true, cardMode: true,
+      fieldWidthCm: width, fieldHeightCm: 20,
+      distanceCm: 62, cmPerPixel: 0.02
+    }, shared),
+    reference: Object.assign({ mode: 'glucovision-card-v1' }, shared)
+  };
+}
+
 function serveur() {
   return http.createServer(function (q, r) {
     const rel = decodeURIComponent(q.url.split('?')[0]).replace(/^\/+/, '') || 'index.html';
@@ -99,7 +117,7 @@ async function ecran(page, liste, contexte) {
 
 (async function () {
   const srv = serveur();
-  await new Promise(function (res) { srv.listen(PORT, res); });
+  await new Promise(function (res) { srv.listen(PORT, '127.0.0.1', res); });
   /* PW_CHROMIUM : chemin d'un Chromium déjà présent sur la machine. Sert au
      développement local, où la version de Playwright peut ne pas correspondre
      aux navigateurs installés. En CI la variable est absente et Playwright
@@ -138,6 +156,119 @@ async function ecran(page, liste, contexte) {
   verifie(theme.bodyText === 'rgb(245, 248, 252)' && theme.meta.toLowerCase() === '#060910',
     'le texte et la barre système utilisent les couleurs du design system');
   verifie(!theme.pageOverflow, 'la page ne déborde pas horizontalement à 390 px');
+
+  /* Parcours Carte GlucoVision avec un pont Android déterministe. On remplace
+     uniquement native.js sur cette page isolée : tout le DOM et app.js restent
+     ceux réellement publiés. */
+  console.log('\nCarte GlucoVision :');
+  const cardPage = await ctx.newPage();
+  await cardPage.route('**/js/native.js*', function (route) {
+    return route.fulfill({ status: 200, contentType: 'text/javascript', body: `
+      (function () {
+        window.__depthCaptureRequests = [];
+        window.__depthCaptureCount = 0;
+        function jpeg() {
+          var c = document.createElement('canvas'); c.width = 640; c.height = 480;
+          var x = c.getContext('2d'); x.fillStyle = '#7a5635'; x.fillRect(0, 0, 640, 480);
+          return c.toDataURL('image/jpeg', 0.82).split(',')[1];
+        }
+        function capture(options) {
+          window.__depthCaptureRequests.push(options);
+          window.__depthCaptureCount += 1;
+          var n = window.__depthCaptureCount;
+          var depth = {
+            jpegBase64: jpeg(), scaleOk: true, fresh: true,
+            fieldWidthCm: n === 1 ? 30 : 27, fieldHeightCm: 20,
+            distanceCm: 62, cmPerPixel: n === 1 ? 0.02 : 0.018,
+            cardRequested: true, cardVerified: true, cardFresh: true,
+            cardSchema: 'glucovision-card-v1', cardName: 'glucovision-card',
+            scaleSource: 'card', cardTrackingMethod: 'FULL_TRACKING',
+            cardObservations: 4, cardWidthCm: 8.56, cardHeightCm: 5.398,
+            observations: 4, parallaxCm: 20
+          };
+          if (window.__depthIncomplete) {
+            delete depth.cardObservations; delete depth.cardTrackingMethod;
+            delete depth.cardWidthCm; delete depth.cardHeightCm;
+          }
+          return Promise.resolve({
+            urls: ['data:image/jpeg;base64,' + depth.jpegBase64],
+            depth: Object.assign({ cardMode: options && options.cardMode === true }, depth)
+          });
+        }
+        window.Native = {
+          isApp: true, platform: 'android',
+          ready: function () { return Promise.resolve(true); },
+          markReady: function () { return Promise.resolve(true); },
+          appBuild: function () { return Promise.resolve(2084); },
+          writeStartupReport: function () { return Promise.resolve('ok'); },
+          selfCheck: function () { return {}; }, selfCheckLine: function () { return 'ok'; },
+          onResume: function () {}, onLaunchAction: function () {},
+          camera: { capture: function () { return Promise.resolve([]); },
+                    pickMany: function () { return Promise.resolve([]); } },
+          depth: { available: function () { return Promise.resolve({ supported: true, installed: true }); },
+                   capture: capture },
+          secure: { load: function () { return Promise.resolve({}); },
+                    save: function () { return Promise.resolve(true); } },
+          photos: { src: function () { return ''; }, save: function () { return Promise.resolve(null); },
+                    remove: function () { return Promise.resolve(true); },
+                    prune: function () { return Promise.resolve(0); },
+                    size: function () { return Promise.resolve(0); } },
+          notify: { permission: function () { return Promise.resolve(false); },
+                    schedule: function () { return Promise.resolve(false); },
+                    cancel: function () { return Promise.resolve(false); } },
+          update: { check: function () { return Promise.resolve({ kind: 'current' }); },
+                    download: function () { return Promise.resolve(null); },
+                    apply: function () { return Promise.resolve(false); } },
+          httpJson: function () { return Promise.reject(new Error('offline test')); },
+          saveToDocuments: function () { return Promise.resolve(false); },
+          shareFile: function () { return Promise.resolve(false); }
+        };
+      })();
+    ` });
+  });
+  await cardPage.goto('http://localhost:' + PORT + '/');
+  await cardPage.waitForFunction(function () {
+    return /APK 2084/.test(document.getElementById('app-version').textContent || '');
+  });
+  await cardPage.click('#reference-card > summary');
+  await cardPage.selectOption('#reference-mode', 'glucovision-card-v1');
+  await cardPage.waitForSelector('#btn-depth:not([hidden])');
+  verifie(await cardPage.isVisible('#glucovision-card-guide'),
+    'sélectionner Carte révèle la checklist guidée');
+  const cardHref = await cardPage.getAttribute('.reference-download', 'href');
+  verifie(/glucovision-card\.svg$/.test(cardHref || ''),
+    'le guide fournit le téléchargement de la carte SVG');
+  verifie(await cardPage.locator('a[href="https://policies.google.com/privacy"]').count() === 1,
+    'la divulgation ARCore renvoie vers la confidentialité de Google');
+  await cardPage.click('#btn-depth');
+  await cardPage.waitForFunction(function () { return document.querySelectorAll('#thumbs .thumb').length === 1; });
+  await cardPage.click('#btn-depth');
+  await cardPage.waitForFunction(function () { return document.querySelectorAll('#thumbs .thumb').length === 2; });
+  const cardCapture = await cardPage.evaluate(function () {
+    return {
+      requests: window.__depthCaptureRequests,
+      result: document.getElementById('depth-result').textContent
+    };
+  });
+  verifie(cardCapture.requests.length === 2 &&
+      cardCapture.requests.every(function (r) { return r && r.cardMode === true; }),
+    'chaque Photo mesurée appelle le natif avec {cardMode:true}');
+  verifie(/2 vues mesurées/.test(cardCapture.result),
+    'deux captures distinctes restent deux métadonnées par vue');
+  await cardPage.selectOption('#reference-mode', 'none');
+  verifie(await cardPage.isHidden('#btn-depth') && await cardPage.isHidden('#depth-result'),
+    'revenir au mode rapide masque l’action et ignore les anciennes mesures');
+
+  await cardPage.click('#clear-photos');
+  await cardPage.selectOption('#reference-mode', 'glucovision-card-v1');
+  await cardPage.evaluate(function () { window.__depthIncomplete = true; });
+  await cardPage.click('#btn-depth');
+  await cardPage.waitForSelector('#depth-result.d-warn:not([hidden])');
+  const incompleteDepth = await cardPage.textContent('#depth-result');
+  verifie(!/échelle ARCore vérifiées/i.test(incompleteDepth || '') &&
+      /Aucune mesure utilisée/i.test(incompleteDepth || ''),
+    'une réponse native incomplète n’est jamais présentée comme vérifiée');
+  await cardPage.close();
 
   await page.click('#open-settings');
   await page.waitForFunction(function () {
@@ -212,6 +343,46 @@ async function ecran(page, liste, contexte) {
       contexteSauve.inputVenue === 'restaurant' && contexteSauve.mealAt === mealAtConserve &&
       contexteSauve.clarificationAnswered === true,
     'heure, lieu et clarification survivent à une comparaison restaurée et à son brouillon');
+
+  await ecran(page, [avis('gemini', 'gemini-3.1-flash-lite', 48, riz),
+                      avis('openrouter', 'x-ai/grok-4.5', 50, riz)], {
+    notes: 'contrat carte multi-vues', imageCount: 2,
+    referenceMode: 'glucovision-card-v1',
+    viewMeasurements: [mesureCarte(1, 30), mesureCarte(2, 27)]
+  });
+  const carteSauvee = await page.evaluate(function () {
+    const h = JSON.parse(localStorage.getItem('diabete.history.v1') || '[]');
+    const e = h.filter(function (x) {
+      return x.input && x.input.notes === 'contrat carte multi-vues';
+    })[0];
+    return e && e.input ? e.input : null;
+  });
+  verifie(!!carteSauvee && carteSauvee.referenceMode === 'glucovision-card-v1' &&
+      carteSauvee.viewMeasurements.length === 2 &&
+      carteSauvee.viewMeasurements[0].viewIndex === 1 &&
+      carteSauvee.viewMeasurements[1].viewIndex === 2 &&
+      carteSauvee.viewMeasurements[1].depth.fieldWidthCm === 27,
+    'comparaison et historique conservent les deux contrats natifs sans troncature');
+
+  const preuveIncomplete = mesureCarte(1, 30);
+  delete preuveIncomplete.depth.cardObservations;
+  delete preuveIncomplete.depth.cardTrackingMethod;
+  delete preuveIncomplete.depth.cardWidthCm;
+  await ecran(page, [avis('gemini', 'gemini-3.1-flash-lite', 48, riz),
+                      avis('openrouter', 'x-ai/grok-4.5', 50, riz)], {
+    notes: 'contrat carte forge', imageCount: 1,
+    referenceMode: 'glucovision-card-v1', viewMeasurements: [preuveIncomplete]
+  });
+  const carteForgee = await page.evaluate(function () {
+    const h = JSON.parse(localStorage.getItem('diabete.history.v1') || '[]');
+    const e = h.filter(function (x) {
+      return x.input && x.input.notes === 'contrat carte forge';
+    })[0];
+    return e && e.input ? e.input : null;
+  });
+  verifie(!!carteForgee && carteForgee.referenceMode === 'glucovision-card-v1' &&
+      Array.isArray(carteForgee.viewMeasurements) && carteForgee.viewMeasurements.length === 0,
+    'une preuve carte incomplète est retirée des reprises et de l’historique');
 
   vu = await ecran(page, [
     avis('gemini', 'gemini-3.1-flash-lite', 50, [[riz, 40], [pain, 10]]),

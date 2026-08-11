@@ -37,6 +37,7 @@ test('Bench.cases exclut brouillons, blocages et confirmation dominante manquant
 });
 
 test('Bench.runModel ne score jamais un résultat bloqué', async () => {
+  let sentContext = null;
   const { Bench } = loadScript('js/bench.js', {
     Storage: { getHistory: () => [] },
     Native: { isApp: false },
@@ -44,7 +45,10 @@ test('Bench.runModel ne score jamais un résultat bloqué', async () => {
       processDataUrl: () => Promise.resolve({ base64: 'aGVsbG8=', mediaType: 'image/jpeg' })
     },
     Estimator: {
-      estimateWith: () => Promise.resolve({ totalCarbsG: 20, blocking: ['incohérent'] })
+      estimateWith: (provider, images, ctx) => {
+        sentContext = ctx;
+        return Promise.resolve({ totalCarbsG: 20, blocking: ['incohérent'] });
+      }
     }
   });
   const results = await Bench.runModel(
@@ -55,6 +59,10 @@ test('Bench.runModel ne score jamais un résultat bloqué', async () => {
   assert.equal(results[0].got, null);
   assert.match(results[0].error, /bloqué/i);
   assert.equal(Bench.score(results).n, 0);
+  assert.equal(sentContext.referenceMode, 'none');
+  assert.equal(Array.isArray(sentContext.viewMeasurements) && sentContext.viewMeasurements.length, 0);
+  assert.equal('referenceObject' in sentContext, false);
+  assert.equal('depth' in sentContext, false);
 });
 
 test('Bench.score rend inéligible un modèle qui échoue sur plus de 20 % des cas', () => {

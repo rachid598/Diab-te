@@ -87,6 +87,44 @@ def check_activity_contracts() -> None:
     require(activity, r"Photo conservee sans mesure", "repli photo sans profondeur absent")
 
 
+def check_card_contracts() -> None:
+    activity = (ROOT / "android-src/DepthScanActivity.java").read_text(encoding="utf-8")
+    plugin = (ROOT / "android-src/DepthScanPlugin.java").read_text(encoding="utf-8")
+    geometry = (ROOT / "android-src/CardGeometry.java").read_text(encoding="utf-8")
+
+    require(plugin, r'getBoolean\(\s*"cardMode"\s*,\s*false\s*\)',
+            "cardMode non lu explicitement depuis l'appel Capacitor")
+    require(plugin, r'putExtra\(\s*"cardMode"',
+            "cardMode non transmis a DepthScanActivity")
+    require(activity, r'CARD_ASSET\s*=\s*"glucovision-card\.png"',
+            "asset carte ARCore incorrect")
+    require(activity, r'new\s+AugmentedImageDatabase\s*\(\s*session\s*\)',
+            "base Augmented Images absente")
+    require(activity, r'addImage\s*\(\s*CARD_NAME\s*,\s*bitmap\s*,\s*\(float\)\s*CardGeometry\.CARD_WIDTH_M',
+            "largeur physique de la carte non fournie a ARCore")
+    require(activity, r'getAllTrackables\s*\(\s*AugmentedImage\.class\s*\)',
+            "etat courant de l'AugmentedImage non relu")
+    require(activity, r'AugmentedImage\.TrackingMethod\.FULL_TRACKING',
+            "FULL_TRACKING non exige pour la carte")
+    require(activity, r'currentCardFrameTimestamp\s*==\s*frame\.getTimestamp\(\)',
+            "fraicheur Frame/carte non exigee a la capture")
+    require(activity, r'cardMode\s*\?\s*cardTracking\.ready\(now\)\s*:\s*measurementReady\(now\)',
+            "la carte stable ne peut pas declencher une capture mesuree sans Depth")
+    require(activity, r'if\s*\(cardMode\s*&&\s*!cardVerified\).*?measurement\s*=\s*null',
+            "une profondeur survit a la perte de la carte demandee")
+    require(activity, r'agreesWithDepth\s*\(', "carte et Depth ne sont jamais recoupees")
+    require(activity, r'out\.putExtra\(\s*"scaleSource"', "source d'echelle native absente")
+    require(geometry, r'CARD_WIDTH_M\s*=\s*0\.08560', "largeur ISO de la carte modifiee")
+
+    for field in (
+        "cardRequested", "cardVerified", "cardFresh", "cardName", "cardSchema",
+        "cardWidthCm", "cardHeightCm", "cardDistanceCm", "cardFieldWidthCm",
+        "cardFieldHeightCm", "cardCmPerPixel", "cardTrackingMethod",
+        "cardObservations", "cardDepthCompared", "cardDepthAgrees", "cardNote",
+    ):
+        require(plugin, rf'ret\.put\("{field}"', f"champ carte du pont natif absent : {field}")
+
+
 def check_web_bridge_contract() -> None:
     source = (ROOT / "src/capacitor-plugins.js").read_text(encoding="utf-8")
     native = (ROOT / "js/native.js").read_text(encoding="utf-8")
@@ -110,6 +148,7 @@ def check_web_bridge_contract() -> None:
 def main() -> None:
     check_measure_arity()
     check_activity_contracts()
+    check_card_contracts()
     check_web_bridge_contract()
     print("Appels et contrats Android conformes.")
 

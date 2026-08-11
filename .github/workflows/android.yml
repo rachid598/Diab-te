@@ -5,8 +5,6 @@ on:
   pull_request:
     branches:
       - codex
-      - sans-relief
-      - avec-relief
     paths:
       - 'README.md'
       - 'index.html'
@@ -16,6 +14,8 @@ on:
       - 'src/**'
       - 'vendor/**'
       - 'icons/**'
+      - 'glucovision-card.svg'
+      - 'android-card/**'
       - 'manifest.webmanifest'
       - 'capacitor.config.json'
       - 'package.json'
@@ -32,8 +32,6 @@ on:
   push:
     branches:
       - codex
-      - sans-relief
-      - avec-relief
     paths:
       - 'README.md'
       - 'index.html'
@@ -43,6 +41,8 @@ on:
       - 'src/**'
       - 'vendor/**'
       - 'icons/**'
+      - 'glucovision-card.svg'
+      - 'android-card/**'
       - 'manifest.webmanifest'
       - 'capacitor.config.json'
       - 'package.json'
@@ -70,6 +70,11 @@ env:
   # Empreinte du certificat déjà installé sur le téléphone. Ce contrôle est
   # bloquant avant le build puis répété sur l'APK produit.
   EXPECTED_CERT_SHA256: 6fbba12e3103b5919940ab0de529f900b3ce085c90195f898c9b4ee5265a4a8b
+  # Ces empreintes lient la carte imprimable au PNG réellement embarqué dans
+  # l'APK. Toute régénération volontaire doit mettre à jour les deux valeurs,
+  # le test de contrat et la documentation dans le même commit.
+  CARD_SVG_SHA256: 008fd2ac738425f3fec2d2005f1b7e75dbf0d27f96b5909c2fe85f1c8cb79bc9
+  CARD_PNG_SHA256: 55e41e95feafe666b6fb245ac8e0df5669e2f49e9b62d61f7359c7b9112a15ae
 
 jobs:
   build:
@@ -87,7 +92,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Déterminer la variante
+      - name: Valider la branche et fixer l'identité unique
         id: variant
         shell: bash
         run: |
@@ -95,56 +100,23 @@ jobs:
           # Sur une PR, GITHUB_REF_NAME vaut « 123/merge » : c'est la branche
           # cible qui détermine l'identité Android à valider.
           BRANCH="${GITHUB_BASE_REF:-$GITHUB_REF_NAME}"
-          case "$BRANCH" in
-            codex)
-              echo "apk_tag=apk-codex" >> "$GITHUB_OUTPUT"
-              echo "ota_tag=ota-codex" >> "$GITHUB_OUTPUT"
-              echo "app_id=io.github.rachid598.glucovision" >> "$GITHUB_OUTPUT"
-              echo "label=GlucoVision Codex" >> "$GITHUB_OUTPUT"
-              echo "artifact=glucovision-apk-codex" >> "$GITHUB_OUTPUT"
-              echo "code_offset=2000" >> "$GITHUB_OUTPUT"
-              echo "has_depth=true" >> "$GITHUB_OUTPUT"
-              echo "minimum_native_floor=2080" >> "$GITHUB_OUTPUT"
-              echo "ota_version_prefix=ota-v" >> "$GITHUB_OUTPUT"
-              echo "title=GlucoVision — APK Codex avec relief" >> "$GITHUB_OUTPUT"
-              ;;
-            sans-relief)
-              echo "apk_tag=apk-stable" >> "$GITHUB_OUTPUT"
-              echo "ota_tag=ota-stable" >> "$GITHUB_OUTPUT"
-              echo "app_id=io.github.rachid598.glucovision" >> "$GITHUB_OUTPUT"
-              echo "label=GlucoVision" >> "$GITHUB_OUTPUT"
-              echo "artifact=glucovision-apk-stable" >> "$GITHUB_OUTPUT"
-              echo "code_offset=2000" >> "$GITHUB_OUTPUT"
-              echo "has_depth=false" >> "$GITHUB_OUTPUT"
-              echo "minimum_native_floor=57" >> "$GITHUB_OUTPUT"
-              echo "ota_version_prefix=ota-stable-v" >> "$GITHUB_OUTPUT"
-              echo "title=GlucoVision — APK stable sans relief" >> "$GITHUB_OUTPUT"
-              ;;
-            avec-relief)
-              echo "apk_tag=apk-relief" >> "$GITHUB_OUTPUT"
-              echo "ota_tag=ota-relief" >> "$GITHUB_OUTPUT"
-              echo "app_id=io.github.rachid598.glucovision.relief" >> "$GITHUB_OUTPUT"
-              echo "label=GlucoVision Relief" >> "$GITHUB_OUTPUT"
-              echo "artifact=glucovision-apk-relief" >> "$GITHUB_OUTPUT"
-              echo "code_offset=0" >> "$GITHUB_OUTPUT"
-              echo "has_depth=true" >> "$GITHUB_OUTPUT"
-              echo "minimum_native_floor=57" >> "$GITHUB_OUTPUT"
-              echo "ota_version_prefix=ota-relief-v" >> "$GITHUB_OUTPUT"
-              echo "title=GlucoVision — APK relief expérimental" >> "$GITHUB_OUTPUT"
-              ;;
-            *)
-              echo "apk_tag=apk-latest" >> "$GITHUB_OUTPUT"
-              echo "ota_tag=ota-latest" >> "$GITHUB_OUTPUT"
-              echo "app_id=io.github.rachid598.glucovision" >> "$GITHUB_OUTPUT"
-              echo "label=GlucoVision" >> "$GITHUB_OUTPUT"
-              echo "artifact=glucovision-apk" >> "$GITHUB_OUTPUT"
-              echo "code_offset=0" >> "$GITHUB_OUTPUT"
-              echo "has_depth=true" >> "$GITHUB_OUTPUT"
-              echo "minimum_native_floor=57" >> "$GITHUB_OUTPUT"
-              echo "ota_version_prefix=ota-v" >> "$GITHUB_OUTPUT"
-              echo "title=GlucoVision — APK Android" >> "$GITHUB_OUTPUT"
-              ;;
-          esac
+          if [[ "$BRANCH" != "codex" ]]; then
+            echo "::error::Branche inattendue : $BRANCH. Seule codex peut produire GlucoVision."
+            exit 1
+          fi
+          # Une seule application et un seul canal. ARCore est embarqué comme
+          # capacité optionnelle : le parcours photo classique reste disponible
+          # sur les téléphones sans Depth ou quand l'utilisateur ne l'active pas.
+          echo "apk_tag=apk-codex" >> "$GITHUB_OUTPUT"
+          echo "ota_tag=ota-codex" >> "$GITHUB_OUTPUT"
+          echo "app_id=io.github.rachid598.glucovision" >> "$GITHUB_OUTPUT"
+          echo "label=GlucoVision" >> "$GITHUB_OUTPUT"
+          echo "artifact=glucovision-apk-codex" >> "$GITHUB_OUTPUT"
+          echo "code_offset=2000" >> "$GITHUB_OUTPUT"
+          echo "has_depth=true" >> "$GITHUB_OUTPUT"
+          echo "minimum_native_floor=2084" >> "$GITHUB_OUTPUT"
+          echo "ota_version_prefix=ota-v" >> "$GITHUB_OUTPUT"
+          echo "title=GlucoVision — APK avec relief optionnel" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v4
         with:
@@ -217,6 +189,46 @@ jobs:
           echo "bundle=1.$APP_VERSION.0" >> "$GITHUB_OUTPUT"
           echo "min_native=$MIN_NATIVE" >> "$GITHUB_OUTPUT"
 
+      - name: Vérifier la carte repère imprimable et native
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f glucovision-card.svg || { echo "::error::glucovision-card.svg absent"; exit 1; }
+          test -f android-card/glucovision-card.png || {
+            echo "::error::android-card/glucovision-card.png absent"
+            exit 1
+          }
+          printf '%s  %s\n' "$CARD_SVG_SHA256" glucovision-card.svg | sha256sum --check --strict
+          printf '%s  %s\n' "$CARD_PNG_SHA256" android-card/glucovision-card.png | sha256sum --check --strict
+          python3 <<'PY'
+          import re, struct
+          from pathlib import Path
+          from xml.etree import ElementTree
+
+          svg_path = Path('glucovision-card.svg')
+          root = ElementTree.parse(svg_path).getroot()
+          if root.tag.rsplit('}', 1)[-1] != 'svg':
+              raise SystemExit('format SVG invalide')
+          if root.get('width') != '85.60mm' or root.get('height') != '53.98mm':
+              raise SystemExit('dimensions physiques SVG invalides')
+          if root.get('viewBox') != '0 0 4280 2699':
+              raise SystemExit('viewBox SVG invalide')
+          text = svg_path.read_text(encoding='utf-8')
+          if not re.search(r'LIGNE TÉMOIN 50 mm', text, re.I):
+              raise SystemExit('ligne témoin absente du SVG')
+          if not re.search(r'IMPRIMER À 100 %', text, re.I):
+              raise SystemExit("instruction d'impression absente du SVG")
+
+          png = Path('android-card/glucovision-card.png').read_bytes()
+          if png[:8] != b'\x89PNG\r\n\x1a\n' or png[12:16] != b'IHDR':
+              raise SystemExit('format PNG invalide')
+          width, height, depth, colour = struct.unpack('>IIBB', png[16:26])
+          if (width, height) != (4280, 2699):
+              raise SystemExit(f'dimensions PNG invalides: {width}x{height}')
+          if depth != 8 or colour not in (2, 6):
+              raise SystemExit(f'format couleur PNG invalide: profondeur={depth}, type={colour}')
+          PY
+
       - name: Vérifier le bundle JavaScript des plugins
         shell: bash
         run: |
@@ -232,7 +244,9 @@ jobs:
         run: yes | "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
 
       - name: Préparer les fichiers web
-        run: bash scripts/build-www.sh
+        run: |
+          bash scripts/build-www.sh
+          cmp glucovision-card.svg www/glucovision-card.svg
 
       - name: Générer le projet Android
         run: |
@@ -272,6 +286,11 @@ jobs:
             android/app/src/main/res/values \
             android/app/src/main/res/mipmap-anydpi-v21 \
             android/app/src/main/res/mipmap-anydpi-v26
+          # Le même visuel haute définition que le SVG imprimable est embarqué
+          # à la racine des assets Android pour le suivi de carte hors réseau.
+          mkdir -p android/app/src/main/assets
+          cp android-card/glucovision-card.png android/app/src/main/assets/glucovision-card.png
+          cmp android-card/glucovision-card.png android/app/src/main/assets/glucovision-card.png
           cp android-res/drawable/glucovision_mark.xml android/app/src/main/res/drawable/glucovision_mark.xml
           cp android-res/drawable/glucovision_splash.xml android/app/src/main/res/drawable/glucovision_splash.xml
           cp android-res/values/glucovision_colors.xml android/app/src/main/res/values/glucovision_colors.xml
@@ -508,6 +527,21 @@ jobs:
           mkdir -p dist
           cp "$SRC" dist/glucovision.apk
 
+          # Le fichier source a été contrôlé avant compilation ; on contrôle ici
+          # que Gradle a réellement embarqué les mêmes octets dans l'APK final.
+          if ! unzip -p dist/glucovision.apk assets/glucovision-card.png \
+            > "$RUNNER_TEMP/glucovision-card-from-apk.png"; then
+            echo "::error::Carte repère absente de l'APK"
+            exit 1
+          fi
+          test -s "$RUNNER_TEMP/glucovision-card-from-apk.png" || {
+            echo "::error::Carte repère absente de l'APK"
+            exit 1
+          }
+          printf '%s  %s\n' "$CARD_PNG_SHA256" \
+            "$RUNNER_TEMP/glucovision-card-from-apk.png" | sha256sum --check --strict
+          cmp android-card/glucovision-card.png "$RUNNER_TEMP/glucovision-card-from-apk.png"
+
           BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
           APKSIGNER="$BUILD_TOOLS/apksigner"
           AAPT="$BUILD_TOOLS/aapt"
@@ -680,9 +714,7 @@ jobs:
     needs: [build, emulateur]
     if: >-
       github.event_name == 'push' &&
-      (github.ref == 'refs/heads/codex' ||
-       github.ref == 'refs/heads/sans-relief' ||
-       github.ref == 'refs/heads/avec-relief')
+      github.ref == 'refs/heads/codex'
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -54,10 +54,14 @@ EOF
 javac -encoding UTF-8 -Xlint:all -Werror -d "$WORK/out" \
   $(find "$WORK/stubs" -name '*.java' -print) \
   android-src/DepthGeometry.java \
+  android-src/CardGeometry.java \
+  android-src/CardTrackingGate.java \
   android-src/DepthMeasure.java \
-  native-tests/DepthGeometryTest.java
+  native-tests/DepthGeometryTest.java \
+  native-tests/CardGeometryTest.java
 
 java -cp "$WORK/out" io.github.rachid598.glucovision.DepthGeometryTest
+java -cp "$WORK/out" io.github.rachid598.glucovision.CardGeometryTest
 python3 scripts/check-calls.py
 python3 scripts/test-depth-geometry.py
 echo "Contrats Java/ARCore conformes."

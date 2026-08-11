@@ -492,10 +492,14 @@
     return depthAvailabilityPromise;
   }
 
-  function depthCapture() {
+  function depthCapture(options) {
     if (!isApp || platform !== 'android' || !Cap.DepthScan ||
         typeof Cap.DepthScan.capture !== 'function') return resolved(null);
-    return Cap.DepthScan.capture().then(function (r) {
+    var cardMode = !!(options && options.cardMode === true);
+    /* Ne transmet qu'un booléen connu au pont natif. Un objet arbitraire venu
+       de la WebView ne doit jamais devenir une option Android implicite. */
+    var request = cardMode ? Cap.DepthScan.capture({ cardMode: true }) : Cap.DepthScan.capture();
+    return request.then(function (r) {
       if (!r || r.cancelled) return r || { cancelled: true };
       if (r.error) return { error: String(r.error) };
       var jpeg = (r.jpegBase64 || '').toString();
@@ -519,7 +523,28 @@
           coverage: Number(r.coverage) || 0,
           observations: Number(r.observations) || 0,
           parallaxCm: Number(r.parallaxCm) || 0,
-          fresh: r.fresh !== false,
+          /* Valeurs de sécurité fermées : une propriété absente n'est jamais
+             interprétée comme une validation. */
+          fresh: r.fresh === true,
+          cardMode: cardMode,
+          cardVerified: r.cardVerified === true,
+          cardFresh: r.cardFresh === true,
+          cardSchema: (r.cardSchema || '').toString(),
+          scaleSource: (r.scaleSource || '').toString(),
+          cardRequested: r.cardRequested === true,
+          cardName: (r.cardName || '').toString(),
+          cardWidthCm: Number(r.cardWidthCm) || 0,
+          cardHeightCm: Number(r.cardHeightCm) || 0,
+          cardDistanceCm: Number(r.cardDistanceCm) || 0,
+          cardFieldWidthCm: Number(r.cardFieldWidthCm) || 0,
+          cardFieldHeightCm: Number(r.cardFieldHeightCm) || 0,
+          cardCmPerPixel: Number(r.cardCmPerPixel) || 0,
+          cardIncidenceDeg: Number(r.cardIncidenceDeg) || 0,
+          cardTrackingMethod: (r.cardTrackingMethod || '').toString(),
+          cardObservations: Number(r.cardObservations) || 0,
+          cardDepthCompared: r.cardDepthCompared === true,
+          cardDepthAgrees: r.cardDepthAgrees === true,
+          cardNote: (r.cardNote || '').toString(),
           note: (r.note || '').toString(),
           diag: (r.diag || '').toString()
         }

@@ -40,34 +40,114 @@
     if (file.file !== expected && file.file !== legacy) return null;
     return { file: file.file, mediaType: mediaType };
   }
-  function cleanDepth(raw, imageCount) {
-    if (!raw || typeof raw !== 'object') return null;
+  function hasVerifiedCardContract(raw) {
+    if (!raw || typeof raw !== 'object' || raw.cardRequested !== true ||
+        raw.cardVerified !== true || raw.cardFresh !== true ||
+        raw.cardSchema !== 'glucovision-card-v1' || raw.cardName !== 'glucovision-card' ||
+        raw.cardTrackingMethod !== 'FULL_TRACKING' ||
+        !/^(card|card\+depth)$/.test(raw.scaleSource || '')) return false;
+    var observations = finite(raw.cardObservations);
+    var width = finite(raw.cardWidthCm), height = finite(raw.cardHeightCm);
+    if (observations == null || observations !== Math.round(observations) ||
+        observations < 4 || observations > 1000 || width == null || height == null ||
+        Math.abs(width - 8.56) > 0.05 || Math.abs(height - 5.398) > 0.05) return false;
+    return raw.scaleSource !== 'card+depth' ||
+      (raw.cardDepthCompared === true && raw.cardDepthAgrees === true);
+  }
+  function cleanDepth(raw) {
+    if (!raw || typeof raw !== 'object' || raw.scaleOk !== true ||
+        raw.fresh !== true || raw.cardMode !== true || !hasVerifiedCardContract(raw)) return null;
     var out = {
-      scaleOk: raw.scaleOk === true,
-      fresh: raw.fresh !== false,
+      scaleOk: true,
+      fresh: true,
+      cardVerified: true,
+      cardFresh: true,
+      cardSchema: 'glucovision-card-v1',
+      scaleSource: raw.scaleSource,
+      cardRequested: raw.cardRequested === true,
+      cardDepthCompared: raw.cardDepthCompared === true,
+      cardDepthAgrees: raw.cardDepthAgrees === true,
+      cardMode: raw.cardMode === true,
       volumeOk: raw.volumeOk === true
     };
-    ['fieldWidthCm', 'fieldHeightCm', 'distanceCm', 'cmPerPixel', 'volumeCm3', 'volume']
-      .forEach(function (key) {
-        var value = finite(raw[key]);
-        if (value != null && value >= 0 && value <= 100000) out[key] = value;
-      });
-    if (out.scaleOk) {
-      var view = finite(raw.viewIndex);
-      if (imageCount > 1 &&
-          (view == null || view !== Math.round(view) || view < 1 || view > imageCount)) {
-        return null;
-      }
-      out.viewIndex = imageCount > 1 ? view : 1;
+    ['fieldWidthCm', 'fieldHeightCm', 'distanceCm', 'cmPerPixel', 'volumeCm3',
+     'areaCm2', 'heightMaxCm', 'heightMeanCm', 'samples', 'confidentPixels',
+     'coverage', 'observations', 'parallaxCm'].forEach(function (key) {
+      var value = finite(raw[key]);
+      if (value != null && value >= 0 && value <= 1000000) out[key] = value;
+    });
+    if (!(out.fieldWidthCm > 1 && out.fieldWidthCm <= 250 &&
+          out.fieldHeightCm > 1 && out.fieldHeightCm <= 250 &&
+          out.distanceCm >= 5 && out.distanceCm <= 500 &&
+          out.cmPerPixel > 0 && out.cmPerPixel <= 5)) return null;
+    /* Les diagnostics natifs ne servent pas de preuve mais restent utiles à la
+       reprise. On conserve la valeur entière lorsqu'elle est raisonnable, on
+       ne la coupe jamais en un texte trompeur. */
+    ['note', 'diag'].forEach(function (key) {
+      if (typeof raw[key] === 'string' && raw[key].length <= 2000) out[key] = raw[key];
+    });
+    var cardObservations = finite(raw.cardObservations);
+    if (cardObservations != null && cardObservations >= 0 && cardObservations <= 1000000) {
+      out.cardObservations = cardObservations;
+    }
+    ['cardWidthCm', 'cardHeightCm', 'cardDistanceCm', 'cardFieldWidthCm',
+     'cardFieldHeightCm', 'cardCmPerPixel', 'cardIncidenceDeg'].forEach(function (key) {
+      var value = finite(raw[key]);
+      if (value != null && value >= 0 && value <= 1000000) out[key] = value;
+    });
+    ['cardTrackingMethod', 'cardName'].forEach(function (key) {
+      if (typeof raw[key] === 'string' && raw[key].length <= 120) out[key] = raw[key];
+    });
+    if (typeof raw.cardNote === 'string' && raw.cardNote.length <= 2000) {
+      out.cardNote = raw.cardNote;
     }
     return out;
   }
+  function referenceFromDepth(depth) {
+    var out = {
+      mode: 'glucovision-card-v1', cardVerified: true, cardFresh: true,
+      cardSchema: 'glucovision-card-v1', scaleSource: depth.scaleSource,
+      cardRequested: depth.cardRequested === true,
+      cardDepthCompared: depth.cardDepthCompared === true,
+      cardDepthAgrees: depth.cardDepthAgrees === true,
+      cardObservations: depth.cardObservations || 0,
+      cardTrackingMethod: depth.cardTrackingMethod || ''
+    };
+    ['cardName', 'cardNote', 'cardWidthCm', 'cardHeightCm', 'cardDistanceCm',
+     'cardFieldWidthCm', 'cardFieldHeightCm', 'cardCmPerPixel', 'cardIncidenceDeg']
+      .forEach(function (key) {
+        if (depth[key] !== undefined) out[key] = depth[key];
+      });
+    return out;
+  }
+  function cleanViewMeasurements(raw, imageCount, referenceMode) {
+    if (referenceMode !== 'glucovision-card-v1' || !Array.isArray(raw)) return [];
+    var seen = {};
+    return raw.map(function (measurement) {
+      if (!measurement || typeof measurement !== 'object') return null;
+      var view = finite(measurement.viewIndex);
+      var reference = measurement.reference;
+      var depth = cleanDepth(measurement.depth);
+      if (view == null || view !== Math.round(view) || view < 1 || view > imageCount ||
+          seen[view] || !depth || !reference || typeof reference !== 'object' ||
+          reference.mode !== 'glucovision-card-v1' || !hasVerifiedCardContract(reference) ||
+          reference.scaleSource !== depth.scaleSource) {
+        return null;
+      }
+      seen[view] = true;
+      return {
+        viewIndex: view,
+        depth: depth,
+        reference: referenceFromDepth(depth)
+      };
+    }).filter(Boolean).sort(function (a, b) { return a.viewIndex - b.viewIndex; });
+  }
   function cleanContext(raw, imageCount) {
     raw = raw && typeof raw === 'object' ? raw : {};
-    var plate = finite(raw.plateDiameterCm);
+    var referenceMode = raw.referenceMode === 'glucovision-card-v1'
+      ? 'glucovision-card-v1' : 'none';
     var out = {
-      referenceObject: cleanText(raw.referenceObject, 120) || 'none',
-      plateDiameterCm: plate != null && plate >= 5 && plate <= 100 ? plate : null,
+      referenceMode: referenceMode,
       notes: cleanText(raw.notes, 4000),
       extras: cleanText(raw.extras, 4000),
       imageCount: imageCount
@@ -79,8 +159,7 @@
     var venue = cleanText(raw.venue, 20);
     if (/^(maison|restaurant|cantine)$/.test(venue)) out.venue = venue;
     if (raw.clarificationAnswered === true) out.clarificationAnswered = true;
-    var depth = cleanDepth(raw.depth, imageCount);
-    if (depth) out.depth = depth;
+    out.viewMeasurements = cleanViewMeasurements(raw.viewMeasurements, imageCount, referenceMode);
     return out;
   }
   function cleanItem(raw) {
@@ -246,13 +325,21 @@
       if (!safe || !native() || !window.Cap || !window.Cap.Filesystem || !window.Cap.Directory) {
         return Promise.reject(new Error('Élément de file invalide.'));
       }
-      return Promise.all(safe.files.map(function (f) {
+      return Promise.all(safe.files.map(function (f, index) {
         return window.Cap.Filesystem.readFile({
           path: f.file, directory: window.Cap.Directory.Data
         }).then(function (r) {
           var data = cleanBase64(r && r.data);
           if (!data) throw new Error('Photo de file illisible ou trop volumineuse.');
-          return { base64: data, mediaType: f.mediaType };
+          var out = { base64: data, mediaType: f.mediaType };
+          var measurement = safe.ctx.viewMeasurements.filter(function (view) {
+            return view.viewIndex === index + 1;
+          })[0];
+          if (measurement) {
+            out.depth = measurement.depth;
+            out.reference = measurement.reference;
+          }
+          return out;
         });
       }));
     },

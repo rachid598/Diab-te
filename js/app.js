@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '83'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '84'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -17,7 +17,7 @@
   /* v80 ajoute aussi les règles Android qui excluent repas/photos du cloud et
      du transfert appareil-à-appareil. Elles vivent dans l'APK : un ancien
      build 2073 ne doit donc pas accepter le bundle OTA v80. */
-  var MIN_NATIVE_BUILD = 2080;
+  var MIN_NATIVE_BUILD = 2084;
   var nativeBuild = null;      // build réellement en cours d'exécution, sur APK
   var settings = Storage.getSettings();
 
@@ -264,7 +264,7 @@
     wrap.querySelectorAll('button').forEach(function (b) {
       b.addEventListener('click', function () {
         images.splice(parseInt(b.dataset.i, 10), 1);
-        renderDepthResult(depthOfSent(images));
+        renderDepthResult(depthForDisplay(images));
         renderThumbs();
         updateEstimateBtn();
       });
@@ -453,13 +453,42 @@
 
     renderVenue();
 
-    var ref = $('reference-object');
+    var ref = $('reference-mode');
     var refSummary = $('reference-summary');
     if (ref && refSummary) {
       refSummary.textContent = ref.value === 'none'
-        ? 'Aucun'
-        : (ref.options[ref.selectedIndex].textContent || '').replace(/\s*\(.*\)$/, '');
+        ? 'Rapide'
+        : 'Carte GlucoVision';
     }
+  }
+
+  function selectedReferenceMode() {
+    var el = $('reference-mode');
+    return el && el.value === 'glucovision-card-v1' ? 'glucovision-card-v1' : 'none';
+  }
+
+  function updateReferenceModeUi() {
+    var cardMode = selectedReferenceMode() === 'glucovision-card-v1';
+    var guide = $('glucovision-card-guide');
+    var card = $('reference-card');
+    if (guide) guide.hidden = !cardMode;
+    if (card) card.classList.toggle('required', cardMode);
+    /* Choisir ce parcours est déjà un consentement explicite. Ne demandons
+       pas un second opt-in caché dans les réglages avant d'afficher l'action. */
+    if (cardMode && !settings.experimentalDepth) {
+      settings.experimentalDepth = true;
+      var checkbox = $('set-experimental');
+      if (checkbox) checkbox.checked = true;
+      Promise.resolve(Storage.saveSettings(settings)).then(function (saved) {
+        if (saved) settings = saved;
+        updateDepthButtonVisibility();
+      }).catch(function () {
+        toast('Mode Carte actif pour cette session, mais le réglage n’a pas pu être mémorisé.');
+      });
+    }
+    updateInputSummaries();
+    updateDepthButtonVisibility();
+    renderDepthResult(depthForDisplay(images));
   }
 
   /* ---------- Où tu manges ----------
@@ -548,29 +577,142 @@
   function addDataUrls(urls, depth) {
     var room = Camera.MAX_ANGLES - images.length;
     if (room <= 0) { toast('Maximum ' + Camera.MAX_ANGLES + ' vues.'); return; }
+    var acceptedDepth = verifiedDepth(depth);
     Camera.processDataUrls(urls.slice(0, room)).then(function (out) {
-      out.results.forEach(function (r) {
+      out.results.forEach(function (r, resultIndex) {
         if (images.length < Camera.MAX_ANGLES) {
-          if (depth) r.depth = depth;
+          if (depth && resultIndex === 0) {
+            r.depth = acceptedDepth || depth;
+            if (acceptedDepth) r.reference = referenceFromDepth(acceptedDepth);
+          }
           images.push(r);
         }
       });
       renderThumbs();
+      if (acceptedDepth) renderDepthResult(depthForDisplay(images));
       updateEstimateBtn();
       if (out.errors.length) toast(out.errors.length + ' photo(s) ignorée(s).');
     }).catch(function (e) { toast(e.message); });
   }
 
-  /* Une mesure appartient à une vue précise. S'il y en a plusieurs, on ne
-     transmet au modèle qu'une mesure non ambiguë, avec son numéro de vue. */
-  function depthOfSent(sent) {
-    var found = null, count = 0;
-    (sent || []).forEach(function (img, i) {
-      if (!img || !img.depth || !img.depth.scaleOk || img.depth.fresh === false) return;
-      count++;
-      found = Object.assign({}, img.depth, { viewIndex: i + 1 });
+  function safeDepthNumber(v, min, max) {
+    return typeof v === 'number' && isFinite(v) && v >= min && v <= max ? v : null;
+  }
+
+  function hasVerifiedCardContract(raw) {
+    if (!raw || raw.cardRequested !== true || raw.cardVerified !== true ||
+        raw.cardFresh !== true || raw.cardSchema !== 'glucovision-card-v1' ||
+        raw.cardName !== 'glucovision-card' || raw.cardTrackingMethod !== 'FULL_TRACKING' ||
+        !/^(card|card\+depth)$/.test(raw.scaleSource || '')) return false;
+    var observations = safeDepthNumber(raw.cardObservations, 4, 1000);
+    var width = safeDepthNumber(raw.cardWidthCm, 8.51, 8.61);
+    var height = safeDepthNumber(raw.cardHeightCm, 5.348, 5.448);
+    if (observations == null || observations !== Math.round(observations) ||
+        width == null || height == null) return false;
+    return raw.scaleSource !== 'card+depth' ||
+      (raw.cardDepthCompared === true && raw.cardDepthAgrees === true);
+  }
+
+  /* Une vue ne devient métrique qu'avec les validations positives du natif.
+     `!== false` est volontairement interdit : un ancien APK qui omet un champ
+     doit être refusé, jamais promu silencieusement. */
+  function verifiedDepth(raw) {
+    if (!raw || typeof raw !== 'object' || raw.scaleOk !== true || raw.fresh !== true ||
+        raw.cardMode !== true || !hasVerifiedCardContract(raw)) return null;
+    var width = safeDepthNumber(raw.fieldWidthCm, 1.000001, 250);
+    var height = safeDepthNumber(raw.fieldHeightCm, 1.000001, 250);
+    var distance = safeDepthNumber(raw.distanceCm, 5, 500);
+    var scale = safeDepthNumber(raw.cmPerPixel, 0.0000001, 5);
+    if (width == null || height == null || distance == null || scale == null) return null;
+    var out = {
+      scaleOk: true, fresh: true, cardMode: true, cardVerified: true,
+      cardFresh: true, cardSchema: 'glucovision-card-v1', scaleSource: raw.scaleSource,
+      cardRequested: raw.cardRequested === true,
+      cardDepthCompared: raw.cardDepthCompared === true,
+      cardDepthAgrees: raw.cardDepthAgrees === true,
+      volumeOk: raw.volumeOk === true,
+      fieldWidthCm: width, fieldHeightCm: height,
+      distanceCm: distance, cmPerPixel: scale
+    };
+    ['volumeCm3', 'areaCm2', 'heightMaxCm', 'heightMeanCm', 'samples',
+     'confidentPixels', 'coverage', 'observations', 'parallaxCm'].forEach(function (key) {
+      var value = safeDepthNumber(raw[key], 0, 1000000);
+      if (value != null) out[key] = value;
     });
-    return count === 1 ? found : null;
+    var cardObservations = safeDepthNumber(raw.cardObservations, 0, 1000000);
+    if (cardObservations != null) out.cardObservations = cardObservations;
+    ['cardWidthCm', 'cardHeightCm', 'cardDistanceCm', 'cardFieldWidthCm',
+     'cardFieldHeightCm', 'cardCmPerPixel', 'cardIncidenceDeg'].forEach(function (key) {
+      var value = safeDepthNumber(raw[key], 0, 1000000);
+      if (value != null) out[key] = value;
+    });
+    ['cardTrackingMethod', 'cardName'].forEach(function (key) {
+      if (typeof raw[key] === 'string' && raw[key].length <= 120) out[key] = raw[key];
+    });
+    ['note', 'diag', 'cardNote'].forEach(function (key) {
+      if (typeof raw[key] === 'string' && raw[key].length <= 2000) out[key] = raw[key];
+    });
+    return out;
+  }
+
+  function referenceFromDepth(depth) {
+    var reference = {
+      mode: 'glucovision-card-v1',
+      cardVerified: true,
+      cardFresh: true,
+      cardSchema: 'glucovision-card-v1',
+      scaleSource: depth.scaleSource,
+      cardRequested: depth.cardRequested === true,
+      cardDepthCompared: depth.cardDepthCompared === true,
+      cardDepthAgrees: depth.cardDepthAgrees === true,
+      cardObservations: depth.cardObservations || 0,
+      cardTrackingMethod: depth.cardTrackingMethod || ''
+    };
+    ['cardName', 'cardNote', 'cardWidthCm', 'cardHeightCm', 'cardDistanceCm',
+     'cardFieldWidthCm', 'cardFieldHeightCm', 'cardCmPerPixel', 'cardIncidenceDeg']
+      .forEach(function (key) {
+        if (depth[key] !== undefined) reference[key] = depth[key];
+      });
+    return reference;
+  }
+
+  /* Contrat par vue : deux mesures valides restent deux mesures valides. Elles
+     ne s'annulent plus mutuellement et chacune garde son index d'image. */
+  function viewMeasurementsOfSent(sent, referenceMode) {
+    if (referenceMode !== 'glucovision-card-v1') return [];
+    var out = [];
+    (sent || []).forEach(function (img, i) {
+      var depth = verifiedDepth(img && img.depth);
+      var reference = img && img.reference;
+      if (!depth || !reference || reference.mode !== 'glucovision-card-v1' ||
+          !hasVerifiedCardContract(reference) ||
+          reference.scaleSource !== depth.scaleSource) return;
+      out.push({
+        viewIndex: i + 1,
+        depth: depth,
+        reference: referenceFromDepth(depth)
+      });
+    });
+    return out;
+  }
+
+  function depthForDisplay(sent) {
+    var views = viewMeasurementsOfSent(sent, selectedReferenceMode());
+    if (!views.length) return null;
+    return Object.assign({}, views[views.length - 1].depth, {
+      verifiedViewCount: views.length,
+      viewIndex: views[views.length - 1].viewIndex
+    });
+  }
+
+  function depthForContextDisplay(ctx) {
+    var views = ctx && Array.isArray(ctx.viewMeasurements) ? ctx.viewMeasurements : [];
+    if (!views.length) return null;
+    var last = views[views.length - 1];
+    return Object.assign({}, last.depth, {
+      verifiedViewCount: views.length,
+      viewIndex: last.viewIndex
+    });
   }
 
   function renderDepthResult(d) {
@@ -580,14 +722,21 @@
     if (!d) { el.hidden = true; el.innerHTML = ''; return; }
     el.hidden = false;
 
-    if (d.scaleOk && d.fresh !== false) {
-      var html = '📏 <strong>Échelle ARCore acceptée</strong> — champ photographié ' +
+    if (verifiedDepth(d)) {
+      var html = '📏 <strong>Carte et échelle ARCore vérifiées</strong> — champ photographié ' +
         Math.round(d.fieldWidthCm || 0) + ' × ' + Math.round(d.fieldHeightCm || 0) +
         ' cm à ' + Math.round(d.distanceCm || 0) + ' cm.';
-      html += '<br><span class="tiny">Mesure obtenue après ' +
-        Math.round(d.parallaxCm || 0) + ' cm de déplacement et ' +
-        Math.round(d.observations || 0) + ' observations stables. ' +
-        'Elle sert uniquement à donner l’échelle de cette vue au modèle.</span>';
+      if (d.verifiedViewCount > 1) {
+        html += '<br><span class="tiny">' + Math.round(d.verifiedViewCount) +
+          ' vues mesurées sont conservées séparément.</span>';
+      }
+      html += '<br><span class="tiny">Carte stable sur ' +
+        Math.round(d.cardObservations || d.observations || 0) + ' observations.';
+      if (d.scaleSource === 'card+depth') {
+        html += ' Profondeur concordante après ' + Math.round(d.parallaxCm || 0) +
+          ' cm de déplacement.';
+      }
+      html += ' Cette mesure sert uniquement à donner l’échelle de cette vue au modèle.</span>';
       if (d.volumeOk) {
         html += '<br><span class="tiny">Relief expérimental : ' +
           Math.round(d.volumeCm3 || 0) + ' cm³. Ce volume est affiché pour le test, ' +
@@ -603,10 +752,22 @@
 
     el.className = 'depth-result d-warn';
     el.innerHTML = '📐 <strong>Aucune mesure utilisée</strong> — ' +
-      escapeHtml(d.note || (d.fresh === false
-        ? 'la carte de profondeur ne correspond pas à cette image.'
-        : 'la profondeur n’est pas assez fiable.')) +
+      escapeHtml(d.note || (d.fresh !== true
+        ? 'la carte de profondeur ne correspond pas exactement à cette image.'
+        : (d.cardVerified !== true || d.cardFresh !== true ||
+           d.cardSchema !== 'glucovision-card-v1'
+          ? 'la Carte GlucoVision n’a pas été vérifiée dans cette vue.'
+          : 'la profondeur n’est pas assez fiable.'))) +
       (d.diag ? '<br><span class="mono">' + escapeHtml(d.diag) + '</span>' : '');
+  }
+
+  function updateDepthButtonVisibility() {
+    var btn = $('btn-depth');
+    if (!btn) return;
+    var nativeReady = !Native.isApp || Native.platform !== 'android' ||
+      (nativeBuild != null && nativeBuild >= MIN_NATIVE_BUILD);
+    btn.hidden = !(depthSupported && nativeReady && settings.experimentalDepth &&
+      selectedReferenceMode() === 'glucovision-card-v1');
   }
 
   function initDepth() {
@@ -616,7 +777,7 @@
     var say = function (msg) { if (why) why.textContent = msg; };
     if (!Native.isApp || Native.platform !== 'android' || !Native.depth) {
       btn.hidden = true;
-      say('Disponible uniquement dans l’APK Android compatible ARCore Depth.');
+      say('Disponible uniquement dans l’APK Android compatible ARCore.');
       return;
     }
 
@@ -638,15 +799,15 @@
         if (!a || !a.supported) {
           depthSupported = false;
           btn.hidden = true;
-          say('ARCore Depth non pris en charge sur ce téléphone (' +
+          say('ARCore non pris en charge sur ce téléphone (' +
             ((a && a.reason) || 'inconnu') + ').');
           return;
         }
         depthSupported = true;
         say(a.installed
-          ? 'ARCore Depth est disponible. Active l’option pour afficher le bouton.'
+          ? 'ARCore est disponible. Choisis Carte GlucoVision puis utilise « Photo mesurée ».'
           : 'ARCore est compatible ; Google Play Services pourra demander son installation au premier essai.');
-        btn.hidden = !settings.experimentalDepth;
+        updateDepthButtonVisibility();
       }).catch(function () {
         availabilityBusy = false;
         depthSupported = false;
@@ -666,7 +827,7 @@
       btn.disabled = true;
       var old = btn.textContent;
       btn.textContent = 'Mesure…';
-      Native.depth.capture().then(function (r) {
+      Native.depth.capture({ cardMode: true }).then(function (r) {
         if (!r || r.cancelled) return;
         if (r.error) { toast('Photo mesurée : ' + r.error); return; }
         renderDepthResult(r.depth || null);
@@ -739,10 +900,8 @@
       renderDepthResult(null);
       renderThumbs(); updateEstimateBtn();
     });
-    $('reference-object').addEventListener('change', function (e) {
-      $('plate-diameter-wrap').hidden = e.target.value !== 'assiette';
-      updateInputSummaries();
-    });
+    $('reference-mode').addEventListener('change', updateReferenceModeUi);
+    updateReferenceModeUi();
     // La saisie d'une description active à elle seule le bouton d'estimation.
     $('user-notes').addEventListener('input', updateEstimateBtn);
     ['extra-dessert', 'extra-drink'].forEach(function (id) {
@@ -797,13 +956,13 @@
       isFinite(previousContext.mealAt) ? previousContext.mealAt : null;
     var previousVenue = previousContext && /^(maison|restaurant|cantine)$/.test(
       previousContext.venue || '') ? previousContext.venue : '';
+    var referenceMode = textOnly ? 'none' : selectedReferenceMode();
     var ctx = {
-      referenceObject: $('reference-object').value,
-      plateDiameterCm: $('plate-diameter').value ? parseFloat($('plate-diameter').value) : null,
+      referenceMode: referenceMode,
       notes: $('user-notes').value,
       extras: extrasText(),       // dessert / boisson, absents de la photo
       imageCount: sent.length,    // 0 fait basculer l'estimateur en mode description
-      depth: textOnly ? null : depthOfSent(sent),
+      viewMeasurements: textOnly ? [] : viewMeasurementsOfSent(sent, referenceMode),
       /* Contexte du repas. mealAt est figé ICI, à l'envoi : si l'estimation est
          mise en file d'attente et rejouée à 2 h du matin, elle doit rester le
          dîner qu'elle était, pas devenir une collation. */
@@ -811,7 +970,7 @@
       venue: previousContext ? previousVenue : (settings.venue || ''),
       clarificationAnswered: preserveClarification && clarificationRepondue
     };
-    lastEstimateContext = Object.assign({}, ctx);
+    lastEstimateContext = safePendingContext(ctx, sent.length);
 
     var isCurrentRun = function () { return runGeneration === estimateGeneration; };
     var finishRun = function () {
@@ -1042,12 +1201,11 @@
               seen: result.seen || '',
               photo: name,
               input: item.ctx ? {
-                referenceObject: item.ctx.referenceObject || '',
-                plateDiameterCm: item.ctx.plateDiameterCm || null,
+                referenceMode: item.ctx.referenceMode || 'none',
                 notes: item.ctx.notes || '',
                 extras: item.ctx.extras || '',
                 imageCount: item.ctx.imageCount || 0,
-                depth: item.ctx.depth || null,
+                viewMeasurements: item.ctx.viewMeasurements || [],
                 mealAt: item.ctx.mealAt || item.date || Date.now(),
                 venue: item.ctx.venue || '',
                 clarificationAnswered: item.ctx.clarificationAnswered === true
@@ -1157,9 +1315,10 @@
       return typeof v === 'number' && isFinite(v) && v >= min && v <= max ? v : null;
     };
     var count = num(raw.imageCount, 0, Camera.MAX_ANGLES);
+    var referenceMode = raw.referenceMode === 'glucovision-card-v1'
+      ? 'glucovision-card-v1' : 'none';
     var ctx = {
-      referenceObject: text(raw.referenceObject, 80) || 'none',
-      plateDiameterCm: num(raw.plateDiameterCm, 5, 100),
+      referenceMode: referenceMode,
       notes: text(raw.notes, 4000),
       extras: text(raw.extras, 4000),
       imageCount: count == null ? (fallbackImageCount || 0) : Math.round(count)
@@ -1169,24 +1328,27 @@
     var venue = text(raw.venue, 20);
     if (/^(maison|restaurant|cantine)$/.test(venue)) ctx.venue = venue;
     if (raw.clarificationAnswered === true) ctx.clarificationAnswered = true;
-    if (raw.depth && raw.depth.scaleOk === true) {
-      var d = { scaleOk: true };
-      ['fieldWidthCm', 'fieldHeightCm', 'distanceCm', 'cmPerPixel', 'volumeCm3',
-       'areaCm2', 'heightMaxCm', 'heightMeanCm', 'samples', 'confidentPixels',
-       'coverage', 'observations', 'parallaxCm'].forEach(function (key) {
-        var value = num(raw.depth[key], 0, 1000000);
-        if (value != null) d[key] = value;
+    ctx.viewMeasurements = [];
+    if (referenceMode === 'glucovision-card-v1' && Array.isArray(raw.viewMeasurements)) {
+      var seenViews = {};
+      raw.viewMeasurements.forEach(function (measurement) {
+        if (!measurement || typeof measurement !== 'object') return;
+        var viewIndex = num(measurement.viewIndex, 1, Camera.MAX_ANGLES);
+        var reference = measurement.reference;
+        var depth = verifiedDepth(measurement.depth);
+        if (viewIndex == null || viewIndex !== Math.round(viewIndex) ||
+            viewIndex > ctx.imageCount || seenViews[viewIndex] || !depth ||
+            !reference || reference.mode !== 'glucovision-card-v1' ||
+            !hasVerifiedCardContract(reference) ||
+            reference.scaleSource !== depth.scaleSource) return;
+        seenViews[viewIndex] = true;
+        ctx.viewMeasurements.push({
+          viewIndex: viewIndex,
+          depth: depth,
+          reference: referenceFromDepth(depth)
+        });
       });
-      d.fresh = raw.depth.fresh !== false;
-      var viewIndex = num(raw.depth.viewIndex, 1, Camera.MAX_ANGLES);
-      if (ctx.imageCount <= 1) {
-        d.viewIndex = 1;
-        ctx.depth = d;
-      } else if (viewIndex != null && viewIndex === Math.round(viewIndex) &&
-                 viewIndex <= ctx.imageCount) {
-        d.viewIndex = viewIndex;
-        ctx.depth = d;
-      }
+      ctx.viewMeasurements.sort(function (a, b) { return a.viewIndex - b.viewIndex; });
     }
     return ctx;
   }
@@ -1650,11 +1812,16 @@
     var out = '';
 
     if (r.refAsked && !r.refFound) {
-      out += '<div class="warn-box"><strong>⚠️ Repère d\'échelle non retrouvé sur la photo.</strong><br>' +
-        'Le modèle n\'a pas pu identifier ton objet-repère : les portions ont été ' +
-        'estimées à vue, pas mesurées. La marge d\'erreur affichée est donc plus ' +
-        'large — c\'est normal. Pour la resserrer, reprends la photo avec le repère ' +
-        'bien visible, à plat et dans le même plan que l\'assiette.</div>';
+      out += '<div class="warn-box"><strong>⚠️ Carte GlucoVision non vérifiée.</strong><br>' +
+        'Aucune échelle métrique n’a été transmise au modèle : les portions ont été ' +
+        'estimées à vue. Reprends la photo avec « Photo mesurée », carte entièrement ' +
+        'visible, immobile et posée à côté du repas sur la même table.</div>';
+    } else if (r.refAsked && Array.isArray(r.referenceVerifiedViews) &&
+               r.referenceVerifiedViews.length < (r.referenceExpectedViews || 0)) {
+      out += '<div class="warn-box"><strong>⚠️ Mesure partielle.</strong><br>' +
+        r.referenceVerifiedViews.length + ' vue(s) sur ' + r.referenceExpectedViews +
+        ' ont une échelle native. Les autres angles restent estimés visuellement ; ' +
+        'aucune mesure n’est transférée d’une image à l’autre.</div>';
     }
 
     if (r.alerts && r.alerts.length) {
@@ -1703,7 +1870,7 @@
           '<ul class="seen-list">' + ajoutes.map(ligne).join('') + '</ul>'
         : '') +
       (r.referenceUsed && !r.fromText
-        ? '<p class="seen-ref">📐 Échelle : ' + escapeHtml(r.referenceUsed) + '</p>' : '') +
+        ? '<p class="seen-ref">📐 Mesure locale : ' + escapeHtml(r.referenceUsed) + '</p>' : '') +
       '<p class="hint tiny">' + intro + '</p>' +
       '</div>';
   }
@@ -2537,12 +2704,12 @@
       var ctx = lastEstimateContext
         ? safePendingContext(lastEstimateContext, lastEstimateContext.imageCount || 0)
         : {
-            referenceObject: $('reference-object').value,
-            plateDiameterCm: $('plate-diameter').value ? parseFloat($('plate-diameter').value) : null,
+            referenceMode: inputMode === 'texte' ? 'none' : selectedReferenceMode(),
             notes: $('user-notes').value,
             extras: extrasText(),
             imageCount: inputMode === 'texte' ? 0 : images.length,
-            depth: inputMode === 'texte' ? null : depthOfSent(images)
+            viewMeasurements: inputMode === 'texte' ? [] :
+              viewMeasurementsOfSent(images, selectedReferenceMode())
           };
       var sent = ctx.imageCount > 0 ? lastEstimateImages.slice() : [];
 
@@ -2823,12 +2990,11 @@
       venue: lastEstimateContext && /^(maison|restaurant|cantine)$/.test(
         lastEstimateContext.venue || '') ? lastEstimateContext.venue : '',
       input: lastEstimateContext ? {
-        referenceObject: lastEstimateContext.referenceObject || '',
-        plateDiameterCm: lastEstimateContext.plateDiameterCm || null,
+        referenceMode: lastEstimateContext.referenceMode || 'none',
         notes: lastEstimateContext.notes || '',
         extras: lastEstimateContext.extras || '',
         imageCount: lastEstimateContext.imageCount || 0,
-        depth: lastEstimateContext.depth || null,
+        viewMeasurements: lastEstimateContext.viewMeasurements || [],
         mealAt: lastEstimateContext.mealAt || null,
         venue: lastEstimateContext.venue || '',
         clarificationAnswered: lastEstimateContext.clarificationAnswered === true
@@ -4154,7 +4320,7 @@
     setMode(e.source === 'texte' ? 'texte' : 'photo');
     if (e.source === 'texte' && ctx.notes) $('user-notes').value = ctx.notes;
     renderThumbs();
-    renderDepthResult(ctx.depth || null);
+    renderDepthResult(depthForContextDisplay(ctx));
     selectTab('analyze');
     renderResults(lastResult);
     toast(fusionDropped
@@ -5033,8 +5199,7 @@
       settings = savedSettings;
       hideModal('settings-modal');
       updateCompareToggle();
-      var depthBtn = $('btn-depth');
-      if (depthBtn) depthBtn.hidden = !(depthSupported && settings.experimentalDepth);
+      updateDepthButtonVisibility();
       toast('Réglages enregistrés.');
     }).catch(function (e) {
       toast('Réglages non enregistrés : ' + ((e && e.message) || 'erreur de stockage'));
@@ -5779,6 +5944,7 @@
     Native.appBuild().then(function (build) {
       nativeBuild = build;
       showVersion();
+      updateDepthButtonVisibility();
       /* Le plancher ne vaut QUE pour l'APK Android, où le contenu web se met à
          jour par OTA pendant que le code natif reste celui de l'APK installé.
          Sur iOS il n'y a pas d'OTA : natif et web sont compilés ensemble à
