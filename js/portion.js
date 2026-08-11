@@ -21,7 +21,11 @@
   var LIQUIDES = { ml: 1, cl: 1, l: 1, dl: 1 };
 
   function nombre(t) {
-    var n = parseFloat(String(t).replace(',', '.'));
+    if (typeof t === 'number') return isFinite(t) ? t : null;
+    if (typeof t !== 'string') return null;
+    var raw = t.trim();
+    if (!/^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)$/.test(raw)) return null;
+    var n = Number(raw.replace(',', '.'));
     return isFinite(n) ? n : null;
   }
 
@@ -32,15 +36,58 @@
     return { valeur: Math.round(valeur * f * 100) / 100, unite: LIQUIDES[u] ? 'ml' : 'g' };
   }
 
+  var UNIT_LABELS = [
+    ['biscuit', /\bbiscuits?\b/], ['cookie', /\bcookies?\b/],
+    ['gaufrette', /\bgaufrettes?\b/], ['barre', /\bbarres?\b/],
+    ['tranche', /\btranches?\b/], ['galette', /\bgalettes?\b/],
+    ['capsule', /\bcapsules?\b/], ['sachet', /\bsachets?\b/],
+    ['pot', /\bpots?\b/], ['bouteille', /\bbouteilles?\b/],
+    ['canette', /\bcanettes?\b/], ['portion', /\bportions?\b/],
+    ['pièce', /\bpieces?\b|\bpi[eè]ces?\b/]
+  ];
+
+  function labelDans(texte) {
+    var t = String(texte || '').toLowerCase();
+    if (t.normalize) t = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    for (var i = 0; i < UNIT_LABELS.length; i++) {
+      if (UNIT_LABELS[i][1].test(t)) return UNIT_LABELS[i][0];
+    }
+    return '';
+  }
+
+  function compteDans(texte) {
+    var t = String(texte || '').toLowerCase();
+    if (!t) return null;
+    var label = labelDans(t);
+    if (!label) return null;
+    var m = /(\d{1,4}(?:[.,]\d+)?)\s*(?:x\s*)?(?:biscuits?|cookies?|gaufrettes?|barres?|tranches?|galettes?|capsules?|sachets?|pots?|bouteilles?|canettes?|portions?|pi[eè]ces?)\b/.exec(t);
+    var n = m ? nombre(m[1]) : null;
+    if (!(n > 0) || Math.floor(n) !== n) return null;
+    return { unitesSuggerees: n, label: label };
+  }
+
   /* Lit le champ « quantity » d'OpenFoodFacts, qui est du texte libre saisi par
-     les contributeurs. Deux formes utiles :
-       « 12 x 25 g »  → le paquet ANNONCE lui-même son nombre d'unités ;
-       « 300 g e »    → seulement le poids total (le « e » est la marque
-                        d'estimation métrologique européenne, pas une unité).
-     Tout le reste renvoie null : mieux vaut demander que deviner. */
+     les contributeurs. Le nombre trouvé n'est JAMAIS déclaré confirmé :
+     « 2 × 250 g » peut désigner deux sachets contenant chacun six biscuits.
+     L'interface peut le proposer, mais l'utilisateur doit confirmer ce qui est
+     réellement consommable avant qu'il entre dans le calcul. */
   function parseQuantity(texte) {
     var t = String(texte || '').toLowerCase().trim();
     if (!t) return null;
+
+    var nomme = /(\d+)\s*(?:biscuits?|cookies?|gaufrettes?|barres?|tranches?|galettes?|capsules?|sachets?|pots?|bouteilles?|canettes?|portions?|pi[eè]ces?)\s*(?:[x×*]|de|à|a)?\s*([\d.,]+)\s*(kg|g|ml|cl|dl|l)\b/.exec(t);
+    if (nomme) {
+      var nombrePieces = parseInt(nomme[1], 10);
+      var poidsPiece = normalise(nombre(nomme[2]), nomme[3]);
+      if (nombrePieces > 0 && poidsPiece) return {
+        total: Math.round(nombrePieces * poidsPiece.valeur * 100) / 100,
+        unitesSuggerees: nombrePieces,
+        parUniteSuggeree: poidsPiece.valeur,
+        label: labelDans(t),
+        unite: poidsPiece.unite,
+        confirme: false
+      };
+    }
 
     var multi = /(\d+)\s*[x×*]\s*([\d.,]+)\s*(kg|g|ml|cl|dl|l)\b/.exec(t);
     if (multi) {
@@ -49,9 +96,11 @@
       if (unites > 0 && parPiece) {
         return {
           total: Math.round(unites * parPiece.valeur * 100) / 100,
-          unites: unites,
-          parUnite: parPiece.valeur,
-          unite: parPiece.unite
+          unitesSuggerees: unites,
+          parUniteSuggeree: parPiece.valeur,
+          label: labelDans(t),
+          unite: parPiece.unite,
+          confirme: false
         };
       }
     }
@@ -59,8 +108,27 @@
     var simple = /([\d.,]+)\s*(kg|g|ml|cl|dl|l)\b/.exec(t);
     if (simple) {
       var tot = normalise(nombre(simple[1]), simple[2]);
-      if (tot) return { total: tot.valeur, unites: null, parUnite: null, unite: tot.unite };
+      if (tot) {
+        var compte = compteDans(t);
+        return {
+          total: tot.valeur,
+          unitesSuggerees: compte ? compte.unitesSuggerees : null,
+          parUniteSuggeree: null,
+          label: compte ? compte.label : '',
+          unite: tot.unite,
+          confirme: false
+        };
+      }
     }
+    var seulementCompte = compteDans(t);
+    if (seulementCompte) return {
+      total: null,
+      unitesSuggerees: seulementCompte.unitesSuggerees,
+      parUniteSuggeree: null,
+      label: seulementCompte.label,
+      unite: 'g',
+      confirme: false
+    };
     return null;
   }
 
@@ -69,33 +137,62 @@
      afficher, parce que le chiffre serait quand même recopié dans la pompe. */
   function parUnite(total, unites) {
     var t = nombre(total), n = nombre(unites);
-    if (t == null || n == null || t <= 0 || n <= 0) return null;
-    return Math.round((t / n) * 100) / 100;
+    if (t == null || n == null || t <= 0 || n <= 0 || Math.floor(n) !== n) return null;
+    return t / n;
   }
 
-  /* Glucides d'une quantité donnée. Arrondi au dixième : l'affichage final
-     arrondit à l'entier, mais arrondir deux fois de suite décale le total. */
+  /* Glucides d'une quantité donnée. Aucun arrondi ici : l'affichage final peut
+     arrondir, mais le calcul et la portion mémorisée restent exacts. */
   function glucides(quantite, pour100) {
     var q = nombre(quantite), c = nombre(pour100);
     if (q == null || c == null || q < 0 || c < 0) return null;
-    return Math.round(q * c) / 100;
+    return q * c / 100;
+  }
+
+  function calculeUnites(options) {
+    var o = options || {};
+    var m = nombre(o.mange);
+    var densite = nombre(o.pour100);
+    if (m == null || m <= 0 || m > 10000 || densite == null || densite < 0 || densite > 100) return null;
+
+    var methode = o.methode === 'unite' ? 'unite' : 'paquet';
+    var poids;
+    var total = nombre(o.total);
+    var unites = nombre(o.unites);
+    if (methode === 'unite') {
+      poids = nombre(o.parUnite);
+      if (poids == null || poids <= 0 || poids > 100000) return null;
+    } else {
+      poids = parUnite(total, unites);
+      if (poids == null || total > 100000 || unites > 10000) return null;
+    }
+
+    var quantite = poids * m;
+    return {
+      methode: methode,
+      parUnite: poids,
+      quantite: quantite,
+      glucides: glucides(quantite, densite),
+      depassePaquet: methode === 'paquet' && m > unites
+    };
   }
 
   /* Résumé complet d'une saisie « paquet de X, N unités, j'en mange M ».
      Renvoie null dès qu'un maillon manque — l'interface n'affiche alors rien
      plutôt qu'un résultat partiel qui aurait l'air d'un résultat. */
   function calcule(total, unites, mange, pour100) {
-    var pu = parUnite(total, unites);
-    var m = nombre(mange);
-    if (pu == null || m == null || m <= 0) return null;
-    var quantite = Math.round(pu * m * 100) / 100;
-    return { parUnite: pu, quantite: quantite, glucides: glucides(quantite, pour100) };
+    return calculeUnites({ total: total, unites: unites, mange: mange,
+      pour100: pour100, methode: 'paquet' });
   }
 
   window.Portion = {
     parseQuantity: parseQuantity,
+    countFromText: compteDans,
+    labelFromText: labelDans,
+    normalizeQuantity: normalise,
     parUnite: parUnite,
     glucides: glucides,
-    calcule: calcule
+    calcule: calcule,
+    calculeUnites: calculeUnites
   };
 })();

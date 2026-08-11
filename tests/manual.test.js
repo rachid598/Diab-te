@@ -8,6 +8,7 @@ const { ManualCalc } = loadScript('js/manual.js');
 
 test('le mode manuel refuse les grammes négatifs, infinis ou démesurés', () => {
   assert.equal(ManualCalc.normalizeGrams('-1'), null);
+  assert.equal(ManualCalc.normalizeGrams('0'), null, 'une ligne vide ne peut pas confirmer 0 g');
   assert.equal(ManualCalc.normalizeGrams(Infinity), null);
   assert.equal(ManualCalc.normalizeGrams('5001'), null);
   assert.equal(ManualCalc.normalizeGrams('12,5'), 12.5);
@@ -37,4 +38,12 @@ test('une densité nutritionnelle invalide ne produit pas un faux total', () => 
   assert.equal(got.ok, false);
   assert.equal(got.totalCarbsG, 0);
   assert.match(got.errors.join(' '), /100 g invalides/i);
+});
+
+test('une densité absente ne devient jamais silencieusement zéro', () => {
+  [null, undefined, '', '   ', true, false].forEach((carb) => {
+    const got = ManualCalc.calculate([{ name: 'Produit incomplet', grams: 100, carb }]);
+    assert.equal(got.ok, false, `densité ${String(carb)} acceptée`);
+    assert.match(got.errors.join(' '), /100 g invalides/i);
+  });
 });

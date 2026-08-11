@@ -72,6 +72,13 @@
       extras: cleanText(raw.extras, 4000),
       imageCount: imageCount
     };
+    var mealAt = finite(raw.mealAt);
+    if (mealAt != null && mealAt >= 946684800000 && mealAt <= 4102444800000) {
+      out.mealAt = mealAt;
+    }
+    var venue = cleanText(raw.venue, 20);
+    if (/^(maison|restaurant|cantine)$/.test(venue)) out.venue = venue;
+    if (raw.clarificationAnswered === true) out.clarificationAnswered = true;
     var depth = cleanDepth(raw.depth, imageCount);
     if (depth) out.depth = depth;
     return out;

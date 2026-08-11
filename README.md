@@ -47,6 +47,13 @@ le dit au lieu de le masquer.
 [OpenFoodFacts](https://world.openfoodfacts.org) (recherche par nom ou scan de code-barres),
 repas fréquents enregistrés. Fonctionne sans réseau et sans clé API.
 
+Pour un paquet, l'app sait maintenant calculer une consommation en unités : indique par
+exemple **300 g, 15 biscuits, j'en mange 2** et elle calcule **40 g de produit puis 28 g de
+glucides** si l'étiquette annonce 70 g/100 g. Un compte trouvé automatiquement dans une
+fiche produit reste une suggestion à confirmer : « 2 × 250 g » peut décrire deux
+sachets, pas deux biscuits. Le poids direct d'une unité est aussi accepté. Les produits
+scannés et les corrections personnelles enrichissent la recherche locale du téléphone.
+
 ## Comment la précision est obtenue
 
 La difficulté n'est pas de reconnaître l'aliment, c'est d'**estimer la portion**. La méthode
