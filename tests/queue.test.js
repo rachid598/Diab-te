@@ -39,8 +39,10 @@ function queueEnv(options) {
 
 test('add valide le base64, borne le contexte et persiste des chemins internes', async () => {
   const { Queue } = queueEnv();
+  const mealAt = 1_786_406_400_000;
   const id = await Queue.add([{ base64: 'aGVsbG8=', mediaType: 'image/jpeg' }], {
     notes: 'riz', extras: 'yaourt', imageCount: 99,
+    mealAt, venue: 'restaurant', clarificationAnswered: true,
     depth: { scaleOk: true, fieldWidthCm: 30, volumeCm3: 1000 }
   });
   assert.match(id, /^q\d{10,16}-[a-z0-9]{6,16}$/);
@@ -49,6 +51,9 @@ test('add valide le base64, borne le contexte et persiste des chemins internes',
   assert.equal(item.ctx.imageCount, 1);
   assert.equal(item.ctx.depth.fieldWidthCm, 30);
   assert.equal(item.ctx.depth.viewIndex, 1);
+  assert.equal(item.ctx.mealAt, mealAt);
+  assert.equal(item.ctx.venue, 'restaurant');
+  assert.equal(item.ctx.clarificationAnswered, true);
 });
 
 test('la file conserve la vue ARCore exacte et rejette une échelle multi-vues ambiguë', async () => {

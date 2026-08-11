@@ -12,6 +12,11 @@
   var MAX_TOTAL_CARBS = 400;
 
   function finiteNumber(value) {
+    /* Number(null) et Number(true) valent respectivement 0 et 1. Accepter ces
+       conversions silencieuses ferait passer une densité absente pour « 0 g de
+       glucides », donc pour un résultat complet. */
+    if (typeof value !== 'number' && typeof value !== 'string') return null;
+    if (typeof value === 'string' && !value.trim()) return null;
     var n = typeof value === 'string'
       ? parseFloat(value.replace(',', '.'))
       : Number(value);
@@ -20,7 +25,7 @@
 
   function normalizeGrams(value) {
     var n = finiteNumber(value);
-    if (n == null || n < 0 || n > MAX_ITEM_GRAMS) return null;
+    if (n == null || n <= 0 || n > MAX_ITEM_GRAMS) return null;
     return Math.round(n * 10) / 10;
   }
 
@@ -33,7 +38,8 @@
       var name = String(item.name || ('Aliment ' + (index + 1))).slice(0, 160);
 
       if (grams == null) {
-        errors.push('« ' + name + ' » : quantité invalide (0 à ' + MAX_ITEM_GRAMS + ' g).');
+        errors.push('« ' + name + ' » : indique une quantité supérieure à 0 g (maximum ' +
+          MAX_ITEM_GRAMS + ' g).');
       }
       if (density == null || density < 0 || density > 100) {
         errors.push('« ' + name + ' » : glucides pour 100 g invalides.');

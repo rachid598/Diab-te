@@ -297,18 +297,19 @@
     et: 1, avec: 1, sans: 1, dans: 1, portion: 1, part: 1, tranche: 1, morceaux: 1,
     morceau: 1, demi: 1, demie: 1, entier: 1, entiere: 1, petit: 1, petite: 1,
     grand: 1, grande: 1, maison: 1, frais: 1, fraiche: 1, cuit: 1, cuite: 1,
-    grille: 1, grillee: 1, roti: 1, rotie: 1, vapeur: 1, blanc: 1, blanche: 1,
-    complet: 1, complete: 1, long: 1, grain: 1, nature: 1, sauce: 1,
-    assiette: 1, bol: 1, verre: 1, tasse: 1, environ: 1, filet: 1, pave: 1,
-    basmati: 1
+    grille: 1, grillee: 1, roti: 1, rotie: 1, vapeur: 1,
+    long: 1, grain: 1, nature: 1, sauce: 1,
+    assiette: 1, bol: 1, verre: 1, tasse: 1, environ: 1, filet: 1, pave: 1
   };
   var FOOD_ALIASES = {
     patate: 'pomme_de_terre', patates: 'pomme_de_terre',
     potato: 'pomme_de_terre', potatoes: 'pomme_de_terre',
-    frites: 'pomme_de_terre', frite: 'pomme_de_terre',
+    frites: 'frite',
     pommes: 'pomme', apples: 'pomme', apple: 'pomme',
     pates: 'pate', pasta: 'pate', spaghettis: 'pate', spaghetti: 'pate',
     riz: 'riz', rice: 'riz', baguettes: 'baguette', pains: 'pain',
+    blanche: 'blanc', blanches: 'blanc', blancs: 'blanc',
+    complete: 'complet', completes: 'complet', complets: 'complet',
     bananes: 'banane', oranges: 'orange', tomates: 'tomate',
     poulets: 'poulet', chicken: 'poulet', saumons: 'saumon', salmon: 'saumon',
     yaourts: 'yaourt', yogourt: 'yaourt', yogourts: 'yaourt',
@@ -411,6 +412,58 @@
   function finite(v) {
     return typeof v === 'number' && isFinite(v) ? v : null;
   }
+
+  /* Open Food Facts normalise les différentes représentations d'un même GTIN :
+     un UPC-A de 12 chiffres devient notamment un EAN-13 avec un zéro devant.
+     Le stockage local doit faire exactement de même, sinon un produit trouvé en
+     ligne disparaît au prochain scan hors connexion.
+
+     On ne retire volontairement QUE les séparateurs visuels d'un code saisi à
+     la main. `https://exemple/3017620422003` est un QR, pas un code-barres : en
+     extraire tous les chiffres créerait une fausse clé de produit. */
+  function barcodeDigits(value) {
+    if (typeof value === 'number') {
+      if (!isFinite(value) || value < 0 || Math.floor(value) !== value ||
+          value > 9007199254740991) return null;
+      value = String(value);
+    }
+    if (typeof value !== 'string') return null;
+    var raw = value.trim();
+    if (!raw || !/^\d[\d\s\-\u00a0]*$/.test(raw)) return null;
+    var digits = raw.replace(/[\s\-\u00a0]/g, '');
+    return /^\d{1,14}$/.test(digits) ? digits : null;
+  }
+
+  function leftPad(value, length) {
+    while (value.length < length) value = '0' + value;
+    return value;
+  }
+
+  function canonicalBarcode(value) {
+    var digits = barcodeDigits(value);
+    if (!digits) return null;
+    var significant = digits.replace(/^0+/, '');
+    if (!significant) return null;
+    if (significant.length <= 7) return leftPad(significant, 8);
+    if (significant.length === 8) return significant;
+    if (significant.length <= 12) return leftPad(significant, 13);
+    return significant.length <= 14 ? significant : null;
+  }
+
+  /* Indication seulement : Open Food Facts accepte aussi quelques codes fabriqués
+     par des producteurs dont la clé GTIN est fausse. L'appelant peut donc
+     avertir, mais ne doit pas refuser un scan uniquement à cause de ce résultat.
+     null signifie que la saisie n'est pas un GTIN vérifiable. */
+  function barcodeChecksumValid(value) {
+    var code = canonicalBarcode(value);
+    if (!code || [8, 12, 13, 14].indexOf(code.length) === -1) return null;
+    var sum = 0, weight = 3;
+    for (var i = code.length - 2; i >= 0; i--) {
+      sum += parseInt(code.charAt(i), 10) * weight;
+      weight = weight === 3 ? 1 : 3;
+    }
+    return ((10 - (sum % 10)) % 10) === parseInt(code.charAt(code.length - 1), 10);
+  }
   function bounded(v, min, max, fallback) {
     v = finite(v);
     return v == null ? fallback : Math.max(min, Math.min(max, v));
@@ -488,6 +541,285 @@
 
   function shortText(value, max) {
     return typeof value === 'string' ? value.trim().slice(0, max || 200) : '';
+  }
+
+  function baseUnit(value) {
+    return value === 'ml' ? 'ml' : value === 'g' ? 'g' : null;
+  }
+
+  function positiveNumber(value, max) {
+    value = finite(value);
+    return value != null && value > 0 && value <= (max || 1000000000) ? value : null;
+  }
+
+  /* Les poids/comptages restent fortement bornés par `positiveNumber`, mais un
+     horodatage JavaScript vaut déjà ~1,8 × 10^12. Le plafond générique de 10^9
+     le transformait donc en zéro et cassait récence, migration et purge. */
+  function timestampNumber(value) {
+    return positiveNumber(value, Number.MAX_SAFE_INTEGER);
+  }
+
+  function packageFingerprint(value, unit) {
+    var raw = isObject(value) ? (isObject(value.package) ? value.package : value) : null;
+    var total = raw
+      ? positiveNumber(raw.total != null ? raw.total : raw.totalBaseQuantity)
+      : positiveNumber(value);
+    var unite = baseUnit(unit || (raw && (raw.unite || raw.baseUnit || raw.unit)));
+    if (total == null || !unite) return null;
+    // Six décimales évitent les variations de sérialisation sans confondre deux
+    // poids réalistes différents. OFF fournit en pratique au plus deux décimales.
+    return unite + ':' + String(Math.round(total * 1000000) / 1000000);
+  }
+
+  function normalizePackageFacts(value, fallbackSource) {
+    var raw = isObject(value) ? (isObject(value.package) ? value.package : value) : null;
+    if (!raw) return null;
+    var total = positiveNumber(raw.total != null ? raw.total : raw.totalBaseQuantity);
+    var unite = baseUnit(raw.unite || raw.baseUnit || raw.unit);
+    var fingerprint = packageFingerprint(total, unite);
+    if (!fingerprint) return null;
+    var source = raw.source;
+    if (source !== 'off' && source !== 'user' && source !== 'legacy') {
+      source = fallbackSource === 'off' ? 'off' : fallbackSource === 'legacy' ? 'legacy' : 'user';
+    }
+    var out = {
+      total: total,
+      unite: unite,
+      source: source,
+      fingerprint: fingerprint
+    };
+    var rawQuantity = shortText(raw.rawQuantity, 120);
+    if (rawQuantity) out.rawQuantity = rawQuantity;
+    return out;
+  }
+
+  function directUnitFingerprint(value, unit) {
+    var weight = positiveNumber(value, 100000);
+    var unite = baseUnit(unit);
+    if (weight == null || !unite) return null;
+    return 'unit:' + unite + ':' + String(Math.round(weight * 1000000) / 1000000);
+  }
+
+  function normalizeUnitDefinition(value, pack, legacy, confirmedBySetter) {
+    var raw = isObject(value) ? (isObject(value.unit) ? value.unit : value) : null;
+    if (!raw) return null;
+    var methode = legacy ? 'paquet' : (raw.methode === 'unite' ? 'unite' : 'paquet');
+    var unite = baseUnit(raw.unite || raw.baseUnit || (pack && pack.unite));
+    var count = null, perUnit = null, fingerprint = null;
+    if (methode === 'unite') {
+      perUnit = positiveNumber(raw.parUnite != null ? raw.parUnite : raw.unitWeight, 100000);
+      fingerprint = directUnitFingerprint(perUnit, unite);
+      if (!fingerprint) return null;
+    } else {
+      if (!pack) return null;
+      count = positiveNumber(raw.unites != null ? raw.unites
+        : (raw.unitsPerPackage != null ? raw.unitsPerPackage : raw.count), 1000000);
+      if (count == null || Math.floor(count) !== count) return null;
+      fingerprint = pack.fingerprint;
+      unite = pack.unite;
+    }
+    var ownFingerprint = typeof raw.fingerprint === 'string' ? raw.fingerprint : fingerprint;
+    if (ownFingerprint !== fingerprint) return null;
+    var confirmed = legacy || confirmedBySetter || raw.confirmed === true;
+    if (!confirmed) return null;
+    var source = raw.source || raw.method;
+    if (legacy) source = 'legacy';
+    if (source !== 'user' && source !== 'legacy' && source !== 'off-confirmed') source = 'user';
+    return {
+      methode: methode,
+      unites: count,
+      parUnite: perUnit,
+      unite: unite,
+      label: shortText(raw.label || raw.unitLabel, 24),
+      confirmed: true,
+      source: source,
+      fingerprint: fingerprint,
+      confirmedAt: timestampNumber(raw.confirmedAt || raw.ts) || Date.now()
+    };
+  }
+
+  /* v2 sépare la vérité du paquet de la définition d'une unité consommable.
+     Une ancienne entrée venait nécessairement du formulaire utilisateur : elle
+     peut donc être migrée comme confirmation, liée à l'empreinte du paquet. */
+  function normalizePackagingRecord(value) {
+    if (!isObject(value)) return null;
+    var structured = value.v === 2 || isObject(value.package);
+    var pack = normalizePackageFacts(structured ? value.package : value,
+      structured ? 'user' : 'legacy');
+    var unit = normalizeUnitDefinition(structured ? value.unit : value,
+      pack, !structured, false);
+    if (!pack && !unit) return null;
+    return {
+      v: 2,
+      package: pack,
+      unit: unit,
+      ts: timestampNumber(value.ts) || Date.now()
+    };
+  }
+
+  function publicPackageFacts(value) {
+    if (!value) return null;
+    var out = {
+      total: value.total,
+      unite: value.unite,
+      source: value.source,
+      fingerprint: value.fingerprint
+    };
+    if (value.rawQuantity) out.rawQuantity = value.rawQuantity;
+    return out;
+  }
+
+  function publicUnitDefinition(value) {
+    if (!value) return null;
+    return {
+      methode: value.methode,
+      unites: value.unites,
+      parUnite: value.parUnite,
+      unite: value.unite,
+      label: value.label,
+      confirmed: true,
+      // Provenance séparée de la méthode de calcul paquet/unité.
+      source: value.source,
+      method: value.source,
+      fingerprint: value.fingerprint,
+      confirmedAt: value.confirmedAt
+    };
+  }
+
+  function barcodeRecordPriority(entry, kind, canonical) {
+    var value = entry.value || {};
+    var priority = 0;
+    if (kind === 'products' && value.source === 'perso') priority = 3;
+    if (kind === 'packaging') {
+      var normalized = normalizePackagingRecord(value);
+      if (normalized && normalized.unit && normalized.unit.confirmed) {
+        priority = normalized.unit.source === 'legacy' ? 2 : 3;
+      } else if (normalized) priority = 1;
+    }
+    return {
+      priority: priority,
+      ts: timestampNumber(value.ts) || 0,
+      canonical: entry.key === canonical ? 1 : 0
+    };
+  }
+
+  function betterBarcodeRecord(candidate, current, kind, canonical) {
+    if (!current) return candidate;
+    var a = barcodeRecordPriority(candidate, kind, canonical);
+    var b = barcodeRecordPriority(current, kind, canonical);
+    if (a.priority !== b.priority) return a.priority > b.priority ? candidate : current;
+    if (a.ts !== b.ts) return a.ts > b.ts ? candidate : current;
+    return a.canonical > b.canonical ? candidate : current;
+  }
+
+  /* Consolide les anciennes clés (UPC-A brut, zéros variables) sans toucher aux
+     clés non reconnues. Ces dernières ne sont jamais retournées, mais les garder
+     évite qu'une simple lecture ne devienne une suppression destructive. */
+  function readBarcodeMap(storageKey, kind) {
+    var raw = read(storageKey, {});
+    if (!isObject(raw)) return {};
+    var groups = {}, out = {}, dirty = false;
+    Object.keys(raw).forEach(function (key) {
+      var canonical = canonicalBarcode(key);
+      if (!canonical || !isObject(raw[key])) {
+        out[key] = raw[key];
+        return;
+      }
+      var entry = { key: key, value: raw[key] };
+      groups[canonical] = betterBarcodeRecord(entry, groups[canonical], kind, canonical);
+      if (canonical !== key || groups[canonical].key !== key) dirty = true;
+    });
+    Object.keys(groups).forEach(function (canonical) {
+      out[canonical] = groups[canonical].value;
+      var aliases = Object.keys(raw).filter(function (key) {
+        return key !== canonical && canonicalBarcode(key) === canonical;
+      });
+      if (aliases.length) dirty = true;
+    });
+    if (dirty) write(storageKey, out); // migration opportuniste ; la lecture reste valable si quota plein
+    return out;
+  }
+
+  function getBarcodeRecord(storageKey, kind, code) {
+    var canonical = canonicalBarcode(code);
+    if (!canonical) return null;
+    var map = readBarcodeMap(storageKey, kind);
+    return isObject(map[canonical]) ? { code: canonical, map: map, value: map[canonical] } : null;
+  }
+
+  function getNormalizedPackagingEntry(code) {
+    var found = getBarcodeRecord(KEYS.packaging, 'packaging', code);
+    if (!found) return null;
+    var normalized = normalizePackagingRecord(found.value);
+    if (!normalized) return null;
+    /* `package:null` est volontairement valide pour une définition directe
+       (par exemple « 1 biscuit pèse 18,5 g »). Ne la réécrivons pas à chaque
+       lecture sous prétexte qu'elle n'a pas de paquet de référence. */
+    var canonicalV2 = found.value.v === 2 &&
+      Object.prototype.hasOwnProperty.call(found.value, 'package') &&
+      Object.prototype.hasOwnProperty.call(found.value, 'unit');
+    if (!canonicalV2) {
+      found.map[found.code] = normalized;
+      write(KEYS.packaging, found.map);
+    }
+    return { code: found.code, map: found.map, value: normalized };
+  }
+
+  function pruneBarcodeMap(map, max, kind) {
+    var recognized = Object.keys(map).filter(function (key) {
+      return canonicalBarcode(key) === key && isObject(map[key]);
+    });
+    if (recognized.length <= max) return map;
+    recognized.sort(function (a, b) {
+      var pa = barcodeRecordPriority({ key: a, value: map[a] }, kind, a);
+      var pb = barcodeRecordPriority({ key: b, value: map[b] }, kind, b);
+      return pb.priority - pa.priority || pb.ts - pa.ts;
+    });
+    recognized.slice(max).forEach(function (key) { delete map[key]; });
+    return map;
+  }
+
+  function normalizeProductPack(value) {
+    if (!isObject(value)) return null;
+    var total = positiveNumber(value.total);
+    if (total == null) return null;
+    var out = {
+      total: total,
+      unite: baseUnit(value.unite) || 'g',
+      unitesSuggerees: null,
+      parUniteSuggeree: null,
+      labelSuggere: shortText(value.labelSuggere, 24),
+      suggestionConflit: value.suggestionConflit === true,
+      confirme: false
+    };
+    /* `unites` est l'ancien nom ambigu. En cache produit il devient seulement
+       une suggestion ; seule la définition séparée dans packaging peut être
+       confirmée par l'utilisateur. */
+    var units = positiveNumber(value.unitesSuggerees != null
+      ? value.unitesSuggerees : value.unites, 1000000);
+    if (units != null && Math.floor(units) === units) out.unitesSuggerees = units;
+    var perUnit = positiveNumber(value.parUniteSuggeree, 100000);
+    if (perUnit != null) out.parUniteSuggeree = perUnit;
+    var rawQuantity = shortText(value.rawQuantity, 120);
+    if (rawQuantity) out.rawQuantity = rawQuantity;
+    return out;
+  }
+
+  function normalizeProductRecord(value, code) {
+    if (!isObject(value)) return null;
+    var carb = finite(value.carb), name = shortText(value.n, 120);
+    if (!name || carb == null || carb < 0 || carb > 100) return null;
+    var serving = positiveNumber(value.serving, 1000000);
+    return {
+      n: name,
+      brand: shortText(value.brand, 60),
+      carb: carb,
+      code: code,
+      serving: serving,
+      pack: normalizeProductPack(value.pack),
+      source: value.source === 'perso' ? 'perso' : 'off',
+      ts: timestampNumber(value.ts) || 0
+    };
   }
 
   function sanitizePortions(value) {
@@ -1018,6 +1350,9 @@
     foodKey: foodKey,
     sameFood: sameFood,
     matchFoods: matchFoods,
+    canonicalBarcode: canonicalBarcode,
+    barcodeChecksumValid: barcodeChecksumValid,
+    packageFingerprint: packageFingerprint,
 
     /* ----- Retrouver un repas déjà mangé -----
        Un repas passé dont la valeur RÉELLE a été relevée vaut mieux que
@@ -1289,52 +1624,102 @@
     },
 
     /* ----- Emballages connus, par code-barres -----
-       OpenFoodFacts sait presque toujours ce que pèse un paquet, presque jamais
-       combien d'unités il contient : personne ne saisit « 12 biscuits ». C'est
-       donc à toi de le dire, mais une seule fois — au second scan du même
-       produit, la réponse est déjà là.
-
-       Ce que la base publique donne (le poids) reste relu à chaque fois ; seul
-       ce qu'elle ignore (le nombre d'unités et leur nom) est mémorisé ici. */
-    getPackaging: function (code) {
-      var c = String(code || '').replace(/\D/g, '');
-      if (!c) return null;
-      var p = read(KEYS.packaging, {})[c];
-      if (!isObject(p)) return null;
-      var total = finite(p.total), unites = finite(p.unites);
-      if (!(total > 0) || !(unites > 0)) return null;
+       Le poids du paquet et la définition de l'unité sont deux vérités
+       différentes. « 2 x 250 g » décrit parfois deux sachets, pas deux biscuits.
+       Une unité n'est donc utilisable qu'après confirmation humaine et reste
+       liée à l'empreinte poids+unité du paquet observé. */
+    getPackageFacts: function (code) {
+      var found = getNormalizedPackagingEntry(code);
+      return found ? publicPackageFacts(found.value.package) : null;
+    },
+    setPackageFacts: function (code, info) {
+      var c = canonicalBarcode(code), pack = normalizePackageFacts(info,
+        info && info.source === 'off' ? 'off' : 'user');
+      if (!c || !pack) return false;
+      var map = readBarcodeMap(KEYS.packaging, 'packaging');
+      var previous = normalizePackagingRecord(map[c]);
+      var unit = previous && previous.unit &&
+        ((previous.unit.methode === 'unite' && previous.unit.unite === pack.unite) ||
+         previous.unit.fingerprint === pack.fingerprint)
+        ? previous.unit : null;
+      map[c] = { v: 2, package: pack, unit: unit, ts: Date.now() };
+      pruneBarcodeMap(map, 300, 'packaging');
+      return write(KEYS.packaging, map);
+    },
+    getUnitDefinition: function (code, currentPackage) {
+      var found = getNormalizedPackagingEntry(code);
+      if (!found || !found.value.unit) return null;
+      if (found.value.unit.methode === 'unite') {
+        if (currentPackage != null) {
+          var directPack = normalizePackageFacts(currentPackage, 'off');
+          if (!directPack || directPack.unite !== found.value.unit.unite) return null;
+        }
+        return publicUnitDefinition(found.value.unit);
+      }
+      if (!found.value.package) return null;
+      var expected = currentPackage == null
+        ? found.value.package.fingerprint
+        : (typeof currentPackage === 'string'
+          ? currentPackage : packageFingerprint(currentPackage));
+      if (!expected || found.value.unit.fingerprint !== expected) return null;
+      return publicUnitDefinition(found.value.unit);
+    },
+    setUnitDefinition: function (code, info) {
+      var c = canonicalBarcode(code);
+      if (!c || !isObject(info)) return false;
+      var map = readBarcodeMap(KEYS.packaging, 'packaging');
+      var previous = normalizePackagingRecord(map[c]);
+      /* Ergonomie : le premier appel peut fournir le paquet et l'unité ensemble.
+         Sinon, une définition sans poids de référence serait impossible à
+         invalider lors d'un changement de format. */
+      var pack = previous && previous.package;
+      if (!pack) pack = normalizePackageFacts(info, info.source === 'off' ? 'off' : 'user');
+      if (!pack && info.methode !== 'unite') return false;
+      var unit = normalizeUnitDefinition(info, pack, false, true);
+      if (!unit) return false;
+      map[c] = { v: 2, package: pack, unit: unit, ts: Date.now() };
+      pruneBarcodeMap(map, 300, 'packaging');
+      return write(KEYS.packaging, map);
+    },
+    /* API historique gardée pour app.js : elle ne rend désormais qu'une
+       définition confirmée et cohérente avec le paquet courant éventuel. */
+    getPackaging: function (code, currentPackage) {
+      var found = getNormalizedPackagingEntry(code);
+      if (!found || !found.value.unit) return null;
+      var storedPack = found.value.package;
+      var pack = currentPackage == null
+        ? storedPack : normalizePackageFacts(currentPackage, 'off');
+      var unit = found.value.unit;
+      if (unit.methode === 'unite' && pack && unit.unite !== pack.unite) return null;
+      if (unit.methode === 'paquet' &&
+          (!pack || unit.fingerprint !== pack.fingerprint)) return null;
+      var provenance = unit.source;
       return {
-        total: total,
-        unites: unites,
-        label: typeof p.label === 'string' ? p.label.slice(0, 24) : '',
-        unite: p.unite === 'ml' ? 'ml' : 'g'
+        total: unit.methode === 'paquet' && pack ? pack.total : null,
+        unites: unit.unites,
+        parUnite: unit.methode === 'unite' ? unit.parUnite : pack.total / unit.unites,
+        label: unit.label,
+        unite: unit.unite,
+        methode: unit.methode,
+        confirmed: true,
+        source: provenance,
+        method: provenance,
+        fingerprint: unit.fingerprint,
+        fingerprintTotal: unit.methode === 'paquet' && pack ? pack.fingerprint : null,
+        confirmedAt: unit.confirmedAt
       };
     },
     setPackaging: function (code, info) {
-      var c = String(code || '').replace(/\D/g, '');
-      if (!c || !isObject(info)) return false;
-      var total = finite(info.total), unites = finite(info.unites);
-      if (!(total > 0) || !(unites > 0)) return false;
-      var tous = read(KEYS.packaging, {});
-      if (!isObject(tous)) tous = {};
-      tous[c] = {
-        total: total,
-        unites: unites,
-        label: typeof info.label === 'string' ? info.label.slice(0, 24) : '',
-        unite: info.unite === 'ml' ? 'ml' : 'g',
-        ts: Date.now()
-      };
-      /* Borne volontairement basse : ce sont les produits que TU achètes, pas un
-         catalogue. Au-delà, on oublie les plus anciens plutôt que de faire
-         grossir indéfiniment un stockage partagé avec les photos. */
-      var codes = Object.keys(tous);
-      if (codes.length > 300) {
-        codes.sort(function (a, b) { return (tous[b].ts || 0) - (tous[a].ts || 0); });
-        var garde = {};
-        codes.slice(0, 300).forEach(function (k) { garde[k] = tous[k]; });
-        tous = garde;
-      }
-      return write(KEYS.packaging, tous);
+      if (!isObject(info)) return false;
+      var normalizedInfo = Object.assign({ unite: 'g' }, info);
+      var c = canonicalBarcode(code), pack = normalizePackageFacts(normalizedInfo, 'user');
+      if (!c || (!pack && normalizedInfo.methode !== 'unite')) return false;
+      var unit = normalizeUnitDefinition(normalizedInfo, pack, false, true);
+      if (!unit) return false;
+      var map = readBarcodeMap(KEYS.packaging, 'packaging');
+      map[c] = { v: 2, package: pack, unit: unit, ts: Date.now() };
+      pruneBarcodeMap(map, 300, 'packaging');
+      return write(KEYS.packaging, map);
     },
 
     /* ----- Produits connus, par code-barres -----
@@ -1353,31 +1738,17 @@
        rafraîchit le premier quand le réseau répond, jamais le second, qui vient
        de l'emballage que tu avais sous les yeux. */
     getProduct: function (code) {
-      var c = String(code || '').replace(/\D/g, '');
-      if (!c) return null;
-      var p = read(KEYS.products, {})[c];
-      if (!isObject(p)) return null;
-      var carb = finite(p.carb);
-      if (carb == null || carb < 0 || carb > 100) return null;
-      if (typeof p.n !== 'string' || !p.n) return null;
-      return {
-        n: p.n, brand: typeof p.brand === 'string' ? p.brand : '',
-        carb: carb, code: c,
-        serving: finite(p.serving),
-        pack: isObject(p.pack) ? p.pack : null,
-        source: p.source === 'perso' ? 'perso' : 'off',
-        ts: finite(p.ts) || 0
-      };
+      var found = getBarcodeRecord(KEYS.products, 'products', code);
+      return found ? normalizeProductRecord(found.value, found.code) : null;
     },
     setProduct: function (code, food, source) {
-      var c = String(code || '').replace(/\D/g, '');
+      var c = canonicalBarcode(code);
       if (!c || !isObject(food)) return false;
       var carb = finite(food.carb);
       if (carb == null || carb < 0 || carb > 100) return false;
       if (typeof food.n !== 'string' || !food.n.trim()) return false;
 
-      var tous = read(KEYS.products, {});
-      if (!isObject(tous)) tous = {};
+      var tous = readBarcodeMap(KEYS.products, 'products');
       var ancien = tous[c];
       /* Une réponse d'OpenFoodFacts n'écrase pas une saisie personnelle : tu as
          lu l'emballage, la base a été remplie par un inconnu. */
@@ -1388,31 +1759,27 @@
         brand: typeof food.brand === 'string' ? food.brand.slice(0, 60) : '',
         carb: carb,
         serving: finite(food.serving),
-        pack: isObject(food.pack) ? food.pack : null,
+        pack: normalizeProductPack(food.pack),
         source: source === 'perso' ? 'perso' : 'off',
         ts: Date.now()
       };
 
-      /* Purge par ancienneté, mais les saisies personnelles passent en dernier :
-         une réponse d'OpenFoodFacts se retrouve d'un scan, ce que tu as recopié
-         à la main serait perdu pour de bon. */
-      var codes = Object.keys(tous);
-      if (codes.length > 500) {
-        codes.sort(function (a, b) {
-          var pa = tous[a].source === 'perso' ? 1 : 0;
-          var pb = tous[b].source === 'perso' ? 1 : 0;
-          if (pa !== pb) return pb - pa;
-          return (tous[b].ts || 0) - (tous[a].ts || 0);
-        });
-        var garde = {};
-        codes.slice(0, 500).forEach(function (k) { garde[k] = tous[k]; });
-        tous = garde;
-      }
+      /* Purge par ancienneté, mais les saisies personnelles restent prioritaires. */
+      pruneBarcodeMap(tous, 500, 'products');
       return write(KEYS.products, tous);
     },
+    getProducts: function (limit) {
+      var tous = readBarcodeMap(KEYS.products, 'products');
+      var list = Object.keys(tous).map(function (code) {
+        return canonicalBarcode(code) === code ? normalizeProductRecord(tous[code], code) : null;
+      }).filter(Boolean).sort(function (a, b) { return b.ts - a.ts; });
+      if (limit == null) return list;
+      limit = Math.floor(Number(limit));
+      if (!isFinite(limit) || limit < 0) return [];
+      return list.slice(0, Math.min(limit, 5000));
+    },
     countProducts: function () {
-      var tous = read(KEYS.products, {});
-      return isObject(tous) ? Object.keys(tous).length : 0;
+      return this.getProducts().length;
     },
     /* Recherche par nom dans les produits déjà rencontrés. Sert quand
        OpenFoodFacts ne répond pas : les produits qu'on rachète chaque semaine
@@ -1421,11 +1788,7 @@
     searchProducts: function (query) {
       var q = sansAccents(query);
       if (q.length < 2) return [];
-      var tous = read(KEYS.products, {});
-      if (!isObject(tous)) return [];
-      var self = this;
-      return Object.keys(tous).map(function (c) { return self.getProduct(c); })
-        .filter(function (p) {
+      return this.getProducts(500).filter(function (p) {
           return p && sansAccents(p.n + ' ' + p.brand).indexOf(q) !== -1;
         })
         .sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); })
