@@ -159,8 +159,16 @@ async function ecran(page, liste, contexte) {
 
   /* Parcours Carte GlucoVision avec un pont Android déterministe. On remplace
      uniquement native.js sur cette page isolée : tout le DOM et app.js restent
-     ceux réellement publiés. */
+     ceux réellement publiés.
+
+     Le build simulé est volontairement énorme plutôt qu'un numéro de version
+     réel : un chiffre comme 2084 se fige au moment de l'écriture du test et
+     retombe SOUS le plancher dès que MIN_NATIVE_BUILD est relevé — c'est
+     exactement ce qui a fait échouer ce test au moment de faire remonter le
+     plancher pour la nouvelle carte. Un grand nombre reste valide quelle que
+     soit la prochaine version. */
   console.log('\nCarte GlucoVision :');
+  const BUILD_SIMULE = 999999999;
   const cardPage = await ctx.newPage();
   await cardPage.route('**/js/native.js*', function (route) {
     return route.fulfill({ status: 200, contentType: 'text/javascript', body: `
@@ -199,7 +207,7 @@ async function ecran(page, liste, contexte) {
           isApp: true, platform: 'android',
           ready: function () { return Promise.resolve(true); },
           markReady: function () { return Promise.resolve(true); },
-          appBuild: function () { return Promise.resolve(2084); },
+          appBuild: function () { return Promise.resolve(${BUILD_SIMULE}); },
           writeStartupReport: function () { return Promise.resolve('ok'); },
           selfCheck: function () { return {}; }, selfCheckLine: function () { return 'ok'; },
           onResume: function () {}, onLaunchAction: function () {},
@@ -227,9 +235,11 @@ async function ecran(page, liste, contexte) {
     ` });
   });
   await cardPage.goto('http://localhost:' + PORT + '/');
-  await cardPage.waitForFunction(function () {
-    return /APK 2084/.test(document.getElementById('app-version').textContent || '');
-  });
+  // BUILD_SIMULE passé en argument : waitForFunction s'exécute côté page,
+  // sans accès à la portée Node où la constante est déclarée.
+  await cardPage.waitForFunction(function (build) {
+    return document.getElementById('app-version').textContent.indexOf('APK ' + build) !== -1;
+  }, BUILD_SIMULE);
   await cardPage.click('#reference-card > summary');
   await cardPage.selectOption('#reference-mode', 'glucovision-card-v1');
   await cardPage.waitForSelector('#btn-depth:not([hidden])');
