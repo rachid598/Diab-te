@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '84'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '85'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -17,7 +17,7 @@
   /* v80 ajoute aussi les règles Android qui excluent repas/photos du cloud et
      du transfert appareil-à-appareil. Elles vivent dans l'APK : un ancien
      build 2073 ne doit donc pas accepter le bundle OTA v80. */
-  var MIN_NATIVE_BUILD = 2084;
+  var MIN_NATIVE_BUILD = 2085;
   var nativeBuild = null;      // build réellement en cours d'exécution, sur APK
   var settings = Storage.getSettings();
 

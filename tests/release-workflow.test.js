@@ -21,8 +21,8 @@ const manifest = JSON.parse(read('manifest.webmanifest'));
 const packageJson = JSON.parse(read('package.json'));
 const packageLock = JSON.parse(read('package-lock.json'));
 
-const CARD_SVG_SHA256 = '008fd2ac738425f3fec2d2005f1b7e75dbf0d27f96b5909c2fe85f1c8cb79bc9';
-const CARD_PNG_SHA256 = '55e41e95feafe666b6fb245ac8e0df5669e2f49e9b62d61f7359c7b9112a15ae';
+const CARD_SVG_SHA256 = 'eb683ff9820a9059a88a118062fbe2130f6f496d3a387fb2f9e37fb55fa0ba14';
+const CARD_PNG_SHA256 = '8c2112546fb9948cdbd00885452b2af8ecb303d658e92946939155dd9842db63';
 
 test('la version v84 ou suivante reste synchronisée dans toute la chaîne de publication', () => {
   const appVersion = /APP_VERSION = '(\d+)'/.exec(app);
@@ -79,7 +79,7 @@ test('la carte repère imprimable et le PNG natif sont verrouillés octet par oc
   assert.match(workflow, new RegExp(`CARD_PNG_SHA256: ${CARD_PNG_SHA256}`));
   assert.match(readme, new RegExp(CARD_SVG_SHA256));
   assert.match(readme, new RegExp(CARD_PNG_SHA256));
-  assert.match(readme, /arcoreimg[^\n]*1\.54\.0[^\n]*95\/100/i);
+  assert.match(readme, /arcoreimg[^\n]*100\/100/i);
 
   const svg = read('glucovision-card.svg');
   assert.match(svg, /width="85\.60mm" height="53\.98mm" viewBox="0 0 4280 2699"/);

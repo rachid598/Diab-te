@@ -192,7 +192,14 @@ test('une erreur de lecture photo ne devient pas zéro octet rassurant', async (
   await assert.rejects(sandbox.Native.photos.size(), /EACCES/);
 });
 
-test('l’APK v84 exclut les données de santé et impose le contrat natif de la carte', () => {
+test('l’APK exclut les données de santé et impose le contrat natif de la carte', () => {
+  /* MIN_NATIVE_BUILD et minimum_native_floor comparés dynamiquement plutôt que
+     figés à une version précise : un test qui oblige à une retouche à chaque
+     bump de version finit par être désarmé (déjà vu sur service-worker.test.js
+     et le test navigateur « Version 80 »). Ce qui compte réellement : le
+     plancher exigé par cette variante ne doit jamais dépasser ce que l'app
+     réclame elle-même, sinon un APK conforme au plancher serait quand même
+     rejeté par son propre contenu web. */
   const workflow = fs.readFileSync(path.join(ROOT, '.github/workflows/android.yml'), 'utf8');
   const modern = fs.readFileSync(
     path.join(ROOT, 'android-res/xml/data_extraction_rules.xml'), 'utf8');
@@ -200,8 +207,17 @@ test('l’APK v84 exclut les données de santé et impose le contrat natif de la
   const app = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
   assert.match(workflow, /android:dataExtractionRules="@xml\/data_extraction_rules"/);
   assert.match(workflow, /android:fullBackupContent="@xml\/backup_rules"/);
-  assert.match(workflow, /minimum_native_floor=2084/);
-  assert.match(app, /MIN_NATIVE_BUILD = 2084/);
+
+  const floorMatch = /minimum_native_floor=(\d+)/.exec(workflow);
+  const minNativeMatch = /MIN_NATIVE_BUILD = (\d+)/.exec(app);
+  assert.ok(floorMatch, 'minimum_native_floor introuvable dans le workflow');
+  assert.ok(minNativeMatch, 'MIN_NATIVE_BUILD introuvable dans js/app.js');
+  const floor = Number(floorMatch[1]);
+  const minNative = Number(minNativeMatch[1]);
+  assert.ok(floor >= 2084, 'le plancher ne doit jamais redescendre sous la carte repère (v84)');
+  assert.ok(minNative >= floor,
+    `MIN_NATIVE_BUILD (${minNative}) doit être au moins égal au plancher (${floor})`);
+
   assert.match(modern, /<cloud-backup/);
   assert.match(modern, /<device-transfer>/);
   assert.ok((modern.match(/<exclude /g) || []).length >= 10);

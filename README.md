@@ -48,12 +48,13 @@ taille physique de 85,60 × 53,98 mm. Elle ne pèse pas les aliments, ne connaî
 densité et ne transforme pas une photo en mesure médicale. Si elle n'est pas détectée de
 façon fiable, le résultat doit rester une estimation photo libre.
 
-Le motif est volontairement asymétrique, mat et riche en détails non répétitifs. L'outil
-officiel ARCore `arcoreimg` 1.54.0 lui attribue **95/100** (seuil recommandé : 75) : ce score
-évalue la facilité de suivi du motif, **pas** la précision des glucides ni des portions.
+Le motif est volontairement asymétrique, mat et riche en détails non répétitifs, avec des
+teintes choisies pour rester contrastées même converties en niveaux de gris — c'est ainsi
+qu'ARCore lit l'image. L'outil officiel `arcoreimg` (binaire Linux du dépôt public [google-ar/arcore-android-sdk](https://github.com/google-ar/arcore-android-sdk)) lui attribue **100/100** (seuil recommandé : 75) : ce score évalue la
+facilité de suivi du motif, **pas** la précision des glucides ni des portions.
 
-- SVG imprimable : `008fd2ac738425f3fec2d2005f1b7e75dbf0d27f96b5909c2fe85f1c8cb79bc9`
-- PNG embarqué : `55e41e95feafe666b6fb245ac8e0df5669e2f49e9b62d61f7359c7b9112a15ae`
+- SVG imprimable : `eb683ff9820a9059a88a118062fbe2130f6f496d3a387fb2f9e37fb55fa0ba14`
+- PNG embarqué : `8c2112546fb9948cdbd00885452b2af8ecb303d658e92946939155dd9842db63`
 
 Dans l'APK Android compatible, le bouton optionnel **Photo mesurée** suit la carte avec
 ARCore et calcule le plan métrique à partir de sa pose. Il transmet l'échelle du champ

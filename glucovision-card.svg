@@ -23,7 +23,7 @@
   <circle cx="314" cy="216" r="31" fill="#f5f1e7"/>
 
   <path d="M452 144H653V260L558 348L452 294Z" fill="#f5f1e7"/>
-  <rect x="492" y="184" width="57" height="128" fill="#f04f78"/>
+  <rect x="492" y="184" width="57" height="128" fill="#b5183f"/>
   <rect x="570" y="184" width="46" height="49" fill="#080b10"/>
 
   <circle cx="270" cy="532" r="112" fill="#080b10"/>
@@ -34,7 +34,7 @@
 
   <path d="M146 780L364 710L412 872L288 1000L150 942Z" fill="#ffd23f"/>
   <path d="M205 805L329 768L347 857L272 925L208 899Z" fill="#080b10"/>
-  <rect x="479" y="752" width="173" height="241" rx="42" fill="#f04f78"/>
+  <rect x="479" y="752" width="173" height="241" rx="42" fill="#b5183f"/>
   <path d="M511 941L567 786L624 941Z" fill="#f5f1e7"/>
 
   <path d="M138 1114H374L415 1212L335 1328H158L112 1235Z" fill="#080b10"/>
@@ -44,7 +44,7 @@
   <path d="M470 1080L668 1153L620 1334L438 1280Z" fill="#f5f1e7"/>
   <path d="M492 1127L613 1171L548 1290Z" fill="#080b10"/>
 
-  <path d="M132 1450L350 1402L429 1538L326 1704L150 1660Z" fill="#f04f78"/>
+  <path d="M132 1450L350 1402L429 1538L326 1704L150 1660Z" fill="#b5183f"/>
   <path d="M183 1490L321 1459L363 1536L291 1641L188 1615Z" fill="#080b10"/>
   <rect x="481" y="1430" width="184" height="238" transform="rotate(7 573 1549)" fill="#080b10"/>
   <circle cx="554" cy="1515" r="39" fill="#ffd23f"/>
@@ -59,7 +59,7 @@
   <path d="M132 2156L381 2102L429 2261L352 2417L146 2386Z" fill="#080b10"/>
   <path d="M183 2195L316 2168L365 2251L309 2355L193 2339Z" fill="#00cfa8"/>
   <path d="M473 2150L658 2116L690 2314L561 2427L453 2326Z" fill="#f5f1e7"/>
-  <circle cx="582" cy="2259" r="54" fill="#f04f78"/>
+  <circle cx="582" cy="2259" r="54" fill="#b5183f"/>
   <path d="M548 2306L609 2188L630 2332Z" fill="#080b10"/>
 
   <!-- Signature visuelle centrale : asymétrique, lisible et riche en arêtes. -->
@@ -78,7 +78,7 @@
   <path d="M2260 664L2583 611L2738 805L2632 1031L2348 1063L2209 858Z" fill="#00cfa8"/>
   <path d="M2319 710L2548 670L2656 817L2575 978L2385 991L2282 850Z" fill="#080b10"/>
   <path d="M2380 770L2519 746L2588 836L2538 923L2424 933L2358 846Z" fill="#f5f1e7"/>
-  <circle cx="2481" cy="838" r="29" fill="#f04f78"/>
+  <circle cx="2481" cy="838" r="29" fill="#b5183f"/>
 
   <path d="M2825 635H3205L3272 789L3162 927L3260 1075H2850L2752 918L2838 790Z" fill="#ffd23f"/>
   <path d="M2906 716H3127L3174 800L3095 888L3160 988H2922L2835 908L2918 815Z" fill="#080b10"/>
@@ -87,10 +87,10 @@
   <circle cx="3729" cy="829" r="225" fill="#080b10"/>
   <circle cx="3678" cy="790" r="139" fill="#f5f1e7"/>
   <circle cx="3762" cy="850" r="72" fill="#00cfa8"/>
-  <circle cx="3814" cy="791" r="29" fill="#f04f78"/>
+  <circle cx="3814" cy="791" r="29" fill="#b5183f"/>
   <path d="M3596 925L3661 840L3720 934Z" fill="#ffd23f"/>
 
-  <path d="M2250 1194L2524 1132L2705 1277L2640 1547L2400 1650L2188 1483Z" fill="#f04f78"/>
+  <path d="M2250 1194L2524 1132L2705 1277L2640 1547L2400 1650L2188 1483Z" fill="#b5183f"/>
   <path d="M2309 1247L2490 1206L2619 1309L2565 1487L2414 1560L2261 1453Z" fill="#080b10"/>
   <path d="M2380 1305L2494 1280L2554 1367L2492 1491L2357 1434Z" fill="#f5f1e7"/>
 
@@ -102,15 +102,39 @@
   <path d="M3405 1177L3918 1128L4074 1294L3965 1635L3606 1682L3357 1480Z" fill="#00cfa8"/>
   <path d="M3486 1239L3844 1207L3972 1325L3891 1567L3630 1601L3446 1442Z" fill="#080b10"/>
   <path d="M3578 1303L3785 1283L3880 1360L3811 1504L3651 1531L3530 1413Z" fill="#f5f1e7"/>
-  <circle cx="3725" cy="1401" r="47" fill="#f04f78"/>
+  <circle cx="3725" cy="1401" r="47" fill="#b5183f"/>
 
   <!-- Trajet brisé : évite les grandes zones uniformes et aide le suivi visuel. -->
   <path d="M1405 1831L1692 1732L1917 1858L2183 1749L2420 1886L2724 1725L2968 1874L3277 1731L3522 1897L3960 1778"
         fill="none" stroke="#080b10" stroke-width="46" stroke-linecap="square" stroke-linejoin="miter"/>
   <circle cx="1405" cy="1831" r="58" fill="#ffd23f" stroke="#080b10" stroke-width="32"/>
-  <path d="M1882 1800L1959 1911L1835 1930Z" fill="#f04f78"/>
+  <path d="M1882 1800L1959 1911L1835 1930Z" fill="#b5183f"/>
   <rect x="2651" y="1668" width="143" height="143" transform="rotate(19 2722 1740)" fill="#00cfa8" stroke="#080b10" stroke-width="30"/>
   <path d="M3449 1812L3522 1718L3614 1849L3501 1914Z" fill="#ffd23f" stroke="#080b10" stroke-width="25"/>
+
+  <!-- Colonne droite x:3950-4180 : c'était la plus grande zone plate de la
+       carte, vide sous y=1682 sur toute la hauteur restante. Un tracker AR
+       repose sur des points répartis sur toute la surface ; un grand aplat
+       est un angle mort si ce coin de la carte est partiellement masqué.
+       Comblée sans toucher à la ligne témoin ni au texte d'instruction. -->
+  <circle cx="4080" cy="1870" r="80" fill="#080b10"/>
+  <circle cx="4058" cy="1850" r="35" fill="#00cfa8"/>
+  <path d="M4100 1900L4140 1875L4155 1920Z" fill="#ffd23f"/>
+
+  <rect x="3985" y="1970" width="150" height="150" transform="rotate(14 4060 2045)" fill="#b5183f"/>
+  <rect x="4013" y="1998" width="55" height="55" transform="rotate(14 4060 2045)" fill="#f5f1e7"/>
+
+  <path d="M4000 2200L4130 2170L4160 2280L4070 2340L3990 2290Z" fill="#00cfa8"/>
+  <path d="M4030 2225L4110 2208L4128 2270L4070 2305L4015 2270Z" fill="#080b10"/>
+  <circle cx="4070" cy="2250" r="20" fill="#ffd23f"/>
+
+  <path d="M3990 2380H4160L4120 2470H4020Z" fill="#080b10"/>
+  <circle cx="4055" cy="2425" r="24" fill="#f5f1e7"/>
+  <rect x="4090" y="2400" width="40" height="40" fill="#ffd23f"/>
+
+  <circle cx="4030" cy="2460" r="50" fill="#b5183f"/>
+  <circle cx="4015" cy="2445" r="20" fill="#080b10"/>
+  <path d="M4055 2480L4085 2440L4100 2490Z" fill="#f5f1e7"/>
 
   <!-- Ligne témoin : 2500 unités à 50 unités/mm = exactement 50 mm. -->
   <text x="1378" y="2138" font-family="DejaVu Sans, Arial, sans-serif"
