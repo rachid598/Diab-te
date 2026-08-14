@@ -73,8 +73,8 @@ env:
   # Ces empreintes lient la carte imprimable au PNG réellement embarqué dans
   # l'APK. Toute régénération volontaire doit mettre à jour les deux valeurs,
   # le test de contrat et la documentation dans le même commit.
-  CARD_SVG_SHA256: eb683ff9820a9059a88a118062fbe2130f6f496d3a387fb2f9e37fb55fa0ba14
-  CARD_PNG_SHA256: 8c2112546fb9948cdbd00885452b2af8ecb303d658e92946939155dd9842db63
+  CARD_SVG_SHA256: 2dac92147701d7c9f1f81a6a9f18128a416730859d1b0912da9048d10976096b
+  CARD_PNG_SHA256: 5636449101e45da4725fcfc16d7037db51d07055f830fb9aa65c6c3bd8d1dd60
 
 jobs:
   build:

@@ -21,8 +21,8 @@ const manifest = JSON.parse(read('manifest.webmanifest'));
 const packageJson = JSON.parse(read('package.json'));
 const packageLock = JSON.parse(read('package-lock.json'));
 
-const CARD_SVG_SHA256 = 'eb683ff9820a9059a88a118062fbe2130f6f496d3a387fb2f9e37fb55fa0ba14';
-const CARD_PNG_SHA256 = '8c2112546fb9948cdbd00885452b2af8ecb303d658e92946939155dd9842db63';
+const CARD_SVG_SHA256 = '2dac92147701d7c9f1f81a6a9f18128a416730859d1b0912da9048d10976096b';
+const CARD_PNG_SHA256 = '5636449101e45da4725fcfc16d7037db51d07055f830fb9aa65c6c3bd8d1dd60';
 
 test('la version v84 ou suivante reste synchronisée dans toute la chaîne de publication', () => {
   const appVersion = /APP_VERSION = '(\d+)'/.exec(app);

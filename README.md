@@ -39,7 +39,7 @@ complémentaires — dessus puis vue oblique — restent plus utiles qu'une rafa
 identique. Ce parcours ne revendique aucune échelle métrique : les portions restent estimées
 visuellement.
 
-**▰ Photo avec carte repère (bêta)** — télécharge
+**▰ Photo avec carte repère** — télécharge
 **[la carte GlucoVision imprimable](glucovision-card.svg)**, imprime-la sur papier mat à
 **100 % sans ajustement**, puis vérifie avec une règle que sa ligne témoin mesure exactement
 50 mm. Pose-la entièrement visible, à plat et sur le même plan que le repas ; ne la tiens pas
@@ -53,8 +53,8 @@ teintes choisies pour rester contrastées même converties en niveaux de gris �
 qu'ARCore lit l'image. L'outil officiel `arcoreimg` (binaire Linux du dépôt public [google-ar/arcore-android-sdk](https://github.com/google-ar/arcore-android-sdk)) lui attribue **100/100** (seuil recommandé : 75) : ce score évalue la
 facilité de suivi du motif, **pas** la précision des glucides ni des portions.
 
-- SVG imprimable : `eb683ff9820a9059a88a118062fbe2130f6f496d3a387fb2f9e37fb55fa0ba14`
-- PNG embarqué : `8c2112546fb9948cdbd00885452b2af8ecb303d658e92946939155dd9842db63`
+- SVG imprimable : `2dac92147701d7c9f1f81a6a9f18128a416730859d1b0912da9048d10976096b`
+- PNG embarqué : `5636449101e45da4725fcfc16d7037db51d07055f830fb9aa65c6c3bd8d1dd60`
 
 Dans l'APK Android compatible, le bouton optionnel **Photo mesurée** suit la carte avec
 ARCore et calcule le plan métrique à partir de sa pose. Il transmet l'échelle du champ
