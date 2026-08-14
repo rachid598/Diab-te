@@ -66,7 +66,7 @@
   <text x="1378" y="324" font-family="DejaVu Sans, Arial, sans-serif"
         font-size="226" font-weight="800" letter-spacing="11" fill="#080b10">GLUCOVISION</text>
   <text x="1388" y="509" font-family="DejaVu Sans, Arial, sans-serif"
-        font-size="88" font-weight="700" letter-spacing="8" fill="#2f3842">CARTE REPÈRE • BÊTA</text>
+        font-size="88" font-weight="700" letter-spacing="8" fill="#2f3842">CARTE REPÈRE</text>
 
   <path d="M1376 642H2020L2090 780L1942 915L2146 1090L1980 1284L2180 1466L2010 1664H1376Z"
         fill="#080b10"/>
