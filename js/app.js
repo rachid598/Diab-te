@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '87'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '88'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -17,7 +17,10 @@
   /* v80 ajoute aussi les règles Android qui excluent repas/photos du cloud et
      du transfert appareil-à-appareil. Elles vivent dans l'APK : un ancien
      build 2073 ne doit donc pas accepter le bundle OTA v80. */
-  var MIN_NATIVE_BUILD = 2085;
+  /* v88 change l'image de référence et son contrat signé (carte v2). Un APK
+     antérieur chercherait encore la carte v1 même si l'interface OTA affiche
+     la v2 : il doit donc être refusé, sans exception. */
+  var MIN_NATIVE_BUILD = 2088;
   var nativeBuild = null;      // build réellement en cours d'exécution, sur APK
   var settings = Storage.getSettings();
 
@@ -464,11 +467,11 @@
 
   function selectedReferenceMode() {
     var el = $('reference-mode');
-    return el && el.value === 'glucovision-card-v1' ? 'glucovision-card-v1' : 'none';
+    return el && el.value === 'glucovision-card-v2' ? 'glucovision-card-v2' : 'none';
   }
 
   function updateReferenceModeUi() {
-    var cardMode = selectedReferenceMode() === 'glucovision-card-v1';
+    var cardMode = selectedReferenceMode() === 'glucovision-card-v2';
     var guide = $('glucovision-card-guide');
     var card = $('reference-card');
     if (guide) guide.hidden = !cardMode;
@@ -601,8 +604,8 @@
 
   function hasVerifiedCardContract(raw) {
     if (!raw || raw.cardRequested !== true || raw.cardVerified !== true ||
-        raw.cardFresh !== true || raw.cardSchema !== 'glucovision-card-v1' ||
-        raw.cardName !== 'glucovision-card' || raw.cardTrackingMethod !== 'FULL_TRACKING' ||
+        raw.cardFresh !== true || raw.cardSchema !== 'glucovision-card-v2' ||
+        raw.cardName !== 'glucovision-card-v2' || raw.cardTrackingMethod !== 'FULL_TRACKING' ||
         !/^(card|card\+depth)$/.test(raw.scaleSource || '')) return false;
     var observations = safeDepthNumber(raw.cardObservations, 4, 1000);
     var width = safeDepthNumber(raw.cardWidthCm, 8.51, 8.61);
@@ -626,7 +629,7 @@
     if (width == null || height == null || distance == null || scale == null) return null;
     var out = {
       scaleOk: true, fresh: true, cardMode: true, cardVerified: true,
-      cardFresh: true, cardSchema: 'glucovision-card-v1', scaleSource: raw.scaleSource,
+      cardFresh: true, cardSchema: 'glucovision-card-v2', scaleSource: raw.scaleSource,
       cardRequested: raw.cardRequested === true,
       cardDepthCompared: raw.cardDepthCompared === true,
       cardDepthAgrees: raw.cardDepthAgrees === true,
@@ -657,10 +660,10 @@
 
   function referenceFromDepth(depth) {
     var reference = {
-      mode: 'glucovision-card-v1',
+      mode: 'glucovision-card-v2',
       cardVerified: true,
       cardFresh: true,
-      cardSchema: 'glucovision-card-v1',
+      cardSchema: 'glucovision-card-v2',
       scaleSource: depth.scaleSource,
       cardRequested: depth.cardRequested === true,
       cardDepthCompared: depth.cardDepthCompared === true,
@@ -679,12 +682,12 @@
   /* Contrat par vue : deux mesures valides restent deux mesures valides. Elles
      ne s'annulent plus mutuellement et chacune garde son index d'image. */
   function viewMeasurementsOfSent(sent, referenceMode) {
-    if (referenceMode !== 'glucovision-card-v1') return [];
+    if (referenceMode !== 'glucovision-card-v2') return [];
     var out = [];
     (sent || []).forEach(function (img, i) {
       var depth = verifiedDepth(img && img.depth);
       var reference = img && img.reference;
-      if (!depth || !reference || reference.mode !== 'glucovision-card-v1' ||
+      if (!depth || !reference || reference.mode !== 'glucovision-card-v2' ||
           !hasVerifiedCardContract(reference) ||
           reference.scaleSource !== depth.scaleSource) return;
       out.push({
@@ -755,7 +758,7 @@
       escapeHtml(d.note || (d.fresh !== true
         ? 'la carte de profondeur ne correspond pas exactement à cette image.'
         : (d.cardVerified !== true || d.cardFresh !== true ||
-           d.cardSchema !== 'glucovision-card-v1'
+           d.cardSchema !== 'glucovision-card-v2'
           ? 'la Carte GlucoVision n’a pas été vérifiée dans cette vue.'
           : 'la profondeur n’est pas assez fiable.'))) +
       (d.diag ? '<br><span class="mono">' + escapeHtml(d.diag) + '</span>' : '');
@@ -767,7 +770,7 @@
     var nativeReady = !Native.isApp || Native.platform !== 'android' ||
       (nativeBuild != null && nativeBuild >= MIN_NATIVE_BUILD);
     btn.hidden = !(depthSupported && nativeReady && settings.experimentalDepth &&
-      selectedReferenceMode() === 'glucovision-card-v1');
+      selectedReferenceMode() === 'glucovision-card-v2');
   }
 
   function initDepth() {
@@ -933,11 +936,12 @@
           preloadCardSvg();
           return;
         }
-        saveTextFile('glucovision-card.svg', cardSvgText, 'image/svg+xml',
-          'Carte repère GlucoVision').then(function (mode) {
+        saveTextFile('glucovision-card-v2.svg', cardSvgText, 'image/svg+xml',
+          'Carte repère GlucoVision v2 — bêta terrain').then(function (mode) {
           if (mode === 'annule' || mode === 'partage') return;
           toast(mode === 'enregistre' ? 'Carte enregistrée.'
               : mode === 'documents' ? 'Partage indisponible — carte écrite ici : ' + lastSavePath
+              : mode === 'erreur' ? 'Impossible de partager ou d’enregistrer la carte. Aucun fichier n’a été créé.'
               : 'Carte téléchargée.');
         });
       });
@@ -1355,8 +1359,8 @@
       return typeof v === 'number' && isFinite(v) && v >= min && v <= max ? v : null;
     };
     var count = num(raw.imageCount, 0, Camera.MAX_ANGLES);
-    var referenceMode = raw.referenceMode === 'glucovision-card-v1'
-      ? 'glucovision-card-v1' : 'none';
+    var referenceMode = raw.referenceMode === 'glucovision-card-v2'
+      ? 'glucovision-card-v2' : 'none';
     var ctx = {
       referenceMode: referenceMode,
       notes: text(raw.notes, 4000),
@@ -1369,7 +1373,7 @@
     if (/^(maison|restaurant|cantine)$/.test(venue)) ctx.venue = venue;
     if (raw.clarificationAnswered === true) ctx.clarificationAnswered = true;
     ctx.viewMeasurements = [];
-    if (referenceMode === 'glucovision-card-v1' && Array.isArray(raw.viewMeasurements)) {
+    if (referenceMode === 'glucovision-card-v2' && Array.isArray(raw.viewMeasurements)) {
       var seenViews = {};
       raw.viewMeasurements.forEach(function (measurement) {
         if (!measurement || typeof measurement !== 'object') return;
@@ -1378,7 +1382,7 @@
         var depth = verifiedDepth(measurement.depth);
         if (viewIndex == null || viewIndex !== Math.round(viewIndex) ||
             viewIndex > ctx.imageCount || seenViews[viewIndex] || !depth ||
-            !reference || reference.mode !== 'glucovision-card-v1' ||
+            !reference || reference.mode !== 'glucovision-card-v2' ||
             !hasVerifiedCardContract(reference) ||
             reference.scaleSource !== depth.scaleSource) return;
         seenViews[viewIndex] = true;
@@ -4760,7 +4764,9 @@
         téléchargement silencieux — sans invite, exactement le symptôme d'origine.
      3. Mobile → partage Web avec fichier. C'est l'équivalent mobile du point 2 :
         la feuille de partage d'Android propose « Enregistrer dans Fichiers ».
-     4. Repli <a download>.
+     4. Repli <a download>, uniquement dans un navigateur normal. Dans l'APK,
+        un échec des deux chemins publics est affiché comme une vraie erreur :
+        jamais comme un téléchargement réussi dans le stockage privé.
 
      Les points 2 et 3 doivent être déclenchés DANS le geste utilisateur, d'où
      l'absence de toute attente avant l'appel. */
@@ -4802,18 +4808,31 @@
     }
 
     if (Native.isApp) {
-      return Native.shareFile(name, content, title).then(function (r) {
+      var publicFallback = function (cause) {
+        lastSaveError = (cause && (cause.error || cause.message)) || String(cause || '');
+        return Promise.resolve().then(function () {
+          return Native.saveToDocuments(name, content);
+        }).then(function (saved) {
+          if (!saved) return 'erreur';
+          lastSavePath = saved.uri || '';
+          return 'documents';
+        }).catch(function (err) {
+          lastSaveError = (err && err.message) || lastSaveError || 'stockage public indisponible';
+          return 'erreur';
+        });
+      };
+      /* Promise.resolve().then() transforme aussi une exception synchrone du
+         pont en rejet contrôlé. Certains plugins Capacitor anciens ne suivent
+         pas parfaitement leur contrat Promise en cas d'activité détruite. */
+      return Promise.resolve().then(function () {
+        return Native.shareFile(name, content, title);
+      }).then(function (r) {
         if (r && r.ok) return r.cancelled ? 'annule' : 'partage';
         /* La feuille de partage a échoué. Plutôt que de laisser le bouton sans
            effet, on écrit le fichier dans un dossier visible et on dit lequel,
            en gardant l'erreur d'origine pour qu'elle soit rapportable. */
-        lastSaveError = (r && r.error) || '';
-        return Native.saveToDocuments(name, content).then(function (saved) {
-          if (!saved) return fallback();
-          lastSavePath = saved.uri || '';
-          return 'documents';
-        });
-      });
+        return publicFallback(r);
+      }, publicFallback);
     }
 
     if (typeof window.showSaveFilePicker === 'function') {
@@ -4879,6 +4898,7 @@
                : mode === 'documents' ? 'Partage indisponible' +
                    (lastSaveError ? ' (' + lastSaveError + ')' : '') +
                    ' — fichier écrit ici : ' + lastSavePath
+               : mode === 'erreur' ? 'Échec du partage et du stockage public : aucun fichier créé.'
                : 'Téléchargée dans le dossier de téléchargements.';
         toast('Sauvegarde exportée sans clé API. ' + ou);
       });
@@ -5449,6 +5469,7 @@
         if (mode === 'annule' || mode === 'partage') return;
         toast(mode === 'enregistre' ? 'Synthèse enregistrée.'
             : mode === 'documents' ? 'Partage indisponible — synthèse écrite ici : ' + lastSavePath
+            : mode === 'erreur' ? 'Impossible de partager ou d’enregistrer la synthèse. Aucun fichier n’a été créé.'
             : 'Synthèse téléchargée.');
       });
     });

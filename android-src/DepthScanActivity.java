@@ -83,8 +83,9 @@ public final class DepthScanActivity extends AppCompatActivity implements GLSurf
     private static final long PHOTO_GIVE_UP_EXTRA_MS = 3000;
 
     private static final String CARD_ASSET = "glucovision-card.png";
-    private static final String CARD_NAME = "glucovision-card";
-    private static final String CARD_SCHEMA = "glucovision-card-v1";
+    /** Identité signée de l'image réellement embarquée dans cet APK. */
+    private static final String CARD_NAME = "glucovision-card-v2";
+    private static final String CARD_SCHEMA = "glucovision-card-v2";
     private static final double CARD_DEPTH_MAX_RELATIVE_FIELD_ERROR = 0.08;
     private static final double CARD_DEPTH_MAX_DISTANCE_ERROR_CM = 5.0;
     private static final double CARD_DEPTH_MAX_NORMAL_ANGLE_DEG = 8.0;
