@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '86'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '87'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -870,6 +870,20 @@
     });
   }
 
+  /* Contenu de la carte repère, pré-chargé une fois. showSaveFilePicker() et
+     navigator.share() n'acceptent d'être déclenchés que DANS le geste
+     utilisateur (voir le commentaire sur saveTextFile un peu plus bas) : un
+     fetch() lancé au clic les ferait échouer silencieusement sur la plupart
+     des navigateurs. Le fichier est local (~8 Ko), le chargement est terminé
+     bien avant que quiconque n'atteigne ce bouton dans les réglages. */
+  var cardSvgText = null;
+  function preloadCardSvg() {
+    if (cardSvgText != null) return;
+    fetch('glucovision-card.svg').then(function (r) {
+      return r.ok ? r.text() : null;
+    }).then(function (t) { if (t) cardSvgText = t; }).catch(function () {});
+  }
+
   function initPhotos() {
     initNativePhotoButtons();
     ['btn-photo', 'btn-video', 'btn-gallery'].forEach(function (id) {
@@ -902,6 +916,32 @@
     });
     $('reference-mode').addEventListener('change', updateReferenceModeUi);
     updateReferenceModeUi();
+
+    /* Remplace l'ancien <a href download> : dans l'APK, l'ancre écrivait dans
+       un dossier interne à la WebView qu'aucun gestionnaire de fichiers ne
+       montre — le fichier existait, mais restait introuvable. saveTextFile()
+       est le même chemin déjà éprouvé pour l'export de sauvegarde et la
+       synthèse : feuille de partage Android, boîte « Enregistrer sous » sur
+       ordinateur, partage Web sur mobile, ancre classique en tout dernier
+       recours. */
+    preloadCardSvg();
+    var btnCardDownload = $('reference-download');
+    if (btnCardDownload) {
+      btnCardDownload.addEventListener('click', function () {
+        if (cardSvgText == null) {
+          toast('La carte n’a pas encore fini de charger. Réessaie dans un instant.');
+          preloadCardSvg();
+          return;
+        }
+        saveTextFile('glucovision-card.svg', cardSvgText, 'image/svg+xml',
+          'Carte repère GlucoVision').then(function (mode) {
+          if (mode === 'annule' || mode === 'partage') return;
+          toast(mode === 'enregistre' ? 'Carte enregistrée.'
+              : mode === 'documents' ? 'Partage indisponible — carte écrite ici : ' + lastSavePath
+              : 'Carte téléchargée.');
+        });
+      });
+    }
     // La saisie d'une description active à elle seule le bouton d'estimation.
     $('user-notes').addEventListener('input', updateEstimateBtn);
     ['extra-dessert', 'extra-drink'].forEach(function (id) {
