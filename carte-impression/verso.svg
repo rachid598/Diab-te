@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="85.60mm" height="53.98mm" viewBox="0 0 4280 2699"
+     role="img" aria-labelledby="title desc">
+  <title id="title">Dos de la carte repère GlucoVision</title>
+  <desc id="desc">Face arrière neutre. Le suivi ARCore ne se fait que sur la face imprimée du motif.</desc>
+
+  <rect width="4280" height="2699" rx="118" fill="#f5f1e7"/>
+  <rect x="38" y="38" width="4204" height="2623" rx="88"
+        fill="none" stroke="#080b10" stroke-width="76"/>
+
+  <text x="2140" y="1280" font-family="DejaVu Sans, Arial, sans-serif"
+        font-size="220" font-weight="800" letter-spacing="10" fill="#080b10"
+        text-anchor="middle">GLUCOVISION</text>
+  <text x="2140" y="1440" font-family="DejaVu Sans, Arial, sans-serif"
+        font-size="82" font-weight="700" letter-spacing="6" fill="#3b444d"
+        text-anchor="middle">CARTE REPÈRE</text>
+
+  <text x="2140" y="2380" font-family="DejaVu Sans, Arial, sans-serif"
+        font-size="60" font-weight="600" fill="#3b444d"
+        text-anchor="middle">Pose le motif (l'autre face) visible, à plat, à côté du repas.</text>
+</svg>
