@@ -73,8 +73,13 @@ env:
   # Ces empreintes lient la carte imprimable au PNG réellement embarqué dans
   # l'APK. Toute régénération volontaire doit mettre à jour les deux valeurs,
   # le test de contrat et la documentation dans le même commit.
-  CARD_SVG_SHA256: 2dac92147701d7c9f1f81a6a9f18128a416730859d1b0912da9048d10976096b
-  CARD_PNG_SHA256: 5636449101e45da4725fcfc16d7037db51d07055f830fb9aa65c6c3bd8d1dd60
+  CARD_SVG_SHA256: 3b283263c6ddf366a50da1225e4456f93176573c3ee93e65e9064caad1ddf78f
+  CARD_PNG_SHA256: 53ec79a2c5952673baa4ce0847428abd7215cd37ad16981161509d8371da854c
+  # Outil officiel Google, figé sur la même version que la dépendance ARCore.
+  # Son empreinte empêche qu'un binaire distant remplacé soit exécuté en CI.
+  ARCOREIMG_VERSION: 1.54.0
+  ARCOREIMG_LINUX_SHA256: 2585423461c77c02d034ed5333c5054384a5d19ad212f581ad0274198ace60c0
+  CARD_MIN_ARCOREIMG_SCORE: 75
 
 jobs:
   build:
@@ -114,7 +119,7 @@ jobs:
           echo "artifact=glucovision-apk-codex" >> "$GITHUB_OUTPUT"
           echo "code_offset=2000" >> "$GITHUB_OUTPUT"
           echo "has_depth=true" >> "$GITHUB_OUTPUT"
-          echo "minimum_native_floor=2084" >> "$GITHUB_OUTPUT"
+          echo "minimum_native_floor=2088" >> "$GITHUB_OUTPUT"
           echo "ota_version_prefix=ota-v" >> "$GITHUB_OUTPUT"
           echo "title=GlucoVision — APK avec relief optionnel" >> "$GITHUB_OUTPUT"
 
@@ -214,6 +219,16 @@ jobs:
           if root.get('viewBox') != '0 0 4280 2699':
               raise SystemExit('viewBox SVG invalide')
           text = svg_path.read_text(encoding='utf-8')
+          elements = list(root.iter())
+          if any(element.tag.rsplit('}', 1)[-1].lower() == 'text' for element in elements):
+              raise SystemExit('le SVG canonique contient encore un élément <text>')
+          if re.search(r'font-family', text, re.I):
+              raise SystemExit('le SVG canonique dépend encore d’une police')
+          badges = [element for element in elements if element.get('id') == 'badge']
+          if len(badges) != 1 or badges[0].get('aria-label') != 'GV2':
+              raise SystemExit('badge GV2 absent ou ambigu dans le SVG')
+          if 'BÊTA TERRAIN' not in text:
+              raise SystemExit('statut BÊTA TERRAIN absent du SVG')
           if not re.search(r'LIGNE TÉMOIN 50 mm', text, re.I):
               raise SystemExit('ligne témoin absente du SVG')
           if not re.search(r'IMPRIMER À 100 %', text, re.I):
@@ -228,6 +243,45 @@ jobs:
           if depth != 8 or colour not in (2, 6):
               raise SystemExit(f'format couleur PNG invalide: profondeur={depth}, type={colour}')
           PY
+
+      - name: Régénérer la carte et mesurer sa qualité avec arcoreimg
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Le script produit le PNG à partir de l'unique SVG canonique dans un
+          # emplacement temporaire puis le compare octet par octet au PNG natif.
+          npm run card:check
+
+          ARCOREIMG="$RUNNER_TEMP/arcoreimg"
+          URL="https://raw.githubusercontent.com/google-ar/arcore-android-sdk/${ARCOREIMG_VERSION}/tools/arcoreimg/linux/arcoreimg"
+          curl --fail --location --silent --show-error "$URL" --output "$ARCOREIMG"
+          printf '%s  %s\n' "$ARCOREIMG_LINUX_SHA256" "$ARCOREIMG" \
+            | sha256sum --check --strict
+          chmod +x "$ARCOREIMG"
+
+          SORTIE=$(
+            "$ARCOREIMG" eval-img \
+              --input_image_path=android-card/glucovision-card.png
+          )
+          SCORE=$(sed -nE 's/^[[:space:]]*([0-9]{1,3})[[:space:]]*$/\1/p' \
+            <<< "$SORTIE" | tail -1 || true)
+          test -n "$SCORE" || {
+            echo "::error::arcoreimg n'a renvoyé aucun score numérique : $SORTIE"
+            exit 1
+          }
+          test "$SCORE" -ge "$CARD_MIN_ARCOREIMG_SCORE" || {
+            echo "::error::Carte trop peu détectable pour ARCore : score $SCORE, seuil $CARD_MIN_ARCOREIMG_SCORE"
+            exit 1
+          }
+
+          {
+            echo "### Contrôle de la carte repère"
+            echo "- rendu déterministe SVG → PNG : identique à l'asset Android"
+            echo "- arcoreimg Linux ARCore SDK ${ARCOREIMG_VERSION} : score mesuré **${SCORE}**"
+            echo "- seuil de publication : **${CARD_MIN_ARCOREIMG_SCORE} minimum**"
+            echo "- ce score évalue les caractéristiques visuelles, pas la précision de mesure sur téléphone"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Vérifier le bundle JavaScript des plugins
         shell: bash

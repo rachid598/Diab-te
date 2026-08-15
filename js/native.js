@@ -609,21 +609,27 @@
       });
   }
 
-  /* Repli quand la feuille de partage échoue : on écrit dans le dossier de
-     documents de l'appareil, qui est visible depuis le gestionnaire de fichiers.
-     Moins pratique que de choisir la destination, mais au moins le fichier
-     existe quelque part de retrouvable — et l'URI renvoyée le dit. */
+  /* Repli quand la feuille de partage échoue : on écrit uniquement dans un
+     emplacement public que l'utilisateur peut réellement retrouver. Data est
+     volontairement exclu : c'est le stockage privé de l'application, et
+     annoncer « Documents » après y avoir écrit serait un faux succès. */
   function saveToDocuments(name, content) {
     if (!isApp) return resolved(null);
-    var dirs = [Cap.Directory.Documents, Cap.Directory.External, Cap.Directory.Data];
+    var dirs = [
+      { value: Cap.Directory.Documents, name: 'DOCUMENTS' },
+      { value: Cap.Directory.External, name: 'EXTERNAL' }
+    ].filter(function (candidate, index, all) {
+      if (!candidate.value) return false;
+      return all.findIndex(function (other) { return other.value === candidate.value; }) === index;
+    });
     var i = 0;
     function attempt() {
       if (i >= dirs.length) return resolved(null);
       var dir = dirs[i++];
       return Cap.Filesystem.writeFile({
-        path: name, data: content, directory: dir, encoding: 'utf8', recursive: true
+        path: name, data: content, directory: dir.value, encoding: 'utf8', recursive: true
       }).then(function (r) {
-        return { uri: (r && r.uri) || name, directory: String(dir) };
+        return { uri: (r && r.uri) || name, directory: dir.name };
       }).catch(function () { return attempt(); });
     }
     return attempt();

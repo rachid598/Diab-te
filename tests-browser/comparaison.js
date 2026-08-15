@@ -52,7 +52,7 @@ function avis(provider, model, total, nomAliment) {
 function mesureCarte(viewIndex, width) {
   const shared = {
     cardRequested: true, cardVerified: true, cardFresh: true,
-    cardSchema: 'glucovision-card-v1', cardName: 'glucovision-card',
+    cardSchema: 'glucovision-card-v2', cardName: 'glucovision-card-v2',
     scaleSource: 'card', cardTrackingMethod: 'FULL_TRACKING', cardObservations: 4,
     cardWidthCm: 8.56, cardHeightCm: 5.398
   };
@@ -63,7 +63,7 @@ function mesureCarte(viewIndex, width) {
       fieldWidthCm: width, fieldHeightCm: 20,
       distanceCm: 62, cmPerPixel: 0.02
     }, shared),
-    reference: Object.assign({ mode: 'glucovision-card-v1' }, shared)
+    reference: Object.assign({ mode: 'glucovision-card-v2' }, shared)
   };
 }
 
@@ -179,6 +179,13 @@ async function ecran(page, liste, contexte) {
         // Contrôlable depuis le test : simule l'échec de la feuille de partage
         // Android, pour vérifier le repli vers Documents.
         window.__shareFileShouldFail = false;
+        window.__saveToDocumentsShouldFail = false;
+        window.__saveToDocumentsCalls = [];
+        window.__downloadAnchorClicks = 0;
+        document.addEventListener('click', function (event) {
+          var target = event.target && event.target.closest && event.target.closest('a[download]');
+          if (target) window.__downloadAnchorClicks += 1;
+        }, true);
         function jpeg() {
           var c = document.createElement('canvas'); c.width = 640; c.height = 480;
           var x = c.getContext('2d'); x.fillStyle = '#7a5635'; x.fillRect(0, 0, 640, 480);
@@ -193,7 +200,7 @@ async function ecran(page, liste, contexte) {
             fieldWidthCm: n === 1 ? 30 : 27, fieldHeightCm: 20,
             distanceCm: 62, cmPerPixel: n === 1 ? 0.02 : 0.018,
             cardRequested: true, cardVerified: true, cardFresh: true,
-            cardSchema: 'glucovision-card-v1', cardName: 'glucovision-card',
+            cardSchema: 'glucovision-card-v2', cardName: 'glucovision-card-v2',
             scaleSource: 'card', cardTrackingMethod: 'FULL_TRACKING',
             cardObservations: 4, cardWidthCm: 8.56, cardHeightCm: 5.398,
             observations: 4, parallaxCm: 20
@@ -233,6 +240,8 @@ async function ecran(page, liste, contexte) {
                     apply: function () { return Promise.resolve(false); } },
           httpJson: function () { return Promise.reject(new Error('offline test')); },
           saveToDocuments: function (name) {
+            window.__saveToDocumentsCalls.push(name);
+            if (window.__saveToDocumentsShouldFail) return Promise.resolve(null);
             return Promise.resolve({ uri: '/documents/' + name, directory: 'DOCUMENTS' });
           },
           shareFile: function (name, content, title) {
@@ -251,10 +260,12 @@ async function ecran(page, liste, contexte) {
     return document.getElementById('app-version').textContent.indexOf('APK ' + build) !== -1;
   }, BUILD_SIMULE);
   await cardPage.click('#reference-card > summary');
-  await cardPage.selectOption('#reference-mode', 'glucovision-card-v1');
+  await cardPage.selectOption('#reference-mode', 'glucovision-card-v2');
   await cardPage.waitForSelector('#btn-depth:not([hidden])');
   verifie(await cardPage.isVisible('#glucovision-card-guide'),
     'sélectionner Carte révèle la checklist guidée');
+  verifie(/BÊTA TERRAIN/.test(await cardPage.locator('#glucovision-card-guide').innerText()),
+    'la carte v2 reste explicitement marquée bêta jusqu’au test sur téléphone');
   verifie(await cardPage.locator('a[href="https://policies.google.com/privacy"]').count() === 1,
     'la divulgation ARCore renvoie vers la confidentialité de Google');
 
@@ -282,12 +293,11 @@ async function ecran(page, liste, contexte) {
     return window.__shareFileCalls.length === 1;
   }, null, { timeout: 5000 });
   const partage = await cardPage.evaluate(function () { return window.__shareFileCalls[0]; });
-  verifie(partage.name === 'glucovision-card.svg', 'le fichier partagé porte le bon nom');
-  verifie(/<svg[\s\S]*GLUCOVISION/.test(partage.content || ''),
+  verifie(partage.name === 'glucovision-card-v2.svg', 'le fichier partagé porte le nom v2');
+  verifie(/<svg[\s\S]*viewBox=/.test(partage.content || ''),
     'le contenu partagé est le vrai SVG de la carte, pas un texte de substitution');
-  verifie(!/BÊTA/.test(partage.content || ''),
-    'la mention bêta a bien été retirée du fichier réellement servi');
-  verifie(/carte repère/i.test(partage.title || ''), 'le titre du partage identifie la carte');
+  verifie(/carte repère[\s\S]*v2/i.test(partage.title || ''),
+    'le titre du partage identifie sans ambiguïté la carte v2');
 
   // Repli : la feuille de partage échoue (courant sur certains téléphones sans
   // application compatible) → écriture dans Documents → message qui dit où.
@@ -298,7 +308,28 @@ async function ecran(page, liste, contexte) {
     return !t.hidden && /documents/i.test(t.textContent || '');
   }, null, { timeout: 5000 });
   verifie(true, 'le repli Documents est proposé quand le partage échoue, avec le chemin utilisé');
-  await cardPage.evaluate(function () { window.__shareFileShouldFail = false; });
+
+  // Si aucun stockage public n'est accessible, l'APK doit annoncer l'échec.
+  // Une ancre <a download> dans la WebView serait un faux succès vers un
+  // emplacement invisible et ne doit surtout pas être invoquée.
+  await cardPage.evaluate(function () { window.__saveToDocumentsShouldFail = true; });
+  await cardPage.click('#reference-download');
+  await cardPage.waitForFunction(function () {
+    var t = document.getElementById('toast');
+    return !t.hidden && /impossible[\s\S]*aucun fichier/i.test(t.textContent || '');
+  }, null, { timeout: 5000 });
+  const echecPublic = await cardPage.evaluate(function () {
+    return {
+      documentsCalls: window.__saveToDocumentsCalls.length,
+      anchorClicks: window.__downloadAnchorClicks
+    };
+  });
+  verifie(echecPublic.documentsCalls === 2 && echecPublic.anchorClicks === 0,
+    'l’échec du stockage public est explicite, sans téléchargement WebView silencieux');
+  await cardPage.evaluate(function () {
+    window.__shareFileShouldFail = false;
+    window.__saveToDocumentsShouldFail = false;
+  });
   await cardPage.click('#btn-depth');
   await cardPage.waitForFunction(function () { return document.querySelectorAll('#thumbs .thumb').length === 1; });
   await cardPage.click('#btn-depth');
@@ -319,7 +350,7 @@ async function ecran(page, liste, contexte) {
     'revenir au mode rapide masque l’action et ignore les anciennes mesures');
 
   await cardPage.click('#clear-photos');
-  await cardPage.selectOption('#reference-mode', 'glucovision-card-v1');
+  await cardPage.selectOption('#reference-mode', 'glucovision-card-v2');
   await cardPage.evaluate(function () { window.__depthIncomplete = true; });
   await cardPage.click('#btn-depth');
   await cardPage.waitForSelector('#depth-result.d-warn:not([hidden])');
@@ -406,7 +437,7 @@ async function ecran(page, liste, contexte) {
   await ecran(page, [avis('gemini', 'gemini-3.1-flash-lite', 48, riz),
                       avis('openrouter', 'x-ai/grok-4.5', 50, riz)], {
     notes: 'contrat carte multi-vues', imageCount: 2,
-    referenceMode: 'glucovision-card-v1',
+    referenceMode: 'glucovision-card-v2',
     viewMeasurements: [mesureCarte(1, 30), mesureCarte(2, 27)]
   });
   const carteSauvee = await page.evaluate(function () {
@@ -416,7 +447,7 @@ async function ecran(page, liste, contexte) {
     })[0];
     return e && e.input ? e.input : null;
   });
-  verifie(!!carteSauvee && carteSauvee.referenceMode === 'glucovision-card-v1' &&
+  verifie(!!carteSauvee && carteSauvee.referenceMode === 'glucovision-card-v2' &&
       carteSauvee.viewMeasurements.length === 2 &&
       carteSauvee.viewMeasurements[0].viewIndex === 1 &&
       carteSauvee.viewMeasurements[1].viewIndex === 2 &&
@@ -430,7 +461,7 @@ async function ecran(page, liste, contexte) {
   await ecran(page, [avis('gemini', 'gemini-3.1-flash-lite', 48, riz),
                       avis('openrouter', 'x-ai/grok-4.5', 50, riz)], {
     notes: 'contrat carte forge', imageCount: 1,
-    referenceMode: 'glucovision-card-v1', viewMeasurements: [preuveIncomplete]
+    referenceMode: 'glucovision-card-v2', viewMeasurements: [preuveIncomplete]
   });
   const carteForgee = await page.evaluate(function () {
     const h = JSON.parse(localStorage.getItem('diabete.history.v1') || '[]');
@@ -439,9 +470,31 @@ async function ecran(page, liste, contexte) {
     })[0];
     return e && e.input ? e.input : null;
   });
-  verifie(!!carteForgee && carteForgee.referenceMode === 'glucovision-card-v1' &&
+  verifie(!!carteForgee && carteForgee.referenceMode === 'glucovision-card-v2' &&
       Array.isArray(carteForgee.viewMeasurements) && carteForgee.viewMeasurements.length === 0,
     'une preuve carte incomplète est retirée des reprises et de l’historique');
+
+  const ancienneCarte = mesureCarte(1, 30);
+  ancienneCarte.depth.cardSchema = 'glucovision-card-v1';
+  ancienneCarte.depth.cardName = 'glucovision-card';
+  ancienneCarte.reference.mode = 'glucovision-card-v1';
+  ancienneCarte.reference.cardSchema = 'glucovision-card-v1';
+  ancienneCarte.reference.cardName = 'glucovision-card';
+  await ecran(page, [avis('gemini', 'gemini-3.1-flash-lite', 48, riz),
+                      avis('openrouter', 'x-ai/grok-4.5', 50, riz)], {
+    notes: 'ancienne carte v1', imageCount: 1,
+    referenceMode: 'glucovision-card-v1', viewMeasurements: [ancienneCarte]
+  });
+  const legacyClosed = await page.evaluate(function () {
+    const h = JSON.parse(localStorage.getItem('diabete.history.v1') || '[]');
+    const e = h.filter(function (x) {
+      return x.input && x.input.notes === 'ancienne carte v1';
+    })[0];
+    return e && e.input ? e.input : null;
+  });
+  verifie(!!legacyClosed && legacyClosed.referenceMode === 'none' &&
+      Array.isArray(legacyClosed.viewMeasurements) && legacyClosed.viewMeasurements.length === 0,
+    'une preuve v1 restaurée perd tout privilège métrique au lieu d’être promue en v2');
 
   vu = await ecran(page, [
     avis('gemini', 'gemini-3.1-flash-lite', 50, [[riz, 40], [pain, 10]]),

@@ -39,8 +39,8 @@ complémentaires — dessus puis vue oblique — restent plus utiles qu'une rafa
 identique. Ce parcours ne revendique aucune échelle métrique : les portions restent estimées
 visuellement.
 
-**▰ Photo avec carte repère** — télécharge
-**[la carte GlucoVision imprimable](glucovision-card.svg)**, imprime-la sur papier mat à
+**▰ Photo avec carte repère (v2 — bêta terrain)** — télécharge
+**[la carte GlucoVision v2 imprimable](glucovision-card.svg)**, imprime-la sur papier mat à
 **100 % sans ajustement**, puis vérifie avec une règle que sa ligne témoin mesure exactement
 50 mm. Pose-la entièrement visible, à plat et sur le même plan que le repas ; ne la tiens pas
 en main et ne la masque pas avec l'assiette. Elle fournit au traitement un motif connu et une
@@ -48,13 +48,20 @@ taille physique de 85,60 × 53,98 mm. Elle ne pèse pas les aliments, ne connaî
 densité et ne transforme pas une photo en mesure médicale. Si elle n'est pas détectée de
 façon fiable, le résultat doit rester une estimation photo libre.
 
-Le motif est volontairement asymétrique, mat et riche en détails non répétitifs, avec des
+Le motif v2 est volontairement asymétrique, mat et riche en détails non répétitifs, avec des
 teintes choisies pour rester contrastées même converties en niveaux de gris — c'est ainsi
-qu'ARCore lit l'image. L'outil officiel `arcoreimg` (binaire Linux du dépôt public [google-ar/arcore-android-sdk](https://github.com/google-ar/arcore-android-sdk)) lui attribue **100/100** (seuil recommandé : 75) : ce score évalue la
-facilité de suivi du motif, **pas** la précision des glucides ni des portions.
+qu'ARCore lit l'image. À chaque publication, la CI régénère le PNG Android depuis cet unique
+SVG, exige une correspondance octet par octet, puis exécute réellement le binaire officiel
+`arcoreimg` livré dans le SDK ARCore tag 1.54.0 de
+[google-ar/arcore-android-sdk](https://github.com/google-ar/arcore-android-sdk), vérifié par
+SHA-256 (l'exécutable se présente lui-même comme version 1.2). La publication est bloquée
+sous le seuil recommandé de **75** et le score
+mesuré est écrit dans le résumé du build. Ce score peut varier selon la version ou la
+plateforme de l'outil et évalue la facilité de suivi du fichier numérique, **pas** le taux de
+détection imprimé ni la précision des glucides ou des portions.
 
-- SVG imprimable : `2dac92147701d7c9f1f81a6a9f18128a416730859d1b0912da9048d10976096b`
-- PNG embarqué : `5636449101e45da4725fcfc16d7037db51d07055f830fb9aa65c6c3bd8d1dd60`
+- SVG imprimable v2 : `3b283263c6ddf366a50da1225e4456f93176573c3ee93e65e9064caad1ddf78f`
+- PNG v2 embarqué : `53ec79a2c5952673baa4ce0847428abd7215cd37ad16981161509d8371da854c`
 
 Dans l'APK Android compatible, le bouton optionnel **Photo mesurée** suit la carte avec
 ARCore et calcule le plan métrique à partir de sa pose. Il transmet l'échelle du champ
@@ -62,6 +69,8 @@ photographié seulement si la carte est encore visible, en suivi complet, fraîc
 sur plusieurs observations pour cette vue précise. Si la profondeur ARCore est aussi
 disponible, elle doit concorder avec la carte avant que le relief expérimental soit conservé.
 Le volume n'est jamais converti directement en masse ou en glucides.
+La mention bêta ne sera retirée qu'après le
+**[protocole de validation sur carte imprimée et téléphone réel](CARTE-TEST-TERRAIN.md)**.
 
 **✍️ Description** — aucune photo : tu écris ce que tu manges. Le modèle interprète les
 portions courantes françaises. La marge d'erreur est structurellement plus large, et l'app
@@ -253,6 +262,8 @@ npm test                          # garde-fous JS, stockage et géométrie ARCor
 npx http-server -p 8080           # servir en local ; aucune étape de build pour le web
 bash scripts/build-plugins.sh     # après un changement de version de plugin Capacitor
 bash scripts/build-www.sh         # prépare www/ pour l'APK
+node scripts/render-card.mjs      # régénère le PNG Android depuis l'unique SVG de la carte
+npm run card:check                # vérifie que le PNG committé est exactement ce rendu
 node scripts/render-icons.mjs     # régénère les PNG d'icônes depuis icons/*.svg
 ```
 
@@ -276,8 +287,9 @@ canaux de variantes restent des archives de téléchargement ; ils ne sont plus 
 | `js/report.js` | synthèse pour la consultation |
 | `js/bench.js` | banc d'essai sur les repas de l'utilisateur |
 | `js/app.js` | interface |
-| `glucovision-card.svg` | carte repère à imprimer à 100 %, format physique 85,60 × 53,98 mm |
-| `android-card/glucovision-card.png` | même motif haute définition embarqué dans l'APK |
+| `glucovision-card.svg` | source canonique vectorielle de la carte v2, à imprimer à 100 %, 85,60 × 53,98 mm |
+| `android-card/glucovision-card.png` | rendu déterministe de ce SVG, embarqué dans l'APK |
+| `CARTE-TEST-TERRAIN.md` | protocole nécessaire avant de retirer la mention bêta |
 | `bench/` | banc d'essai hors ligne sur Nutrition5k (voir [BENCHMARK.md](BENCHMARK.md)) |
 
 ---

@@ -27,17 +27,17 @@ function verifiedView(viewIndex, changes) {
     depth: {
       scaleOk: true, fresh: true, cardMode: true,
       cardRequested: true, cardVerified: true, cardFresh: true,
-      cardSchema: 'glucovision-card-v1', scaleSource: 'card',
-      cardName: 'glucovision-card', cardWidthCm: 8.56, cardHeightCm: 5.398,
+      cardSchema: 'glucovision-card-v2', scaleSource: 'card',
+      cardName: 'glucovision-card-v2', cardWidthCm: 8.56, cardHeightCm: 5.398,
       cardObservations: 8, cardTrackingMethod: 'FULL_TRACKING',
       fieldWidthCm: 32.4, fieldHeightCm: 24.1,
       distanceCm: 62, cmPerPixel: 0.02, volumeCm3: 1234
     },
     reference: {
-      mode: 'glucovision-card-v1', cardRequested: true,
+      mode: 'glucovision-card-v2', cardRequested: true,
       cardVerified: true, cardFresh: true,
-      cardSchema: 'glucovision-card-v1', scaleSource: 'card',
-      cardName: 'glucovision-card', cardWidthCm: 8.56, cardHeightCm: 5.398,
+      cardSchema: 'glucovision-card-v2', scaleSource: 'card',
+      cardName: 'glucovision-card-v2', cardWidthCm: 8.56, cardHeightCm: 5.398,
       cardObservations: 8, cardTrackingMethod: 'FULL_TRACKING'
     }
   };
@@ -129,7 +129,7 @@ test('la confiance IA et le repère ne resserrent pas la bande empirique', () =>
   const low = raw(100);
   low.overallConfidence = 'low';
   const a = Estimator.sanitize(high, {
-    imageCount: 1, referenceMode: 'glucovision-card-v1', viewMeasurements: [verifiedView(1)]
+    imageCount: 1, referenceMode: 'glucovision-card-v2', viewMeasurements: [verifiedView(1)]
   });
   const b = Estimator.sanitize(low, { imageCount: 1, referenceMode: 'none' });
   assert.deepEqual([a.rangeLowG, a.rangeHighG], [62, 166]);
@@ -179,7 +179,7 @@ test('seule une Carte GlucoVision fraîche et vérifiée entre dans le prompt', 
   const { Estimator } = env();
   const prompt = Estimator.buildPrompt({
     imageCount: 1,
-    referenceMode: 'glucovision-card-v1',
+    referenceMode: 'glucovision-card-v2',
     viewMeasurements: [verifiedView(1)]
   });
   assert.match(prompt, /MESURE NATIVE VÉRIFIÉE POUR IMAGE 1\/1 UNIQUEMENT/);
@@ -188,19 +188,19 @@ test('seule une Carte GlucoVision fraîche et vérifiée entre dans le prompt', 
   assert.doesNotMatch(prompt, /1234/);
 
   const absent = Estimator.buildPrompt({
-    imageCount: 1, referenceMode: 'glucovision-card-v1', viewMeasurements: []
+    imageCount: 1, referenceMode: 'glucovision-card-v2', viewMeasurements: []
   });
   assert.match(absent, /AUCUNE VUE N'A DE VÉRIFICATION NATIVE/);
   assert.doesNotMatch(absent, /MESURE NATIVE VÉRIFIÉE POUR IMAGE/);
 
   const stale = Estimator.buildPrompt({
-    imageCount: 1, referenceMode: 'glucovision-card-v1',
+    imageCount: 1, referenceMode: 'glucovision-card-v2',
     viewMeasurements: [verifiedView(1, { depth: { fresh: false } })]
   });
   assert.doesNotMatch(stale, /MESURE NATIVE VÉRIFIÉE POUR IMAGE/);
 
   const forged = Estimator.buildPrompt({
-    imageCount: 1, referenceMode: 'glucovision-card-v1',
+    imageCount: 1, referenceMode: 'glucovision-card-v2',
     viewMeasurements: [verifiedView(1, {
       depth: { cardSchema: 'evil-card', scaleSource: 'depth' }
     })]
@@ -215,25 +215,44 @@ test('seule une Carte GlucoVision fraîche et vérifiée entre dans le prompt', 
   delete incompleteView.reference.cardTrackingMethod;
   delete incompleteView.reference.cardWidthCm;
   const incomplete = Estimator.buildPrompt({
-    imageCount: 1, referenceMode: 'glucovision-card-v1',
+    imageCount: 1, referenceMode: 'glucovision-card-v2',
     viewMeasurements: [incompleteView]
   });
   assert.doesNotMatch(incomplete, /MESURE NATIVE VÉRIFIÉE POUR IMAGE/);
 
   const disagree = Estimator.buildPrompt({
-    imageCount: 1, referenceMode: 'glucovision-card-v1',
+    imageCount: 1, referenceMode: 'glucovision-card-v2',
     viewMeasurements: [verifiedView(1, {
       depth: { scaleSource: 'card+depth', cardDepthCompared: true, cardDepthAgrees: false },
       reference: { scaleSource: 'card+depth', cardDepthCompared: true, cardDepthAgrees: false }
     })]
   });
   assert.doesNotMatch(disagree, /MESURE NATIVE VÉRIFIÉE POUR IMAGE/);
+
+  /* L'ancienne carte n'est pas une variante de la v2 : son image ARCore et son
+     schéma sont différents. Même une preuve v1 complète doit donc tomber vers
+     le parcours visuel sans mesure, jamais être migrée silencieusement. */
+  const legacyView = verifiedView(1, {
+    depth: { cardSchema: 'glucovision-card-v1', cardName: 'glucovision-card' },
+    reference: {
+      mode: 'glucovision-card-v1',
+      cardSchema: 'glucovision-card-v1',
+      cardName: 'glucovision-card'
+    }
+  });
+  const legacy = Estimator.buildPrompt({
+    imageCount: 1,
+    referenceMode: 'glucovision-card-v1',
+    viewMeasurements: [legacyView]
+  });
+  assert.match(legacy, /MODE RAPIDE SANS CARTE/);
+  assert.doesNotMatch(legacy, /MESURE NATIVE VÉRIFIÉE POUR IMAGE/);
 });
 
 test('deux vues natives restent associées à leurs images et ne s’annulent pas', () => {
   const { Estimator } = env();
   const prompt = Estimator.buildPrompt({
-    imageCount: 3, referenceMode: 'glucovision-card-v1',
+    imageCount: 3, referenceMode: 'glucovision-card-v2',
     viewMeasurements: [
       verifiedView(1),
       verifiedView(3, { depth: { fieldWidthCm: 28.7, cmPerPixel: 0.018 } })
@@ -251,7 +270,7 @@ test('referenceFound/referenceUsed forgés par l’IA ne sont jamais une preuve'
   answer.referenceFound = true;
   answer.referenceUsed = 'carte inventée 400 px → 0,02 cm/px';
   const withoutNative = Estimator.sanitize(answer, {
-    imageCount: 1, referenceMode: 'glucovision-card-v1', viewMeasurements: []
+    imageCount: 1, referenceMode: 'glucovision-card-v2', viewMeasurements: []
   });
   assert.equal(withoutNative.refFound, false);
   assert.equal(withoutNative.referenceUsed, '');
@@ -259,7 +278,7 @@ test('referenceFound/referenceUsed forgés par l’IA ne sont jamais une preuve'
   answer.referenceFound = false;
   answer.referenceUsed = 'mensonge contradictoire';
   const withNative = Estimator.sanitize(answer, {
-    imageCount: 1, referenceMode: 'glucovision-card-v1',
+    imageCount: 1, referenceMode: 'glucovision-card-v2',
     viewMeasurements: [verifiedView(1)]
   });
   assert.equal(withNative.refFound, true);

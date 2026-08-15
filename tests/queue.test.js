@@ -41,17 +41,17 @@ function verifiedView(viewIndex, changes) {
   const depth = Object.assign({
     scaleOk: true, fresh: true, cardMode: true,
     cardRequested: true, cardVerified: true, cardFresh: true,
-    cardSchema: 'glucovision-card-v1', scaleSource: 'card',
-    cardName: 'glucovision-card', cardWidthCm: 8.56, cardHeightCm: 5.398,
+    cardSchema: 'glucovision-card-v2', scaleSource: 'card',
+    cardName: 'glucovision-card-v2', cardWidthCm: 8.56, cardHeightCm: 5.398,
     cardObservations: 9, cardTrackingMethod: 'FULL_TRACKING',
     fieldWidthCm: 30, fieldHeightCm: 20, distanceCm: 60, cmPerPixel: 0.02,
     volumeCm3: 1000
   }, changes && changes.depth || {});
   const reference = Object.assign({
-    mode: 'glucovision-card-v1', cardRequested: true,
+    mode: 'glucovision-card-v2', cardRequested: true,
     cardVerified: true, cardFresh: true,
-    cardSchema: 'glucovision-card-v1', scaleSource: 'card',
-    cardName: 'glucovision-card', cardWidthCm: 8.56, cardHeightCm: 5.398,
+    cardSchema: 'glucovision-card-v2', scaleSource: 'card',
+    cardName: 'glucovision-card-v2', cardWidthCm: 8.56, cardHeightCm: 5.398,
     cardObservations: 9, cardTrackingMethod: 'FULL_TRACKING'
   }, changes && changes.reference || {});
   return { viewIndex, depth, reference };
@@ -63,13 +63,13 @@ test('add valide le base64, borne le contexte et persiste des chemins internes',
   const id = await Queue.add([{ base64: 'aGVsbG8=', mediaType: 'image/jpeg' }], {
     notes: 'riz', extras: 'yaourt', imageCount: 99,
     mealAt, venue: 'restaurant', clarificationAnswered: true,
-    referenceMode: 'glucovision-card-v1', viewMeasurements: [verifiedView(1)]
+    referenceMode: 'glucovision-card-v2', viewMeasurements: [verifiedView(1)]
   });
   assert.match(id, /^q\d{10,16}-[a-z0-9]{6,16}$/);
   const item = plain(Queue.list()[0]);
   assert.equal(item.files[0].file, `queue/${id}-0.jpg`);
   assert.equal(item.ctx.imageCount, 1);
-  assert.equal(item.ctx.referenceMode, 'glucovision-card-v1');
+  assert.equal(item.ctx.referenceMode, 'glucovision-card-v2');
   assert.equal(item.ctx.viewMeasurements[0].depth.fieldWidthCm, 30);
   assert.equal(item.ctx.viewMeasurements[0].viewIndex, 1);
   assert.equal(item.ctx.viewMeasurements[0].depth.cardObservations, 9);
@@ -85,7 +85,7 @@ test('la file conserve toutes les mesures par vue et rejette les preuves forgée
   ];
   const valid = queueEnv();
   await valid.Queue.add(twoImages, {
-    referenceMode: 'glucovision-card-v1',
+    referenceMode: 'glucovision-card-v2',
     viewMeasurements: [
       verifiedView(1),
       verifiedView(2, { depth: { fieldWidthCm: 28, scaleSource: 'card+depth',
@@ -104,13 +104,32 @@ test('la file conserve toutes les mesures par vue et rejette les preuves forgée
 
   const forged = queueEnv();
   await forged.Queue.add(twoImages, {
-    referenceMode: 'glucovision-card-v1',
+    referenceMode: 'glucovision-card-v2',
     viewMeasurements: [
       verifiedView(1, { depth: { fresh: false } }),
       verifiedView(2, { reference: { cardVerified: false } })
     ]
   });
   assert.deepEqual(forged.Queue.list()[0].ctx.viewMeasurements, []);
+});
+
+test('une ancienne preuve carte v1 est conservée sans privilège métrique', async () => {
+  const legacy = queueEnv();
+  const view = verifiedView(1, {
+    depth: { cardSchema: 'glucovision-card-v1', cardName: 'glucovision-card' },
+    reference: {
+      mode: 'glucovision-card-v1',
+      cardSchema: 'glucovision-card-v1',
+      cardName: 'glucovision-card'
+    }
+  });
+  await legacy.Queue.add([{ base64: 'aGVsbG8=', mediaType: 'image/jpeg' }], {
+    referenceMode: 'glucovision-card-v1',
+    viewMeasurements: [view]
+  });
+  const saved = legacy.Queue.list()[0];
+  assert.equal(saved.ctx.referenceMode, 'none');
+  assert.equal(saved.ctx.viewMeasurements.length, 0);
 });
 
 test('une écriture partielle supprime tous les fichiers tentés et ne crée pas d’entrée', async () => {

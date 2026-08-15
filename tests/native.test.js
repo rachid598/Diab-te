@@ -48,7 +48,9 @@ function env(options) {
       available: () => Promise.resolve({ supported: true, installed: true }),
       capture: () => Promise.resolve({ cancelled: true })
     },
-    Directory: { Data: 'DATA' },
+    Directory: {
+      Data: 'DATA', Cache: 'CACHE', Documents: 'DOCUMENTS', External: 'EXTERNAL'
+    },
     Filesystem: options.filesystem
   };
   const sandbox = loadScript('js/native.js', { Cap, URL });
@@ -120,7 +122,7 @@ test('le mode carte est transmis au natif et toutes ses preuves sont conservées
           jpegBase64: 'aGVsbG8=', scaleOk: true, fresh: true,
           fieldWidthCm: 30, fieldHeightCm: 20, distanceCm: 60, cmPerPixel: 0.02,
           cardRequested: true, cardVerified: true, cardFresh: true,
-          cardSchema: 'glucovision-card-v1', scaleSource: 'card',
+          cardSchema: 'glucovision-card-v2', scaleSource: 'card',
           cardTrackingMethod: 'augmented-image', cardObservations: 8,
           cardWidthCm: 8.56, cardHeightCm: 5.398,
           cardDepthCompared: true, cardDepthAgrees: true
@@ -133,7 +135,7 @@ test('le mode carte est transmis au natif et toutes ses preuves sont conservées
   assert.equal(got.depth.cardMode, true);
   assert.equal(got.depth.cardVerified, true);
   assert.equal(got.depth.cardFresh, true);
-  assert.equal(got.depth.cardSchema, 'glucovision-card-v1');
+  assert.equal(got.depth.cardSchema, 'glucovision-card-v2');
   assert.equal(got.depth.scaleSource, 'card');
   assert.equal(got.depth.cardObservations, 8);
   assert.equal(got.depth.cardWidthCm, 8.56);
@@ -154,6 +156,36 @@ test('des validations de carte absentes restent strictement fausses', async () =
   assert.equal(got.depth.cardVerified, false);
   assert.equal(got.depth.cardFresh, false);
   assert.equal(got.depth.cardSchema, '');
+});
+
+test('le repli de partage n’écrit jamais dans le stockage Data privé', async () => {
+  const directories = [];
+  const sandbox = env({
+    filesystem: {
+      writeFile(args) {
+        directories.push(args.directory);
+        return Promise.reject(new Error('public storage unavailable'));
+      }
+    }
+  });
+  assert.equal(await sandbox.Native.saveToDocuments('carte.svg', '<svg/>'), null);
+  assert.deepEqual(directories, ['DOCUMENTS', 'EXTERNAL']);
+  assert.equal(directories.includes('DATA'), false);
+});
+
+test('le repli de partage nomme le dossier public réellement utilisé', async () => {
+  const sandbox = env({
+    filesystem: {
+      writeFile(args) {
+        if (args.directory === 'DOCUMENTS') return Promise.reject(new Error('denied'));
+        return Promise.resolve({ uri: '/public/carte.svg' });
+      }
+    }
+  });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(await sandbox.Native.saveToDocuments('carte.svg', '<svg/>'))),
+    { uri: '/public/carte.svg', directory: 'EXTERNAL' }
+  );
 });
 
 test('une erreur de lecture du Keystore n’est jamais confondue avec une clé absente', async () => {
@@ -205,6 +237,7 @@ test('l’APK exclut les données de santé et impose le contrat natif de la car
     path.join(ROOT, 'android-res/xml/data_extraction_rules.xml'), 'utf8');
   const legacy = fs.readFileSync(path.join(ROOT, 'android-res/xml/backup_rules.xml'), 'utf8');
   const app = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
+  const activity = fs.readFileSync(path.join(ROOT, 'android-src/DepthScanActivity.java'), 'utf8');
   assert.match(workflow, /android:dataExtractionRules="@xml\/data_extraction_rules"/);
   assert.match(workflow, /android:fullBackupContent="@xml\/backup_rules"/);
 
@@ -217,6 +250,9 @@ test('l’APK exclut les données de santé et impose le contrat natif de la car
   assert.ok(floor >= 2084, 'le plancher ne doit jamais redescendre sous la carte repère (v84)');
   assert.ok(minNative >= floor,
     `MIN_NATIVE_BUILD (${minNative}) doit être au moins égal au plancher (${floor})`);
+  assert.match(activity, /CARD_NAME\s*=\s*"glucovision-card-v2"/);
+  assert.match(activity, /CARD_SCHEMA\s*=\s*"glucovision-card-v2"/);
+  assert.doesNotMatch(activity, /glucovision-card-v1/);
 
   assert.match(modern, /<cloud-backup/);
   assert.match(modern, /<device-transfer>/);

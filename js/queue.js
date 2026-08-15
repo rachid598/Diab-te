@@ -43,7 +43,7 @@
   function hasVerifiedCardContract(raw) {
     if (!raw || typeof raw !== 'object' || raw.cardRequested !== true ||
         raw.cardVerified !== true || raw.cardFresh !== true ||
-        raw.cardSchema !== 'glucovision-card-v1' || raw.cardName !== 'glucovision-card' ||
+        raw.cardSchema !== 'glucovision-card-v2' || raw.cardName !== 'glucovision-card-v2' ||
         raw.cardTrackingMethod !== 'FULL_TRACKING' ||
         !/^(card|card\+depth)$/.test(raw.scaleSource || '')) return false;
     var observations = finite(raw.cardObservations);
@@ -62,7 +62,7 @@
       fresh: true,
       cardVerified: true,
       cardFresh: true,
-      cardSchema: 'glucovision-card-v1',
+      cardSchema: 'glucovision-card-v2',
       scaleSource: raw.scaleSource,
       cardRequested: raw.cardRequested === true,
       cardDepthCompared: raw.cardDepthCompared === true,
@@ -105,8 +105,8 @@
   }
   function referenceFromDepth(depth) {
     var out = {
-      mode: 'glucovision-card-v1', cardVerified: true, cardFresh: true,
-      cardSchema: 'glucovision-card-v1', scaleSource: depth.scaleSource,
+      mode: 'glucovision-card-v2', cardVerified: true, cardFresh: true,
+      cardSchema: 'glucovision-card-v2', scaleSource: depth.scaleSource,
       cardRequested: depth.cardRequested === true,
       cardDepthCompared: depth.cardDepthCompared === true,
       cardDepthAgrees: depth.cardDepthAgrees === true,
@@ -121,7 +121,7 @@
     return out;
   }
   function cleanViewMeasurements(raw, imageCount, referenceMode) {
-    if (referenceMode !== 'glucovision-card-v1' || !Array.isArray(raw)) return [];
+    if (referenceMode !== 'glucovision-card-v2' || !Array.isArray(raw)) return [];
     var seen = {};
     return raw.map(function (measurement) {
       if (!measurement || typeof measurement !== 'object') return null;
@@ -130,7 +130,7 @@
       var depth = cleanDepth(measurement.depth);
       if (view == null || view !== Math.round(view) || view < 1 || view > imageCount ||
           seen[view] || !depth || !reference || typeof reference !== 'object' ||
-          reference.mode !== 'glucovision-card-v1' || !hasVerifiedCardContract(reference) ||
+          reference.mode !== 'glucovision-card-v2' || !hasVerifiedCardContract(reference) ||
           reference.scaleSource !== depth.scaleSource) {
         return null;
       }
@@ -144,8 +144,8 @@
   }
   function cleanContext(raw, imageCount) {
     raw = raw && typeof raw === 'object' ? raw : {};
-    var referenceMode = raw.referenceMode === 'glucovision-card-v1'
-      ? 'glucovision-card-v1' : 'none';
+    var referenceMode = raw.referenceMode === 'glucovision-card-v2'
+      ? 'glucovision-card-v2' : 'none';
     var out = {
       referenceMode: referenceMode,
       notes: cleanText(raw.notes, 4000),

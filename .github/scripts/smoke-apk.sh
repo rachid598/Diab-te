@@ -62,11 +62,17 @@ adb shell monkey -p "$APP_ID" -c android.intent.category.LAUNCHER 1 >/dev/null
 
 etat=timeout
 LIGNE=""
+PLANTAGE_APP="$SORTIE/plantage-app.txt"
 for _ in $(seq 1 $((DELAI / 2))); do
   LIGNE=$(adb shell cat "$RAPPORT" 2>/dev/null | tr -d '\r')
   if [ -n "$LIGNE" ]; then etat=pret; break; fi
-  # Un plantage se voit tout de suite : inutile d'attendre le délai complet.
-  if grep -qE "FATAL EXCEPTION|ANR in $APP_ID" "$LOG"; then etat=plantage; break; fi
+  # Un plantage DE L'APP se voit tout de suite. L'émulateur peut aussi écrire
+  # un FATAL d'un service Android (par exemple android.process.acore) : il ne
+  # doit pas condamner un APK qui n'en est pas responsable.
+  if bash .github/scripts/logcat-app-crash.sh "$LOG" "$APP_ID" > "$PLANTAGE_APP"; then
+    etat=plantage
+    break
+  fi
   sleep 2
 done
 
@@ -84,7 +90,8 @@ echo "== Résultat : $etat"
 
 if [ "$etat" = plantage ]; then
   echo "::error::L'APK plante au lancement."
-  sed -n '/FATAL EXCEPTION/,+25p' "$LOG" | head -60
+  cat "$PLANTAGE_APP" || true
+  echo "Le journal pertinent complet est joint à l'artefact de l'émulateur."
   exit 1
 fi
 

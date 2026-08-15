@@ -148,10 +148,10 @@
     if (!ctx.imageCount) return buildTextPrompt(ctx);
 
     var lines = ['Analyse ce repas et estime les glucides selon la méthode.'];
-    var referenceMode = ctx.referenceMode === 'glucovision-card-v1'
-      ? 'glucovision-card-v1' : 'none';
+    var referenceMode = ctx.referenceMode === 'glucovision-card-v2'
+      ? 'glucovision-card-v2' : 'none';
     var measurements = validViewMeasurements(ctx.viewMeasurements, ctx.imageCount, referenceMode);
-    if (referenceMode === 'glucovision-card-v1') {
+    if (referenceMode === 'glucovision-card-v2') {
       lines.push('MODE CARTE GLUCOVISION demandé. La carte visuelle n\'est jamais une preuve');
       lines.push('et tu ne dois ni la détecter, ni la mesurer en pixels, ni déduire sa taille.');
       if (measurements.length) {
@@ -227,7 +227,7 @@
   function hasVerifiedCardContract(raw) {
     if (!raw || typeof raw !== 'object' || raw.cardRequested !== true ||
         raw.cardVerified !== true || raw.cardFresh !== true ||
-        raw.cardSchema !== 'glucovision-card-v1' || raw.cardName !== 'glucovision-card' ||
+        raw.cardSchema !== 'glucovision-card-v2' || raw.cardName !== 'glucovision-card-v2' ||
         raw.cardTrackingMethod !== 'FULL_TRACKING' ||
         !/^(card|card\+depth)$/.test(raw.scaleSource || '')) return false;
     var observations = strictNum(raw.cardObservations);
@@ -240,7 +240,7 @@
   }
 
   function validViewMeasurements(raw, imageCount, referenceMode) {
-    if (referenceMode !== 'glucovision-card-v1' || !Array.isArray(raw)) return [];
+    if (referenceMode !== 'glucovision-card-v2' || !Array.isArray(raw)) return [];
     var count = strictNum(imageCount);
     if (count == null || count !== Math.round(count) || count < 1 || count > 6) return [];
     var seen = {};
@@ -252,7 +252,7 @@
       if (!depth || typeof depth !== 'object' || !reference || typeof reference !== 'object' ||
           depth.scaleOk !== true || depth.fresh !== true || depth.cardMode !== true ||
           !hasVerifiedCardContract(depth) ||
-          reference.mode !== 'glucovision-card-v1' || !hasVerifiedCardContract(reference) ||
+          reference.mode !== 'glucovision-card-v2' || !hasVerifiedCardContract(reference) ||
           reference.scaleSource !== depth.scaleSource ||
           view == null || view !== Math.round(view) || view < 1 || view > count || seen[view]) {
         return null;
@@ -268,8 +268,8 @@
       var tracking = typeof depth.cardTrackingMethod === 'string' &&
         depth.cardTrackingMethod.length <= 120 ? depth.cardTrackingMethod : '';
       var cleanReference = {
-        mode: 'glucovision-card-v1', cardVerified: true, cardFresh: true,
-        cardSchema: 'glucovision-card-v1', scaleSource: depth.scaleSource
+        mode: 'glucovision-card-v2', cardVerified: true, cardFresh: true,
+        cardSchema: 'glucovision-card-v2', scaleSource: depth.scaleSource
       };
       var cleanDepth = {
         scaleOk: true,
@@ -277,7 +277,7 @@
         cardMode: true,
         cardVerified: true,
         cardFresh: true,
-        cardSchema: 'glucovision-card-v1',
+        cardSchema: 'glucovision-card-v2',
         scaleSource: depth.scaleSource,
         fieldWidthCm: Math.round(width * 10) / 10,
         fieldHeightCm: Math.round(height * 10) / 10,
@@ -853,11 +853,11 @@
   function sanitize(result, ctx) {
     result = result && typeof result === 'object' ? result : {};
     var fromText = !(ctx && ctx.imageCount);
-    var referenceMode = !fromText && ctx && ctx.referenceMode === 'glucovision-card-v1'
-      ? 'glucovision-card-v1' : 'none';
+    var referenceMode = !fromText && ctx && ctx.referenceMode === 'glucovision-card-v2'
+      ? 'glucovision-card-v2' : 'none';
     var verifiedViews = validViewMeasurements(ctx && ctx.viewMeasurements,
       ctx && ctx.imageCount, referenceMode);
-    var refAsked = referenceMode === 'glucovision-card-v1';
+    var refAsked = referenceMode === 'glucovision-card-v2';
 
     /* Les champs referenceFound/referenceUsed éventuellement inventés par le
        modèle sont intentionnellement ignorés. La seule preuve est le contrat

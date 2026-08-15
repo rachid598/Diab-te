@@ -21,8 +21,8 @@ const manifest = JSON.parse(read('manifest.webmanifest'));
 const packageJson = JSON.parse(read('package.json'));
 const packageLock = JSON.parse(read('package-lock.json'));
 
-const CARD_SVG_SHA256 = '2dac92147701d7c9f1f81a6a9f18128a416730859d1b0912da9048d10976096b';
-const CARD_PNG_SHA256 = '5636449101e45da4725fcfc16d7037db51d07055f830fb9aa65c6c3bd8d1dd60';
+const CARD_SVG_SHA256 = '3b283263c6ddf366a50da1225e4456f93176573c3ee93e65e9064caad1ddf78f';
+const CARD_PNG_SHA256 = '53ec79a2c5952673baa4ce0847428abd7215cd37ad16981161509d8371da854c';
 
 test('la version v84 ou suivante reste synchronisée dans toute la chaîne de publication', () => {
   const appVersion = /APP_VERSION = '(\d+)'/.exec(app);
@@ -65,7 +65,7 @@ test('le workflow refuse toute branche autre que codex et garde une seule identi
   assert.match(workflow, /app_id=io\.github\.rachid598\.glucovision/);
   assert.match(workflow, /code_offset=2000/);
   assert.match(workflow, /has_depth=true/);
-  assert.match(workflow, /minimum_native_floor=2084/);
+  assert.match(workflow, /minimum_native_floor=2088/);
   assert.match(workflow,
     /EXPECTED_CERT_SHA256: 6fbba12e3103b5919940ab0de529f900b3ce085c90195f898c9b4ee5265a4a8b/);
   assert.match(workflow,
@@ -79,10 +79,19 @@ test('la carte repère imprimable et le PNG natif sont verrouillés octet par oc
   assert.match(workflow, new RegExp(`CARD_PNG_SHA256: ${CARD_PNG_SHA256}`));
   assert.match(readme, new RegExp(CARD_SVG_SHA256));
   assert.match(readme, new RegExp(CARD_PNG_SHA256));
-  assert.match(readme, /arcoreimg[^\n]*100\/100/i);
+  assert.match(readme, /arcoreimg[^\n]*1\.54\.0/i);
+  assert.match(readme, /seuil[^\n]*75/i,
+    'la documentation doit annoncer le seuil bloquant, pas un score parfait présumé');
+  assert.doesNotMatch(readme, /100\/100/i);
 
   const svg = read('glucovision-card.svg');
   assert.match(svg, /width="85\.60mm" height="53\.98mm" viewBox="0 0 4280 2699"/);
+  assert.doesNotMatch(svg, /<text\b/i,
+    'tous les textes imprimés doivent être convertis en tracés');
+  assert.doesNotMatch(svg, /font-family/i,
+    'la carte canonique ne doit dépendre d’aucune police installée');
+  assert.match(svg, /id="badge"[^>]*aria-label="GV2"/i);
+  assert.match(svg, /BÊTA TERRAIN/i);
   assert.match(svg, /LIGNE TÉMOIN 50 mm/i);
   assert.match(svg, /IMPRIMER À 100 %/i);
   assert.match(svg, /x1="1380"[^>]*x2="3880"/,
