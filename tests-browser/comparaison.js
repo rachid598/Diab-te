@@ -175,6 +175,10 @@ async function ecran(page, liste, contexte) {
       (function () {
         window.__depthCaptureRequests = [];
         window.__depthCaptureCount = 0;
+        window.__shareFileCalls = [];
+        // Contrôlable depuis le test : simule l'échec de la feuille de partage
+        // Android, pour vérifier le repli vers Documents.
+        window.__shareFileShouldFail = false;
         function jpeg() {
           var c = document.createElement('canvas'); c.width = 640; c.height = 480;
           var x = c.getContext('2d'); x.fillStyle = '#7a5635'; x.fillRect(0, 0, 640, 480);
@@ -228,8 +232,14 @@ async function ecran(page, liste, contexte) {
                     download: function () { return Promise.resolve(null); },
                     apply: function () { return Promise.resolve(false); } },
           httpJson: function () { return Promise.reject(new Error('offline test')); },
-          saveToDocuments: function () { return Promise.resolve(false); },
-          shareFile: function () { return Promise.resolve(false); }
+          saveToDocuments: function (name) {
+            return Promise.resolve({ uri: '/documents/' + name, directory: 'DOCUMENTS' });
+          },
+          shareFile: function (name, content, title) {
+            window.__shareFileCalls.push({ name: name, content: content, title: title });
+            if (window.__shareFileShouldFail) return Promise.resolve({ ok: false, error: 'test' });
+            return Promise.resolve({ ok: true });
+          }
         };
       })();
     ` });
@@ -245,11 +255,50 @@ async function ecran(page, liste, contexte) {
   await cardPage.waitForSelector('#btn-depth:not([hidden])');
   verifie(await cardPage.isVisible('#glucovision-card-guide'),
     'sélectionner Carte révèle la checklist guidée');
-  const cardHref = await cardPage.getAttribute('.reference-download', 'href');
-  verifie(/glucovision-card\.svg$/.test(cardHref || ''),
-    'le guide fournit le téléchargement de la carte SVG');
   verifie(await cardPage.locator('a[href="https://policies.google.com/privacy"]').count() === 1,
     'la divulgation ARCore renvoie vers la confidentialité de Google');
+
+  /* Ancien bouton : <a href download>. Dans l'APK, cette ancre écrivait dans un
+     dossier interne à la WebView qu'aucun gestionnaire de fichiers ne montre —
+     le fichier existait, mais restait introuvable. On vérifie ici le
+     remplacement : la feuille de partage native est réellement invoquée, avec
+     le contenu SVG réel (pas un texte de substitution), pas une simple ancre.
+
+     Le pré-chargement du SVG est asynchrone et n'expose aucun signal externe
+     (aucun hook de test dans le code de production) : si le premier clic tombe
+     avant qu'il n'aboutisse, le bouton avertit poliment « pas encore prête » —
+     ce cas est lui-même couvert en retentant après une courte pause. */
+  await cardPage.click('#reference-download');
+  const pasEncorePret = await cardPage.evaluate(function () {
+    var t = document.getElementById('toast');
+    return !t.hidden && /pas encore fini de charger/i.test(t.textContent || '');
+  });
+  if (pasEncorePret) {
+    verifie(true, 'un clic avant la fin du pré-chargement prévient plutôt que d’échouer');
+    await cardPage.waitForTimeout(300);
+    await cardPage.click('#reference-download');
+  }
+  await cardPage.waitForFunction(function () {
+    return window.__shareFileCalls.length === 1;
+  }, null, { timeout: 5000 });
+  const partage = await cardPage.evaluate(function () { return window.__shareFileCalls[0]; });
+  verifie(partage.name === 'glucovision-card.svg', 'le fichier partagé porte le bon nom');
+  verifie(/<svg[\s\S]*GLUCOVISION/.test(partage.content || ''),
+    'le contenu partagé est le vrai SVG de la carte, pas un texte de substitution');
+  verifie(!/BÊTA/.test(partage.content || ''),
+    'la mention bêta a bien été retirée du fichier réellement servi');
+  verifie(/carte repère/i.test(partage.title || ''), 'le titre du partage identifie la carte');
+
+  // Repli : la feuille de partage échoue (courant sur certains téléphones sans
+  // application compatible) → écriture dans Documents → message qui dit où.
+  await cardPage.evaluate(function () { window.__shareFileShouldFail = true; });
+  await cardPage.click('#reference-download');
+  await cardPage.waitForFunction(function () {
+    var t = document.getElementById('toast');
+    return !t.hidden && /documents/i.test(t.textContent || '');
+  }, null, { timeout: 5000 });
+  verifie(true, 'le repli Documents est proposé quand le partage échoue, avec le chemin utilisé');
+  await cardPage.evaluate(function () { window.__shareFileShouldFail = false; });
   await cardPage.click('#btn-depth');
   await cardPage.waitForFunction(function () { return document.querySelectorAll('#thumbs .thumb').length === 1; });
   await cardPage.click('#btn-depth');
