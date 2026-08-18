@@ -973,6 +973,92 @@ async function ecran(page, liste, contexte) {
     return window.__clarifCalls[2].clarificationAnswered !== true;
   }), 'un nouveau repas peut recevoir sa propre question de clarification');
 
+  /* Repli automatique vers un second fournisseur : le cas d'usage exact
+     évoqué en discussion (clé Gemini à sec en plein repas) est simulé en
+     faisant échouer le fournisseur principal avec la même erreur 429 que
+     produirait un vrai quota dépassé. */
+  console.log('\nRepli automatique vers un second fournisseur :');
+  await page.evaluate(function () {
+    const key = 'diabete.settings.v1';
+    const s = JSON.parse(localStorage.getItem(key) || '{}');
+    s.provider = 'gemini';
+    s.fallbackProvider = 'openrouter';
+    s.verificationMode = 'off';
+    s.verifyProvider = '';
+    s.apiKeys = Object.assign({}, s.apiKeys || {}, { gemini: 'cle-test', openrouter: 'cle-secours' });
+    localStorage.setItem(key, JSON.stringify(s));
+  });
+  await page.goto('http://localhost:' + PORT + '/');
+  await page.evaluate(function () {
+    window.__secoursAppeleAvec = null;
+    window.Estimator.estimate = function () {
+      var err = new Error('Quota / débit atteint (429). Patiente ~1 min puis réessaie.');
+      err.status = 429;
+      return Promise.reject(err);
+    };
+    window.Estimator.estimateWith = function (provider) {
+      window.__secoursAppeleAvec = provider;
+      return Promise.resolve({
+        totalCarbsG: 32, rangeLowG: 26, rangeHighG: 38,
+        overallConfidence: 'medium', model: 'x-ai/grok-4.5',
+        provider: provider, fromText: true, seen: 'Une salade composée.',
+        blocking: [], alerts: [], clarification: null,
+        items: [{ name: 'salade composée', carbsG: 32, estimatedMassG: 200,
+                  carbDensityPer100g: 16, confidence: 'medium', assumptions: '' }]
+      });
+    };
+  });
+  await page.click('.mode-btn[data-mode="texte"]');
+  await page.fill('#user-notes', 'salade composée pour tester le repli');
+  await page.click('#estimate-btn');
+  await page.waitForSelector('#results .safety-banner', { timeout: 5000 });
+  verifie(await page.evaluate(function () { return window.__secoursAppeleAvec; }) === 'openrouter',
+    'le secours OpenRouter est appelé quand Gemini échoue');
+  const bandeauRepli = await page.textContent('#results .safety-banner');
+  verifie(/gemini/i.test(bandeauRepli) && /openrouter/i.test(bandeauRepli),
+    'le bandeau nomme le fournisseur en défaut et celui qui a répondu');
+  verifie(/32/.test(await page.textContent('.hero-carbs')),
+    'le chiffre affiché est bien celui du fournisseur de secours');
+
+  /* Sans clé de secours utilisable, l'échec du principal ne doit JAMAIS être
+     masqué : c'est l'erreur réelle (ici la clé Gemini) qui doit atteindre
+     l'utilisateur, pas un silence ni une fausse réussite. */
+  console.log('\nSans clé de secours, l\'erreur du fournisseur principal n\'est pas masquée :');
+  await page.evaluate(function () {
+    const key = 'diabete.settings.v1';
+    const s = JSON.parse(localStorage.getItem(key) || '{}');
+    s.provider = 'gemini';
+    s.fallbackProvider = 'openrouter';
+    s.verificationMode = 'off';
+    s.verifyProvider = '';
+    s.apiKeys = Object.assign({}, s.apiKeys || {}, { gemini: 'cle-test', openrouter: '' });
+    localStorage.setItem(key, JSON.stringify(s));
+  });
+  await page.goto('http://localhost:' + PORT + '/');
+  await page.evaluate(function () {
+    window.__secoursAppele = false;
+    window.Estimator.estimate = function () {
+      var err = new Error('Clé API invalide, expirée ou sans accès (401).');
+      err.status = 401;
+      return Promise.reject(err);
+    };
+    window.Estimator.estimateWith = function () {
+      window.__secoursAppele = true;
+      return Promise.reject(new Error('ne doit jamais être appelé'));
+    };
+  });
+  await page.click('.mode-btn[data-mode="texte"]');
+  await page.fill('#user-notes', 'repas pour tester l\'absence de secours');
+  await page.click('#estimate-btn');
+  await page.waitForFunction(function () {
+    const t = document.getElementById('toast');
+    return t && !t.hidden;
+  }, { timeout: 5000 });
+  verifie(await page.evaluate(function () { return window.__secoursAppele; }) === false,
+    'sans clé OpenRouter enregistrée, le secours n\'est jamais appelé');
+  verifie(/401|clé API invalide/i.test(await page.textContent('#toast')),
+    'et c\'est bien l\'erreur du fournisseur principal qui remonte, pas un message générique');
+
   verifie(erreursJs.length === 0, 'aucune erreur JavaScript : ' + (erreursJs[0] || '—'));
 
   await nav.close();
