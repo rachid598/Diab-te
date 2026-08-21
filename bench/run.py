@@ -10,8 +10,14 @@ from concurrent.futures import ThreadPoolExecutor
 HERE = os.path.dirname(os.path.abspath(__file__))
 KEY = open(os.path.join(HERE, '.key')).read().strip()
 URL = 'https://openrouter.ai/api/v1/chat/completions'
-SYSTEM = open(os.path.join(HERE, 'system_prompt.txt')).read()
 THINKING_MAX_TOKENS = 8000
+
+# Prompts surchargeables : c'est ce qui permet de comparer DEUX versions du
+# prompt sur les memes plats, seule facon de mesurer l'effet d'une consigne.
+# Par defaut, les fichiers des manches publiees, pour que le rejeu reste
+# possible a l'identique. Les extraire de js/estimator.js plutot que de les
+# recopier : voir bench/extract-prompts.mjs.
+SYSTEM = open(os.path.join(HERE, os.environ.get('BENCH_SYSTEM', 'system_prompt.txt'))).read()
 
 # Parametres surchargeables par l'environnement. Les valeurs par defaut sont
 # celles des deux premieres manches (BENCHMARK.md) : sans variable, le script
@@ -22,13 +28,25 @@ OUT = os.environ.get('BENCH_OUT', 'resultats.json')
 
 # Prompt utilisateur : mode photo, aucun objet-repere, une seule vue,
 # pas de notes, pas d'extras, pas de bloc de calibration (buildUserPrompt).
-USER_PROMPT = '\n'.join([
+USER_PROMPT_DEFAUT = '\n'.join([
     'Analyse ce repas et estime les glucides selon la méthode.',
     "Aucun objet-repère : estime l'échelle via l'assiette/les couverts et baisse la confiance.",
     "Une seule vue : tu ne vois pas directement la hauteur/épaisseur — estime-la et",
     "signale-la comme seule inconnue géométrique (une photo de côté la lèverait).",
     'Réponds uniquement avec le JSON.',
 ])
+
+# ATTENTION : le texte ci-dessus est celui des manches de juillet/aout 2026. Il a
+# DERIVE de l'application depuis : la v83 a remplace l'objet-repere libre (pompe,
+# piece, assiette) par la carte verifiee par ARCore, et la consigne A du prompt
+# systeme actuel interdit desormais explicitement de deduire une echelle d'une
+# assiette ou de couverts. Le rejouer tel quel envoie donc au modele un prompt
+# utilisateur qui CONTREDIT son prompt systeme.
+# Il reste la valeur par defaut pour ne pas reecrire apres coup une mesure deja
+# publiee ; toute nouvelle manche doit passer BENCH_USER, genere par
+# bench/extract-prompts.mjs depuis buildUserPrompt.
+USER_PROMPT = (open(os.path.join(HERE, os.environ['BENCH_USER'])).read()
+               if os.environ.get('BENCH_USER') else USER_PROMPT_DEFAUT)
 
 MODELS = [
     'anthropic/claude-opus-5',
