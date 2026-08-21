@@ -1,0 +1,6 @@
+Analyse ce repas et estime les glucides selon la méthode.
+MODE RAPIDE SANS CARTE : aucune échelle métrique native n'est fournie.
+Estime les portions visuellement sans déclarer de mesure réelle.
+Une seule vue : tu ne vois pas directement la hauteur/épaisseur — estime-la et
+signale-la comme seule inconnue géométrique (une photo de côté la lèverait).
+Réponds uniquement avec le JSON.

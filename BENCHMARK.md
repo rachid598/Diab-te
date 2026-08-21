@@ -52,6 +52,37 @@ Rejouer : `bench/run.py` (déposer la clé OpenRouter dans `bench/.key`, le
 catalogue tarifaire dans `bench/models.json` via `GET /api/v1/models`, et le
 prompt système dans `bench/system_prompt.txt`), puis `bench/score.py`.
 
+### ⚠️ Ces résultats mesurent un prompt que l'application n'envoie plus
+
+Les chiffres ci-dessous datent de juillet et août 2026. Le prompt a changé depuis,
+et les fichiers du banc, eux, n'ont pas suivi :
+
+- `bench/system_prompt.txt` décrit encore l'**objet-repère libre** — pompe, pièce,
+  diamètre d'assiette — que la v83 a remplacé par la carte vérifiée par ARCore ;
+- le prompt utilisateur figé dans `run.py` demande d'*« estimer l'échelle via
+  l'assiette/les couverts »*, ce que la consigne A du prompt système **actuel**
+  interdit explicitement. Rejouer tel quel enverrait donc au modèle deux consignes
+  contradictoires ;
+- la v89 a ajouté l'ancrage géométrique obligatoire, non mesuré à ce jour.
+
+Les MAE affichés dans les Réglages restent donc **des ordres de grandeur**, pas la
+mesure du produit tel qu'il tourne aujourd'hui. Le classement relatif des modèles
+est probablement encore valable ; les valeurs absolues, non.
+
+Pour une nouvelle manche, extraire les prompts au lieu de les recopier :
+
+```sh
+node bench/extract-prompts.mjs js/estimator.js bench/system.txt bench/user.txt
+BENCH_SYSTEM=system.txt BENCH_USER=user.txt \
+BENCH_SELECTION=selection.json,selection2.json \
+BENCH_MODELS=google/gemini-3.1-flash-lite BENCH_OUT=resultats4.json \
+python3 bench/run.py
+```
+
+Les deux variables acceptent des fichiers différents pour la même manche : c'est
+ainsi qu'on compare **deux versions du prompt sur les mêmes plats**, seule façon
+de mesurer l'effet d'une consigne plutôt que de le supposer.
+
 ## Résultats — manche 1, 14 modèles × 14 plats
 
 MAE = écart absolu moyen, en grammes de glucides. Le biais est l'erreur moyenne

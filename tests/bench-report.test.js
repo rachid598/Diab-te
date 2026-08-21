@@ -2,7 +2,11 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { loadScript } = require('./test-env');
+
+const ROOT = path.resolve(__dirname, '..');
 
 function confirmed(e) {
   return !e.draft && !e.blocked && !(e.blocking && e.blocking.length) &&
@@ -175,4 +179,26 @@ test('Report.analyse moyenne les deux valeurs centrales pour une médiane paire'
     }
   });
   assert.equal(Report.analyse(30).mediane, 55);
+});
+
+/* Le banc ne vaut que s'il envoie CE que l'application envoie. Le prompt
+   utilisateur figé dans run.py a dérivé sans bruit : il parle encore d'un
+   « objet-repère » que la v83 a supprimé, et contredit la consigne A du prompt
+   système actuel, qui interdit justement de déduire une échelle d'une assiette
+   ou de couverts. Ce test empêche la même dérive de recommencer en silence. */
+test('le prompt utilisateur du banc est extrait de l’application, pas recopié', () => {
+  const run = fs.readFileSync(path.join(ROOT, 'bench', 'run.py'), 'utf8');
+
+  assert.match(run, /BENCH_USER/,
+    'run.py doit accepter un prompt utilisateur extrait de js/estimator.js');
+  assert.match(run, /BENCH_SYSTEM/,
+    'run.py doit accepter un prompt système surchargeable, sinon aucun A/B possible');
+  assert.match(run, /DERIVE de l.application/,
+    'le prompt par défaut doit porter l’avertissement de dérive');
+
+  const extracteur = fs.readFileSync(path.join(ROOT, 'bench', 'extract-prompts.mjs'), 'utf8');
+  assert.match(extracteur, /buildPhotoPrompt/,
+    'le prompt utilisateur doit venir de la vraie fonction, pas d’une transcription');
+  assert.match(extracteur, /mealAt: NaN/,
+    'le contexte horaire doit être neutralisé, sinon deux manches ne sont plus comparables');
 });
