@@ -413,6 +413,62 @@ async function ecran(page, liste, contexte) {
   verifie(/Avis concordants/.test(vu.texte),
     'même total ET mêmes aliments reste concordant');
 
+  /* Cas réel relevé sur un plateau de restaurant : 127 g contre 196 g, soit
+     ~7 unités d'insuline d'écart. Dire « 69 g de différence » n'aide personne ;
+     nommer le poste qui les porte se vérifie en regardant la corbeille. */
+  console.log('\nD\'où vient l\'écart entre deux avis :');
+  const restauGemini = avis('gemini', 'gemini-3.1-flash-lite', 127,
+    [['Riz blanc cuit', 42], ['Frites avec sauce', 45],
+     ['Poisson frit', 15], ['Oignons frits', 25]]);
+  const restauGrok = avis('openrouter', 'x-ai/grok-4.5', 196,
+    [['Riz blanc long grain cuit', 56], ['frites nature', 95],
+     ['Poisson frit', 20], ['Oignons frits', 25]]);
+  vu = await ecran(page, [restauGemini, restauGrok]);
+  const ecartTexte = await page.textContent('.cmp-gap');
+  verifie(/Les avis divergent nettement/.test(vu.texte),
+    'la divergence est toujours annoncée');
+  verifie(/frites/i.test(ecartTexte),
+    'le poste qui porte l’écart est nommé');
+  const premier = await page.textContent('.cmp-gap li:first-child');
+  verifie(/frites/i.test(premier) && /50 g/.test(premier),
+    'et il arrive en tête, chiffré : ' + premier.replace(/\s+/g, ' ').trim());
+  verifie(/Riz blanc/i.test(ecartTexte),
+    'les libellés « Riz blanc cuit » et « Riz blanc long grain cuit » sont regroupés');
+  verifie(!/Oignons/i.test(ecartTexte),
+    'un aliment sur lequel les deux avis s’accordent n’encombre pas la liste');
+
+  /* Ne pas voir un aliment est une divergence, pas une donnée manquante :
+     la colonne qui l'ignore compte 0 g, et on dit laquelle. */
+  const sansFrites = avis('claude', 'claude-opus-5', 82,
+    [['Riz blanc cuit', 47], ['Poisson frit', 35]]);
+  await ecran(page, [restauGemini, restauGrok, sansFrites]);
+  const trois = await page.textContent('.cmp-gap');
+  verifie(/non compté par/i.test(trois),
+    'un aliment absent d’une colonne est signalé comme non compté');
+  verifie(/Opus 5/.test(trois),
+    'et la colonne qui l’ignore est nommée : ' + trois.replace(/\s+/g, ' ').trim().slice(0, 120));
+
+  /* Hors-domaine : le banc ne couvre que 20–130 g. Le calcul est vérifié côté
+     node ; ici on vérifie que l'écran le dit, une seule fois pour le repas. */
+  console.log('\nRepas hors du domaine mesuré :');
+  const grosRepas = avis('openrouter', 'x-ai/grok-4.5', 196,
+    [['riz', 100], ['frites', 96]]);
+  grosRepas.result.outOfDomain = ['196 g de glucides (banc mesuré jusqu\'à 130 g)'];
+  const petitRepas = avis('gemini', 'gemini-3.1-flash-lite', 48, riz);
+  petitRepas.result.outOfDomain = [];
+  vu = await ecran(page, [petitRepas, grosRepas]);
+  verifie(/hors du domaine mesuré/i.test(vu.texte),
+    'le repas hors domaine est signalé sur l’écran de comparaison');
+  verifie(/banc mesuré jusqu.à 130 g/i.test(vu.texte),
+    'et la raison chiffrée est donnée');
+  verifie(await page.locator('#results .warn-box').filter({ hasText: 'hors du domaine' }).count() === 1,
+    'une seule fois pour le repas, pas une par colonne');
+
+  vu = await ecran(page, [avis('gemini', 'gemini-3.1-flash-lite', 48, riz),
+                          avis('openrouter', 'x-ai/grok-4.5', 50, riz)]);
+  verifie(!/hors du domaine/i.test(vu.texte),
+    'une assiette ordinaire ne déclenche aucun bandeau hors domaine');
+
   const mealAtConserve = 1786406400000;
   await ecran(page, [avis('gemini', 'gemini-3.1-flash-lite', 48, riz),
                       avis('openrouter', 'x-ai/grok-4.5', 50, riz)], {

@@ -285,3 +285,59 @@ test('referenceFound/referenceUsed forgés par l’IA ne sont jamais une preuve'
   assert.match(withNative.referenceUsed, /vérifiée nativement/);
   assert.doesNotMatch(withNative.referenceUsed, /mensonge/);
 });
+
+/* Le banc ne mesure que des assiettes de 20–130 g de glucides et de 2 à 7
+   aliments (BENCHMARK.md). Au-delà, le MAE des Réglages et la bande fixe des
+   fourchettes n'ont jamais été vérifiés : l'estimation doit le signaler
+   elle-même, sinon l'écran les présente comme acquis. */
+test('un repas hors du domaine mesuré du banc est signalé, avec sa raison', () => {
+  const { Estimator } = env();
+
+  const simple = Estimator.sanitize(raw(60), { imageCount: 1, referenceMode: 'none' });
+  assert.equal(simple.outOfDomain.length, 0,
+    'une assiette ordinaire ne doit déclencher aucun avertissement');
+
+  const gros = Estimator.sanitize(raw(190), { imageCount: 1, referenceMode: 'none' });
+  assert.equal(gros.outOfDomain.length, 1);
+  assert.match(gros.outOfDomain[0], /190 g de glucides/);
+  assert.match(gros.outOfDomain[0], /130 g/);
+
+  // Beaucoup d'aliments, mais un total modeste : c'est la complexité qui sort.
+  const nombreux = raw(60);
+  nombreux.items = Array.from({ length: 9 }, (_, i) => ({
+    name: 'aliment ' + i, estimatedMassG: 20, carbDensityPer100g: 33,
+    carbsG: 60 / 9, proteinG: 1, fatG: 1, kcal: 30, confidence: 'medium'
+  }));
+  const complexe = Estimator.sanitize(nombreux, { imageCount: 1, referenceMode: 'none' });
+  assert.equal(complexe.outOfDomain.length, 1);
+  assert.match(complexe.outOfDomain[0], /9 aliments/);
+
+  // Un en-cas sous la borne basse ne doit PAS alerter : l'erreur absolue y est
+  // petite par construction, et l'avertissement perdrait tout son poids.
+  const encas = Estimator.sanitize(raw(12), { imageCount: 1, referenceMode: 'none' });
+  assert.equal(encas.outOfDomain.length, 0);
+});
+
+/* L'ancrage géométrique est ce qui empêche deux modèles de partir tous les deux
+   d'une moyenne mémorisée et de se tromper ENSEMBLE — cas où rien, ni la
+   comparaison ni la vérification croisée, ne peut plus le détecter.
+
+   La consigne vit dans SYSTEM_PROMPT, qui n'est pas exporté : on la vérifie donc
+   sur la source, comme le fait le banc, qui en extrait le littéral de tableau. */
+test('le prompt système impose un ancrage mesurable et dégrade la portion type en simple contrôle', () => {
+  const source = require('node:fs')
+    .readFileSync(require('node:path').join(__dirname, '..', 'js', 'estimator.js'), 'utf8');
+  const systeme = source.slice(source.indexOf('var SYSTEM_PROMPT'),
+                               source.indexOf('function buildUserPrompt'));
+
+  assert.match(systeme, /ANCRAGE OBLIGATOIRE/);
+  assert.match(systeme, /dimensions en cm/i);
+  assert.match(systeme, /d.compte d'unit.s/i,
+    'un aliment dénombrable doit rester ancrable sans dimensions');
+  assert.match(systeme, /CONTR.LE final de vraisemblance/i,
+    'la portion type doit être un contrôle, jamais le point de départ');
+  assert.match(systeme, /se trompent ENSEMBLE/,
+    'le prompt doit dire POURQUOI la moyenne mémorisée est piégeuse');
+  assert.match(systeme, /"portionDescription":[^\n]*ancrage/i,
+    'le schéma doit exiger que l\'ancrage soit reporté, sinon il reste invérifiable');
+});

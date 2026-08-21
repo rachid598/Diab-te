@@ -859,6 +859,15 @@ hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 .cmp-warn { text-align: left; font-size: 13.5px; line-height: 1.5; margin: 4px 0 12px;
   background: color-mix(in srgb, var(--accent) 15%, var(--surface)); color: var(--accent);
   border: 1.5px solid var(--accent); border-radius: var(--r); padding: 11px 13px; }
+/* Répartition de l'écart, dans le bandeau de divergence : c'est la ligne qu'on
+   relit en regardant l'assiette, elle doit rester lisible sans loupe. */
+.cmp-gap { margin: 9px 0 0; padding: 9px 0 0; list-style: none;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.cmp-gap li { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline;
+  font-size: 13px; font-weight: 600; padding: 3px 0; overflow-wrap: anywhere; }
+.cmp-gap em { font-style: normal; opacity: 0.85; }
+.cmp-gap-delta { margin-left: auto; font-weight: 800; font-variant-numeric: tabular-nums;
+  white-space: nowrap; }
 
 @media (max-width: 360px) {
   .cmp-table th, .cmp-table td { padding: 9px 6px; }
