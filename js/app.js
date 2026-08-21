@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '88'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '89'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -1522,6 +1522,30 @@
       return PROVIDER_NAME[x.provider] || x.provider;
     }
     function sousTitreDe(x) { return PROVIDER_NAME[x.provider] || x.provider; }
+
+    /* Les quatre premiers postes suffisent : au-delà, les écarts deviennent du
+       bruit devant celui qui domine, et une liste longue redevient illisible —
+       or tout l'intérêt est de nommer LE poste à vérifier dans l'assiette. */
+    function detailEcartsHtml(lignes, colonnes, nom) {
+      if (!lignes.length) return '';
+      return '<ul class="cmp-gap">' + lignes.slice(0, 4).map(function (r) {
+        var detail;
+        if (r.absentDe.length) {
+          var vus = [];
+          r.vals.forEach(function (v, col) {
+            if (v) vus.push(escapeHtml(nom(colonnes[col])) + ' ' + v + ' g');
+          });
+          detail = vus.join(' · ') + ' — <em>non compté par ' +
+            escapeHtml(r.absentDe.map(function (col) { return nom(colonnes[col]); }).join(', ')) +
+            '</em>';
+        } else {
+          detail = r.vals[r.loCol] + ' g (' + escapeHtml(nom(colonnes[r.loCol])) + ') → ' +
+                   r.vals[r.hiCol] + ' g (' + escapeHtml(nom(colonnes[r.hiCol])) + ')';
+        }
+        return '<li><strong>' + escapeHtml(r.nom) + '</strong> : ' + detail +
+          ' <span class="cmp-gap-delta">' + r.ecart + ' g</span></li>';
+      }).join('') + '</ul>';
+    }
     function ligne(intitule, rendu, classe) {
       var h = '<tr' + (classe === 'cmp-big' ? ' class="cmp-row-main"' : '') + '>' +
               '<th scope="row" class="cmp-metric">' + intitule + '</th>';
@@ -1570,9 +1594,18 @@
           diff + ' g d\'écart (' + Math.round(rel * 100) + ' %). Ne prends pas la moyenne : ' +
           (avis.length > 2
             ? 'regarde le détail par aliment pour comprendre lequel se trompe.'
-            : 'demande le troisième avis ci-dessous, ou compare le détail par aliment.') + '</div>';
+            : 'demande le troisième avis ci-dessous, ou compare le détail par aliment.') +
+          detailEcartsHtml(ecartsParAliment(ok), ok, nomDe) + '</div>';
       }
     }
+
+    /* Un seul bandeau pour le repas, pas un par colonne : c'est l'assiette qui
+       sort du domaine, pas l'avis. On prend la colonne la plus haute — si le
+       repas dépasse selon l'une d'elles, l'avertissement vaut pour toutes. */
+    var horsDomaine = ok.map(function (x) { return x.result; })
+      .filter(function (r) { return r.outOfDomain && r.outOfDomain.length; })
+      .sort(function (a, b) { return b.totalCarbsG - a.totalCarbsG; })[0];
+    if (horsDomaine) html += horsDomaineHtml(horsDomaine);
 
     if (avis.length > 2) {
       html += '<p class="cmp-scrollhint">↔ Fais glisser le tableau pour voir chaque modèle.</p>';
@@ -1874,7 +1907,24 @@
         '</ul>Vérifie les portions ci-dessous, ou relance l\'estimation. ' +
         'Ne saisis pas ce chiffre tel quel.</div>';
     }
+    out += horsDomaineHtml(r);
     return out;
+  }
+
+  /* Le repas sort-il de la population sur laquelle les modèles ont été mesurés ?
+     Les chiffres de fiabilité de l'app — MAE des Réglages, fourchette calculée
+     par une bande fixe — viennent tous du banc, qui ne contient que des assiettes
+     de 20 à 130 g de glucides et de 2 à 7 aliments. Sur un plateau de restaurant,
+     ils n'ont jamais été vérifiés. Les afficher sans le dire reviendrait à les
+     présenter comme acquis là où l'app est justement la plus fragile. */
+  function horsDomaineHtml(r) {
+    var raisons = r && r.outOfDomain;
+    if (!raisons || !raisons.length) return '';
+    return '<div class="warn-box"><strong>ℹ️ Repas hors du domaine mesuré.</strong><br>' +
+      'Ce repas dépasse ce que le banc d\'essai a vérifié — ' +
+      escapeHtml(raisons.join(', ')) + '. La fourchette et la fiabilité affichées ' +
+      'viennent de plats plus simples : considère-les comme optimistes ici, et ' +
+      'recoupe poste par poste avant de doser.</div>';
   }
 
   function seenHtml(r) {
@@ -2317,6 +2367,47 @@
       amountDiffs: amountDiffs,
       same: !(d.onlyMine || []).length && !(d.onlyTheirs || []).length && !amountDiffs.length
     };
+  }
+
+  /* Alignement des aliments sur TOUTES les colonnes, pour dire d'OÙ vient l'écart.
+     « 69 g de différence » ne se vérifie pas ; « les frites : 45 g contre 95 g »
+     se vérifie d'un coup d'œil sur la corbeille — et la corbeille, c'est la seule
+     chose que l'utilisateur ait réellement sous les yeux. Le bandeau de divergence
+     invitait déjà à « regarder le détail par aliment » sans jamais le fournir.
+
+     Le regroupement passe par Storage.foodKey, la même clé que la vérification
+     croisée : « Riz blanc cuit » et « Riz blanc long grain cuit » tombent ensemble,
+     « riz blanc » et « riz basmati » restent séparés — deux densités glucidiques
+     différentes ne doivent pas être fondues en silence.
+
+     Un aliment absent d'une colonne vaut 0 g pour elle : ne pas voir les frites
+     est une divergence à afficher, pas une donnée manquante à ignorer. */
+  function ecartsParAliment(ok) {
+    var groupes = {};
+    ok.forEach(function (x, col) {
+      ((x.result && x.result.items) || []).forEach(function (it) {
+        var g = Math.round(Number(it.carbsG) || 0);
+        if (g < 5) return;            // même plancher que foodDisagreements
+        var cle = Storage.foodKey(it.name) || String(it.name || '').toLowerCase();
+        if (!cle) return;
+        if (!groupes[cle]) groupes[cle] = { nom: it.name, par: {} };
+        // Un modèle peut détailler « frites » en deux lignes : on cumule.
+        groupes[cle].par[col] = (groupes[cle].par[col] || 0) + g;
+      });
+    });
+
+    return Object.keys(groupes).map(function (cle) {
+      var g = groupes[cle];
+      var vals = ok.map(function (_, col) { return g.par[col] || 0; });
+      var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+      var absentDe = [];
+      vals.forEach(function (v, col) { if (!g.par[col]) absentDe.push(col); });
+      return {
+        nom: g.nom, vals: vals, ecart: hi - lo,
+        loCol: vals.indexOf(lo), hiCol: vals.indexOf(hi), absentDe: absentDe
+      };
+    }).filter(function (r) { return r.ecart >= 5; })
+      .sort(function (a, b) { return b.ecart - a.ecart; });
   }
 
   function renderVerificationState() {

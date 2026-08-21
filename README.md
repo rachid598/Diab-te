@@ -126,9 +126,22 @@ parallèle. L'app compare les totaux **et le contenu** : deux modèles peuvent t
 70 g pour des raisons opposées, et annoncer « confirmé » là-dessus serait une fausse
 assurance. Elle dit alors précisément *« l'autre modèle voit du pain que le premier ignore »*.
 
+**D'où vient l'écart.** Quand plusieurs avis divergent, l'app ne se contente plus d'annoncer
+la différence : elle aligne les aliments d'une colonne à l'autre et nomme les postes qui la
+portent — *« frites : 45 g (Gemini) → 95 g (Grok), 50 g d'écart »*. Un total qui diffère de
+69 g ne se vérifie pas ; une corbeille de frites, si. Un aliment compté par un seul modèle
+est signalé comme tel, parce que ne pas le voir est une divergence, pas une donnée manquante.
+
+**Repas hors du domaine mesuré.** Le banc d'essai ne contient que des assiettes de 20 à 130 g
+de glucides et de 2 à 7 aliments. Au-delà — un plateau de restaurant, par exemple — la
+fourchette et la fiabilité affichées viennent de plats plus simples et n'ont jamais été
+vérifiées sur ce type de repas. L'app le dit au lieu de les présenter comme acquis.
+
 **Inventaire de ce qui a été vu.** Une phrase décrivant l'assiette, chaque aliment avec sa
 portion retenue et l'hypothèse faite, l'échelle utilisée. C'est ce qui permet de repérer une
-confusion avant de doser.
+confusion avant de doser. Toute portion au-dessus de 10 g de glucides doit porter son
+**ancrage** — dimensions en cm ou décompte d'unités —, et non une portion type mémorisée :
+deux modèles qui partent de la même moyenne se trompent ensemble sans que rien ne le signale.
 
 **Reconnaissance d'un repas déjà mangé.** Si le plat ressemble vraiment à un repas passé
 dont la valeur réelle a été relevée, l'app affiche l'écart constaté ce jour-là. Une mesure

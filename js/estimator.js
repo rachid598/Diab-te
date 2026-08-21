@@ -31,9 +31,21 @@
     "   principale inconnue géométrique de cet aliment (une vue de côté la lèverait).",
     "",
     "C. VOLUME → MASSE via la densité et la consistance (riz aéré vs compact, mie de pain",
-    "   aérée vs dense, aliment frit gorgé d'huile, sauce). Recoupe avec des portions types",
-    "   plausibles (ex. une baguette entière ≈ 250 g de pain ≈ 130–150 g de glucides ; une",
-    "   ½ baguette ≈ 65–75 g de glucides ; un bol de riz cuit ≈ 40 g).",
+    "   aérée vs dense, aliment frit gorgé d'huile, sauce).",
+    "   ANCRAGE OBLIGATOIRE — pour tout aliment apportant plus de 10 g de glucides, pars",
+    "   de ce que tu peux LIRE sur l'image : dimensions en cm (longueur × largeur ×",
+    "   épaisseur, ou diamètre × hauteur), ou un décompte d'unités avec leur calibre",
+    "   (« 3 pommes de terre d'environ 6 cm »). Déduis-en le volume, puis la masse, et",
+    "   reporte cet ancrage dans 'portionDescription'.",
+    "   Une portion type (« portion restaurant standard », « part moyenne », « bien",
+    "   remplie ») est un CONTRÔLE final de vraisemblance — jamais le point de départ,",
+    "   jamais la seule justification d'une masse. Deux modèles qui partent tous les deux",
+    "   d'une moyenne mémorisée se trompent ENSEMBLE sans que rien ne le signale, et",
+    "   l'utilisateur n'a alors aucun moyen de vérifier la portion sur sa propre photo.",
+    "   Une fois la masse obtenue, recoupe-la avec des portions types plausibles (ex. une",
+    "   baguette entière ≈ 250 g de pain ≈ 130–150 g de glucides ; une ½ baguette ≈ 65–75 g",
+    "   de glucides ; un bol de riz cuit ≈ 40 g) : si l'écart est grand, c'est ta lecture",
+    "   des dimensions qu'il faut revoir, pas le chiffre qu'il faut remplacer par la moyenne.",
     "",
     "D. glucides_aliment = masse_g × densité_glucidique(g/100g de l'aliment TEL QUE consommé)",
     "   /100. N'oublie pas les glucides CACHÉS : sauces sucrées, panure, chapelure,",
@@ -114,7 +126,7 @@
     '  "items": [',
     '    {',
     '      "name": "nom précis de ce que tu vois, en français",',
-    '      "portionDescription": "portion + dimensions natives si fournies, sinon dimensions estimées",',
+    '      "portionDescription": "l\'ancrage lu sur l\'image — dimensions en cm ou décompte d\'unités avec calibre — puis la portion. Dimensions natives si fournies, sinon estimées.",',
     '      "estimatedMassG": nombre,',
     '      "carbDensityPer100g": nombre,',
     '      "carbsG": nombre,',
@@ -1023,6 +1035,7 @@
     result.glycemicSpeed = glycemicSpeed(result._modelGlycemicSpeed || result.glycemicSpeed, total,
                                          result.totalFatG, result.totalProteinG, result.gi);
     result.alerts = plausibility(items, total);
+    result.outOfDomain = outOfDomain(items, total);
     result.blocking = uniqueMessages(result.sourceBlocking.concat(currentBlocking,
       blocking(items, total, result.rangeLowG, result.rangeHighG)));
     return result;
@@ -1066,6 +1079,33 @@
      tel quel, prêt à être saisi dans une pompe.
      Ces contrôles sont arithmétiques et locaux — aucun appel réseau, aucun
      coût, et ils ne modifient jamais le résultat : ils le signalent. */
+  /* Le banc (BENCHMARK.md) ne mesure QUE des assiettes filtrées : 20–130 g de
+     glucides, 2 à 7 aliments, photographiées seules à la verticale. Le MAE des
+     Réglages et la bande [0,62 ; 1,66] des fourchettes en sont tous deux tirés.
+     Un plateau de restaurant à 190 g de glucides répartis sur dix plats sort de
+     cette population : les chiffres de fiabilité affichés ailleurs n'y ont
+     jamais été vérifiés, et le taire reviendrait à les faire passer pour acquis.
+
+     Seules les bornes HAUTES sont signalées. Un en-cas sous 20 g sort lui aussi
+     du filtre, mais l'erreur absolue y reste petite par construction : l'annoncer
+     à chaque yaourt noierait l'avertissement qui compte. */
+  var BENCH_MAX_CARBS_G = 130;
+  var BENCH_MAX_ITEMS = 7;
+
+  function outOfDomain(items, total) {
+    var raisons = [];
+    if (total > BENCH_MAX_CARBS_G) {
+      raisons.push(Math.round(total) + ' g de glucides (banc mesuré jusqu\'à ' +
+        BENCH_MAX_CARBS_G + ' g)');
+    }
+    var comptes = items.filter(function (it) { return (it.carbsG || 0) > 0; }).length;
+    if (comptes > BENCH_MAX_ITEMS) {
+      raisons.push(comptes + ' aliments glucidiques (banc mesuré jusqu\'à ' +
+        BENCH_MAX_ITEMS + ')');
+    }
+    return raisons;
+  }
+
   function plausibility(items, total) {
     var out = [];
 
