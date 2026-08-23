@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '89'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '90'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -3032,7 +3032,26 @@
         var i = parseInt(inp.dataset.i, 10);
         var v = Math.max(0, parseFloat(inp.value) || 0);
         if (inp.dataset.carb) {
-          lastResult.items[i].carbsG = Math.round(v);
+          /* Corriger les GLUCIDES sans toucher à la masse, c'est énoncer une
+             densité : « ce pain-là fait 52 g pour 100 g, pas 45 ». C'est la
+             seule information que la photo ne porte pas — un croissant aéré et
+             un bagel dense ont le même volume — et c'est celle que l'app jetait
+             à chaque repas. On l'enregistre pour cet aliment.
+
+             Les corrections de MASSE ne disent rien de la densité : elles
+             gardent celle du modèle et ne sont donc pas apprises ici. */
+          var it = lastResult.items[i];
+          var masse = Number(it.estimatedMassG);
+          var avant = Number(it.carbDensityPer100g);
+          it.carbsG = Math.round(v);
+          if (masse > 0 && v > 0) {
+            var densite = v / masse * 100;
+            // Sous 10 % d'écart, c'est un arrondi, pas une correction.
+            if (!(avant > 0) || Math.abs(densite - avant) / avant > 0.10) {
+              it.carbDensityPer100g = Math.round(densite * 10) / 10;
+              Storage.noteFoodDensity(it.name, densite);
+            }
+          }
         } else {
           var d = parseFloat(inp.dataset.d);
           lastResult.items[i].estimatedMassG = v;
