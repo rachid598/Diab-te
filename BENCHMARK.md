@@ -4,9 +4,9 @@ Quel modèle d'IA compte le mieux les glucides d'une assiette ? La question n'a 
 de réponse d'opinion : ce chiffre est saisi dans une pompe à insuline. Ce document
 décrit la mesure, ses résultats et ce qu'elle ne prouve pas.
 
-Trois manches : 30 juillet 2026 (4,45 $) et 6 août 2026 (3,67 $), sur
-OpenRouter. Les résultats des deux dates sont conservés côte à côte — une mesure
-qu'on réécrit après coup ne prouve plus rien.
+Quatre manches : 30 juillet 2026 (4,45 $), 6 août 2026 (3,67 $) et 23 août 2026
+(2,27 $), sur OpenRouter. Les résultats de chaque date sont conservés côte à côte —
+une mesure qu'on réécrit après coup ne prouve plus rien.
 
 ## Vérité terrain
 
@@ -63,11 +63,11 @@ et les fichiers du banc, eux, n'ont pas suivi :
   l'assiette/les couverts »*, ce que la consigne A du prompt système **actuel**
   interdit explicitement. Rejouer tel quel enverrait donc au modèle deux consignes
   contradictoires ;
-- la v89 a ajouté l'ancrage géométrique obligatoire, non mesuré à ce jour.
+- la v89 a ajouté l'ancrage géométrique obligatoire, mesuré depuis en manche 4.
 
-Les MAE affichés dans les Réglages restent donc **des ordres de grandeur**, pas la
-mesure du produit tel qu'il tourne aujourd'hui. Le classement relatif des modèles
-est probablement encore valable ; les valeurs absolues, non.
+Les chiffres des manches 1 à 3 restent donc **des ordres de grandeur**. La manche 4,
+elle, a été jouée avec les prompts extraits de l'application : elle confirme les
+valeurs publiées à 0,5 g près, la dérive n'avait donc pas faussé l'ordre de grandeur.
 
 Pour une nouvelle manche, extraire les prompts au lieu de les recopier :
 
@@ -287,20 +287,44 @@ Comparaison **appariée** : mêmes 44 plats, même modèle, seul le prompt syst�
 change. Chaque plat est son propre témoin — comparer deux MAE globales sur 44
 plats ne dirait rien, l'écart-type entre plats écrasant l'effet cherché.
 
-| | prompt v88 | prompt v89 (ancrage) |
-|---|---|---|
-| MAE | 10,6 g | **10,9 g** |
-| médiane | 8,1 g | 8,9 g |
-| biais | −13,2 % | −11,3 % |
-| erreurs > 20 g | 14 % | 14 % |
+| | Gemini 3.1 Flash-Lite | | Grok 4.5 | |
+|---|---|---|---|---|
+| | v88 | **v89** | v88 | **v89** |
+| MAE | 10,6 g | **10,9 g** | 9,6 g | **9,9 g** |
+| médiane | 8,1 g | 8,9 g | 8,3 g | 8,1 g |
+| biais | −13,2 % | **−11,3 %** | +7,2 % | **+4,4 %** |
+| erreurs > 20 g | 14 % | 14 % | 7 % | 5 % |
+| test des signes | 18 / 19 / 7 → **p = 1,00** | | 18 / 20 / 6 → **p = 0,87** | |
 
-**18 plats améliorés, 19 dégradés, 7 inchangés — test des signes : p = 1,00.**
+Sur l'exactitude, résultat nul et non une régression : **+0,3 g de MAE sur les deux
+modèles**, sous le plancher de détection du banc (voir ci-dessous). La consigne
+d'ancrage obligatoire n'améliore ni ne dégrade l'erreur moyenne.
 
-C'est un résultat nul, pas une régression : la consigne d'ancrage obligatoire
-(dimensions en cm ou décompte d'unités, portion type reléguée au rang de contrôle)
-n'améliore ni ne dégrade l'exactitude sur ce jeu. Elle est conservée pour une autre
-raison, non mesurée ici : « 14 × 9 × 2,5 cm » se vérifie sur la photo, « portion
-restaurant standard » non — l'utilisateur peut contredire la première, pas la seconde.
+Elle est conservée pour une raison non mesurable ici : « 14 × 9 × 2,5 cm » se vérifie
+sur la photo, « portion restaurant standard » non. L'utilisateur peut contredire la
+première, pas la seconde.
+
+### Un signal secondaire, à ne pas surinterpréter
+
+Le **biais se rapproche de zéro sur les deux modèles** — et c'est le seul résultat de
+la manche qui dépasse le bruit :
+
+| | biais avant | biais après | déplacement |
+|---|---|---|---|
+| Gemini (sous-estime) | −13,2 % | −11,3 % | 2,0 points |
+| Grok (surestime) | +7,2 % | +4,4 % | 2,7 points |
+| *bruit entre deux exécutions identiques* | | | *1,1 point* |
+
+Les deux modèles partent de biais de **signes opposés** et convergent tous les deux
+vers zéro. Ce n'est pas ce qu'on attend d'une fluctuation aléatoire, et les deux
+déplacements dépassent le seul repère de bruit dont on dispose.
+
+Ce que ça ne prouve pas, et il faut le dire : deux modèles ne font pas un échantillon,
+le repère de bruit vient d'UNE seule paire d'exécutions et ne concerne que Gemini, et
+le test des signes sur l'erreur absolue reste franchement nul. Autrement dit l'ancrage
+recentre peut-être sans resserrer — même dispersion, moyenne mieux placée. Il faudrait
+plusieurs exécutions par bras pour trancher, ce que le budget de cette manche ne
+couvrait pas. **Aucun réglage ne doit changer sur cette base.**
 
 **Ce que cette manche ne teste pas.** Nutrition5k ne contient que des assiettes
 uniques, filmées de dessus, entre 20 et 130 g de glucides — exactement le domaine
@@ -309,7 +333,9 @@ standard. L'hypothèse initiale visait le cas inverse : un plateau de restaurant
 une pile de frites, 190 g de glucides. Aucune vérité terrain publique n'existe pour
 ce cas, et cette manche ne permet donc pas de trancher là-dessus.
 
-Coût : 0,18 $ (88 appels, Gemini 3.1 Flash-Lite, 3,5 s et 0,0021 $ par analyse).
+Coût : 2,27 $ au total (264 appels sur deux modèles). Gemini : 3,5 s et 0,0021 $
+par analyse ; Grok 4.5 : 56 s et 0,0224 $, soit dix fois plus lent et dix fois plus cher
+pour 0,4 g de MAE en moins.
 Rejouer : `BENCH_A=g_avant.json BENCH_B=g_apres.json python3 bench/score-ab.py`.
 
 ### Le plancher de détection : 0,5 g
