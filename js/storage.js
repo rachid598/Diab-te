@@ -47,7 +47,7 @@
     ],
     gemini: [
       { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite',
-        note: 'RECOMMANDÉ · MAE 10,0 g · le plus rapide (4 s) · ~0,002 $', stars: 3 },
+        note: 'RECOMMANDÉ · MAE 10,9 g · le plus rapide (3,5 s) · ~0,002 $', stars: 3 },
       { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', note: 'non mesuré · payant uniquement', stars: 2 },
       { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash',
         note: 'MAE 14,6 g · sous-estime beaucoup (−30 %)', stars: 1 },
@@ -65,7 +65,7 @@
        parlante ici — les tarifs au million de jetons ne disent rien. */
     openrouter: [
       { id: 'google/gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite',
-        note: 'RECOMMANDÉ · MAE 10,0 g · 4 s · ~500 repas pour 1 $', stars: 3 },
+        note: 'RECOMMANDÉ · MAE 10,9 g · 3,5 s · ~475 repas pour 1 $', stars: 3 },
       { id: 'x-ai/grok-4.5', label: 'Grok 4.5',
         note: 'MAE 9,9 g · le plus régulier · ~47 repas pour 1 $', stars: 3 },
       { id: 'qwen/qwen3-vl-235b-a22b-thinking', label: 'Qwen3-VL 235B Thinking',
