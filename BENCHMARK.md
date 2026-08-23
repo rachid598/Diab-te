@@ -312,6 +312,31 @@ ce cas, et cette manche ne permet donc pas de trancher là-dessus.
 Coût : 0,18 $ (88 appels, Gemini 3.1 Flash-Lite, 3,5 s et 0,0021 $ par analyse).
 Rejouer : `BENCH_A=g_avant.json BENCH_B=g_apres.json python3 bench/score-ab.py`.
 
+### Le plancher de détection : 0,5 g
+
+Cette manche a produit, par accident, la mesure la plus utile du banc. Gemini 3.1
+Flash-Lite a tourné **deux fois dans une configuration strictement identique** —
+même prompt v88, mêmes 44 plats, même modèle — dans deux exécutions séparées :
+
+| | MAE |
+|---|---|
+| exécution 1 | 10,0 g |
+| exécution 2 | 10,6 g |
+
+**0,5 g d'écart entre deux manches rigoureusement identiques.** Sur un même plat,
+les deux réponses diffèrent de 2,8 g en médiane, et jusqu'à 20 g au pire ; 2 plats
+sur 44 varient de plus de 10 g d'une exécution à l'autre.
+
+Conséquence directe : l'effet mesuré de l'ancrage (+0,3 g) est **plus petit que le
+bruit entre deux exécutions identiques**. Il n'est pas seulement non significatif,
+il est sous le plancher de détection du banc.
+
+Conséquence pour la suite : à 44 plats et une exécution par bras, ce banc ne peut
+pas trancher un effet inférieur à ~1 g de MAE. Toute modification de prompt dont on
+espère un gain de cet ordre est invérifiable ici — il faudrait beaucoup plus de
+plats, ou plusieurs exécutions moyennées par bras. À garder en tête avant de
+dépenser une manche pour départager deux formulations.
+
 ### Repères externes
 
 Les chiffres ci-dessus n'ont de sens que comparés à ce que font les humains et les
