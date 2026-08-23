@@ -1,0 +1,1557 @@
+{
+ "google/gemini-3.1-flash-lite": [
+  {
+   "dish": "dish_1559844951",
+   "reel": 22.792,
+   "estime": 26.1,
+   "cost": 0.001733,
+   "sec": 3.3,
+   "seen": "Une assiette carrée blanche contenant une petite poignée d'amandes entières et environ une dizaine de dés de pommes de terre rissolées.",
+   "conf": "medium",
+   "low": 22,
+   "high": 30,
+   "items": [
+    {
+     "n": "amandes",
+     "g": 2.1,
+     "m": 30
+    },
+    {
+     "n": "pommes de terre rissolées",
+     "g": 24,
+     "m": 120
+    }
+   ],
+   "tok": [
+    3458,
+    579
+   ]
+  },
+  {
+   "dish": "dish_1559845399",
+   "reel": 24.630001,
+   "estime": 40.1,
+   "cost": 0.0019505,
+   "sec": 3.3,
+   "seen": "Une assiette carrée blanche contenant une clémentine entière, une douzaine de cubes de pommes de terre rissolées et trois tranches de fraises.",
+   "conf": "medium",
+   "low": 35,
+   "high": 46,
+   "items": [
+    {
+     "n": "clémentine",
+     "g": 9.6,
+     "m": 80
+    },
+    {
+     "n": "pommes de terre rissolées",
+     "g": 27,
+     "m": 150
+    },
+    {
+     "n": "fraises",
+     "g": 3.5,
+     "m": 45
+    }
+   ],
+   "tok": [
+    3458,
+    724
+   ]
+  },
+  {
+   "dish": "dish_1558724031",
+   "reel": 25.789999,
+   "estime": 14.1,
+   "cost": 0.0020095,
+   "sec": 3.3,
+   "seen": "Une assiette rouge contenant des tomates cerises, des morceaux de chou-fleur cru, des tranches de melon et une poignée d'amandes.",
+   "conf": "medium",
+   "low": 12.0,
+   "high": 17.0,
+   "items": [
+    {
+     "n": "tomates cerises",
+     "g": 4.7,
+     "m": 120
+    },
+    {
+     "n": "chou-fleur cru",
+     "g": 1.2,
+     "m": 40
+    },
+    {
+     "n": "melon",
+     "g": 6.4,
+     "m": 80
+    },
+    {
+     "n": "amandes",
+     "g": 1.8,
+     "m": 25
+    }
+   ],
+   "tok": [
+    3460,
+    763
+   ]
+  },
+  {
+   "dish": "dish_1563216412",
+   "reel": 36.610001,
+   "estime": 30.4,
+   "cost": 0.001657,
+   "sec": 2.4,
+   "seen": "Une assiette blanche carrée contenant une portion de riz blanc cuit et trois morceaux de brocolis cuits à la vapeur.",
+   "conf": "medium",
+   "low": 25,
+   "high": 36,
+   "items": [
+    {
+     "n": "riz blanc cuit",
+     "g": 28,
+     "m": 100
+    },
+    {
+     "n": "brocolis cuits",
+     "g": 2.4,
+     "m": 80
+    }
+   ],
+   "tok": [
+    3460,
+    528
+   ]
+  },
+  {
+   "dish": "dish_1564686702",
+   "reel": 36.75,
+   "estime": 28.6,
+   "cost": 0.001663,
+   "sec": 2.2,
+   "seen": "Dans une assiette blanche, deux parts rectangulaires de pizza fine garnies de fromage, oignons rouges et champignons, accompagnées de quelques olives noires.",
+   "conf": "medium",
+   "low": 24,
+   "high": 33,
+   "items": [
+    {
+     "n": "pizza à pâte fine",
+     "g": 28,
+     "m": 80
+    },
+    {
+     "n": "olives noires",
+     "g": 0.6,
+     "m": 20
+    }
+   ],
+   "tok": [
+    3460,
+    532
+   ]
+  },
+  {
+   "dish": "dish_1564086658",
+   "reel": 38.712002,
+   "estime": 31.0,
+   "cost": 0.0018670000000000002,
+   "sec": 2.8,
+   "seen": "Une assiette carrée contenant une salade verte avec une sauce crémeuse, une part de pizza rectangulaire et deux rondelles de maïs en épi.",
+   "conf": "medium",
+   "low": 26,
+   "high": 36,
+   "items": [
+    {
+     "n": "Pizza (pâte fine avec sauce tomate et fromage)",
+     "g": 18,
+     "m": 60
+    },
+    {
+     "n": "Maïs en épi (rondelles)",
+     "g": 10,
+     "m": 50
+    },
+    {
+     "n": "Salade verte avec sauce crémeuse",
+     "g": 3,
+     "m": 100
+    }
+   ],
+   "tok": [
+    3460,
+    668
+   ]
+  },
+  {
+   "dish": "dish_1558633221",
+   "reel": 42.901001,
+   "estime": 45.85,
+   "cost": 0.002272,
+   "sec": 2.9,
+   "seen": "Une assiette rouge contenant une pomme entière, une tranche de maïs, des fleurettes de chou-fleur cru, des tomates cerises et des rondelles de carottes cuites.",
+   "conf": "medium",
+   "low": 40,
+   "high": 52,
+   "items": [
+    {
+     "n": "Pomme",
+     "g": 25.2,
+     "m": 180
+    },
+    {
+     "n": "Maïs en épi",
+     "g": 8,
+     "m": 40
+    },
+    {
+     "n": "Chou-fleur cru",
+     "g": 1.8,
+     "m": 60
+    },
+    {
+     "n": "Tomates cerises",
+     "g": 5.25,
+     "m": 150
+    },
+    {
+     "n": "Carottes cuites",
+     "g": 5.6,
+     "m": 80
+    }
+   ],
+   "tok": [
+    3460,
+    938
+   ]
+  },
+  {
+   "dish": "dish_1558636582",
+   "reel": 45.948002,
+   "estime": 29.7,
+   "cost": 0.0020315,
+   "sec": 3.2,
+   "seen": "Une assiette plate contenant une pomme entière, une poignée d'amandes, plusieurs tomates cerises et des bouquets de chou-fleur cru.",
+   "conf": "high",
+   "low": 27,
+   "high": 33,
+   "items": [
+    {
+     "n": "Pomme",
+     "g": 21,
+     "m": 150
+    },
+    {
+     "n": "Amandes",
+     "g": 2.1,
+     "m": 30
+    },
+    {
+     "n": "Tomates cerises",
+     "g": 3.6,
+     "m": 120
+    },
+    {
+     "n": "Chou-fleur cru",
+     "g": 3,
+     "m": 100
+    }
+   ],
+   "tok": [
+    3458,
+    778
+   ]
+  },
+  {
+   "dish": "dish_1566317775",
+   "reel": 47.183998,
+   "estime": 10.0,
+   "cost": 0.0014545,
+   "sec": 1.8,
+   "seen": "Un bol blanc rempli de framboises fraîches posé sur une surface plane.",
+   "conf": "medium",
+   "low": 8.0,
+   "high": 12.0,
+   "items": [
+    {
+     "n": "framboises fraîches",
+     "g": 10.0,
+     "m": 150
+    }
+   ],
+   "tok": [
+    3460,
+    393
+   ]
+  },
+  {
+   "dish": "dish_1561492519",
+   "reel": 52.377998,
+   "estime": 52.4,
+   "cost": 0.001675,
+   "sec": 2.1,
+   "seen": "Une tranche de pain complet de forme carrée et une banane entière posées sur une assiette blanche carrée.",
+   "conf": "medium",
+   "low": 48,
+   "high": 58,
+   "items": [
+    {
+     "n": "Pain complet",
+     "g": 24.8,
+     "m": 55
+    },
+    {
+     "n": "Banane",
+     "g": 27.6,
+     "m": 120
+    }
+   ],
+   "tok": [
+    3460,
+    540
+   ]
+  },
+  {
+   "dish": "dish_1562170356",
+   "reel": 55.529999,
+   "estime": 42.7,
+   "cost": 0.0021845,
+   "sec": 4.4,
+   "seen": "Une assiette carrée contenant des quartiers de pommes de terre sautées, une tranche de bacon grillé, des morceaux d'ananas, et un mélange de fraises, framboises et myrtilles.",
+   "conf": "medium",
+   "low": 38,
+   "high": 48,
+   "items": [
+    {
+     "n": "pommes de terre sautées",
+     "g": 24,
+     "m": 120
+    },
+    {
+     "n": "bacon grillé",
+     "g": 0.1,
+     "m": 20
+    },
+    {
+     "n": "ananas frais",
+     "g": 9.6,
+     "m": 80
+    },
+    {
+     "n": "baies mixtes (fraises, framboises, myrtilles)",
+     "g": 9,
+     "m": 100
+    }
+   ],
+   "tok": [
+    3458,
+    880
+   ]
+  },
+  {
+   "dish": "dish_1558637932",
+   "reel": 60.889999,
+   "estime": 47.6,
+   "cost": 0.0021575,
+   "sec": 4.6,
+   "seen": "Une assiette contenant une pomme entière, une tranche de maïs, des morceaux de chou-fleur cru et une poignée de raisins rouges.",
+   "conf": "medium",
+   "low": 42,
+   "high": 54,
+   "items": [
+    {
+     "n": "Pomme",
+     "g": 25.2,
+     "m": 180
+    },
+    {
+     "n": "Maïs en épi",
+     "g": 8,
+     "m": 40
+    },
+    {
+     "n": "Chou-fleur cru",
+     "g": 2.4,
+     "m": 80
+    },
+    {
+     "n": "Raisins rouges",
+     "g": 12,
+     "m": 75
+    }
+   ],
+   "tok": [
+    3458,
+    862
+   ]
+  },
+  {
+   "dish": "dish_1561146781",
+   "reel": 63.77,
+   "estime": 75.4,
+   "cost": 0.001697,
+   "sec": 3.4,
+   "seen": "Une assiette blanche carrée contenant un bagel nature et une pomme rouge.",
+   "conf": "medium",
+   "low": 68,
+   "high": 83,
+   "items": [
+    {
+     "n": "bagel nature",
+     "g": 52,
+     "m": 100
+    },
+    {
+     "n": "pomme",
+     "g": 23.4,
+     "m": 180
+    }
+   ],
+   "tok": [
+    3458,
+    555
+   ]
+  },
+  {
+   "dish": "dish_1558723894",
+   "reel": 68.302002,
+   "estime": 44.4,
+   "cost": 0.001951,
+   "sec": 2.4,
+   "seen": "Une assiette carrée contenant deux rondelles de maïs, quelques fleurettes de chou-fleur cru, une pomme entière et une importante portion d'amandes entières.",
+   "conf": "medium",
+   "low": 40,
+   "high": 50,
+   "items": [
+    {
+     "n": "pomme",
+     "g": 25.2,
+     "m": 180
+    },
+    {
+     "n": "maïs en rondelles",
+     "g": 14.4,
+     "m": 80
+    },
+    {
+     "n": "chou-fleur cru",
+     "g": 1.2,
+     "m": 40
+    },
+    {
+     "n": "amandes",
+     "g": 3.6,
+     "m": 60
+    }
+   ],
+   "tok": [
+    3460,
+    724
+   ]
+  },
+  {
+   "dish": "dish_1563563492",
+   "reel": 21.364147,
+   "estime": 9.0,
+   "cost": 0.0017239999999999998,
+   "sec": 3.2,
+   "seen": "Une assiette plate contenant un pavé de poisson recouvert d'une sauce tomate et de fromage, accompagné d'une portion de bok choy cuit.",
+   "conf": "medium",
+   "low": 7,
+   "high": 12,
+   "items": [
+    {
+     "n": "pavé de poisson gratiné (sauce tomate et fromage)",
+     "g": 6,
+     "m": 120
+    },
+    {
+     "n": "bok choy cuit",
+     "g": 3,
+     "m": 150
+    }
+   ],
+   "tok": [
+    3458,
+    573
+   ]
+  },
+  {
+   "dish": "dish_1563555160",
+   "reel": 21.797338,
+   "estime": 27.7,
+   "cost": 0.0020785,
+   "sec": 2.7,
+   "seen": "Une assiette carrée blanche contenant une portion généreuse d'œufs brouillés, quelques morceaux de courge rôtie, des choux de Bruxelles et des dés de pommes de terre rôtis.",
+   "conf": "medium",
+   "low": 24,
+   "high": 32,
+   "items": [
+    {
+     "n": "œufs brouillés",
+     "g": 1.7,
+     "m": 150
+    },
+    {
+     "n": "courge rôtie",
+     "g": 8.0,
+     "m": 100
+    },
+    {
+     "n": "choux de Bruxelles",
+     "g": 4.0,
+     "m": 80
+    },
+    {
+     "n": "pommes de terre rôties",
+     "g": 14.0,
+     "m": 70
+    }
+   ],
+   "tok": [
+    3460,
+    809
+   ]
+  },
+  {
+   "dish": "dish_1564588889",
+   "reel": 22.387161,
+   "estime": 16.8,
+   "cost": 0.0018685,
+   "sec": 2.5,
+   "seen": "Une assiette carrée contenant une portion de fromage frais en morceaux (type mozzarella), une préparation type pudding de chia et une poignée de myrtilles fraîches.",
+   "conf": "medium",
+   "low": 14,
+   "high": 22,
+   "items": [
+    {
+     "n": "Mozzarella",
+     "g": 1.6,
+     "m": 80
+    },
+    {
+     "n": "Pudding de chia au lait",
+     "g": 8,
+     "m": 100
+    },
+    {
+     "n": "Myrtilles",
+     "g": 7.2,
+     "m": 60
+    }
+   ],
+   "tok": [
+    3460,
+    669
+   ]
+  },
+  {
+   "dish": "dish_1559060106",
+   "reel": 23.68,
+   "estime": 31.1,
+   "cost": 0.0019129999999999998,
+   "sec": 4.4,
+   "seen": "Une assiette carrée contenant une tranche de bacon grillé, environ 10 dés de pommes de terre rôties et 5 fraises coupées ou entières.",
+   "conf": "medium",
+   "low": 28,
+   "high": 35,
+   "items": [
+    {
+     "n": "bacon grillé",
+     "g": 0.1,
+     "m": 20
+    },
+    {
+     "n": "pommes de terre rôties",
+     "g": 24,
+     "m": 120
+    },
+    {
+     "n": "fraises fraîches",
+     "g": 7,
+     "m": 100
+    }
+   ],
+   "tok": [
+    3458,
+    699
+   ]
+  },
+  {
+   "dish": "dish_1560961385",
+   "reel": 23.794003,
+   "estime": 32.5,
+   "cost": 0.0021335,
+   "sec": 4.1,
+   "seen": "Une assiette carrée contenant des œufs brouillés, des morceaux de pommes de terre rissolées, des brocolis cuits et quelques tranches de fraises.",
+   "conf": "medium",
+   "low": 28,
+   "high": 38,
+   "items": [
+    {
+     "n": "œufs brouillés",
+     "g": 1.5,
+     "m": 100
+    },
+    {
+     "n": "pommes de terre rissolées",
+     "g": 24,
+     "m": 120
+    },
+    {
+     "n": "brocolis cuits",
+     "g": 2.4,
+     "m": 80
+    },
+    {
+     "n": "fraises",
+     "g": 4.6,
+     "m": 60
+    }
+   ],
+   "tok": [
+    3458,
+    846
+   ]
+  },
+  {
+   "dish": "dish_1558640311",
+   "reel": 26.114,
+   "estime": 31.1,
+   "cost": 0.0017230000000000001,
+   "sec": 2.5,
+   "seen": "Une assiette plate contenant un mélange de raisins, de tomates cerises et de dés de melon.",
+   "conf": "medium",
+   "low": 28,
+   "high": 35,
+   "items": [
+    {
+     "n": "raisins",
+     "g": 17,
+     "m": 100
+    },
+    {
+     "n": "tomates cerises",
+     "g": 4.5,
+     "m": 150
+    },
+    {
+     "n": "melon cantaloup",
+     "g": 9.6,
+     "m": 120
+    }
+   ],
+   "tok": [
+    3460,
+    572
+   ]
+  },
+  {
+   "dish": "dish_1559843222",
+   "reel": 27.460001,
+   "estime": 29.6,
+   "cost": 0.0019925,
+   "sec": 3.6,
+   "seen": "Une assiette carrée contenant une clémentine, des bouquets de brocolis, des tranches de fraises et une petite grappe de raisins rouges.",
+   "conf": "medium",
+   "low": 26,
+   "high": 34,
+   "items": [
+    {
+     "n": "clémentine",
+     "g": 9.6,
+     "m": 80
+    },
+    {
+     "n": "brocolis cuits",
+     "g": 1.8,
+     "m": 60
+    },
+    {
+     "n": "fraises fraîches",
+     "g": 5.4,
+     "m": 70
+    },
+    {
+     "n": "raisins rouges",
+     "g": 12.8,
+     "m": 80
+    }
+   ],
+   "tok": [
+    3458,
+    752
+   ]
+  },
+  {
+   "dish": "dish_1559841163",
+   "reel": 27.539,
+   "estime": 22.0,
+   "cost": 0.0022660000000000002,
+   "sec": 3.1,
+   "seen": "Une assiette carrée contenant des œufs brouillés, quelques morceaux de pommes de terre sautées, des brocolis cuits, des mûres et trois petites saucisses.",
+   "conf": "medium",
+   "low": 18,
+   "high": 26,
+   "items": [
+    {
+     "n": "œufs brouillés",
+     "g": 1.8,
+     "m": 120
+    },
+    {
+     "n": "pommes de terre sautées",
+     "g": 10,
+     "m": 50
+    },
+    {
+     "n": "brocolis cuits",
+     "g": 2.4,
+     "m": 80
+    },
+    {
+     "n": "mûres",
+     "g": 6,
+     "m": 60
+    },
+    {
+     "n": "saucisses",
+     "g": 1.8,
+     "m": 90
+    }
+   ],
+   "tok": [
+    3460,
+    934
+   ]
+  },
+  {
+   "dish": "dish_1558722780",
+   "reel": 31.532999,
+   "estime": 28.2,
+   "cost": 0.002212,
+   "sec": 3.0,
+   "seen": "Une assiette rouge contenant des morceaux de melon, des tomates cerises, quelques fleurettes de chou-fleur, des rondelles de carottes cuites et une tranche de maïs.",
+   "conf": "medium",
+   "low": 24,
+   "high": 32,
+   "items": [
+    {
+     "n": "melon",
+     "g": 6.4,
+     "m": 80
+    },
+    {
+     "n": "tomates cerises",
+     "g": 5.3,
+     "m": 135
+    },
+    {
+     "n": "chou-fleur",
+     "g": 1.5,
+     "m": 50
+    },
+    {
+     "n": "carottes cuites",
+     "g": 7,
+     "m": 100
+    },
+    {
+     "n": "maïs en épi (tranche)",
+     "g": 8,
+     "m": 40
+    }
+   ],
+   "tok": [
+    3460,
+    898
+   ]
+  },
+  {
+   "dish": "dish_1559845046",
+   "reel": 31.922001,
+   "estime": 38.1,
+   "cost": 0.0020080000000000002,
+   "sec": 2.7,
+   "seen": "Une assiette carrée contenant des amandes, des dés de pommes de terre rissolées, des bouquets de brocolis cuits et une petite clémentine entière.",
+   "conf": "medium",
+   "low": 34,
+   "high": 42,
+   "items": [
+    {
+     "n": "amandes",
+     "g": 2.1,
+     "m": 30
+    },
+    {
+     "n": "pommes de terre rissolées",
+     "g": 24,
+     "m": 120
+    },
+    {
+     "n": "brocolis cuits",
+     "g": 2.4,
+     "m": 80
+    },
+    {
+     "n": "clémentine",
+     "g": 9.6,
+     "m": 80
+    }
+   ],
+   "tok": [
+    3460,
+    762
+   ]
+  },
+  {
+   "dish": "dish_1562602687",
+   "reel": 32.215893,
+   "estime": 33.5,
+   "cost": 0.0021275,
+   "sec": 3.8,
+   "seen": "Une assiette carrée contenant des hash browns (pommes de terre râpées), des œufs brouillés, des choux de Bruxelles et quatre morceaux de saucisse.",
+   "conf": "medium",
+   "low": 30,
+   "high": 40,
+   "items": [
+    {
+     "n": "hash browns (pommes de terre râpées)",
+     "g": 26.4,
+     "m": 120
+    },
+    {
+     "n": "œufs brouillés",
+     "g": 1.5,
+     "m": 100
+    },
+    {
+     "n": "choux de Bruxelles",
+     "g": 4,
+     "m": 80
+    },
+    {
+     "n": "saucisses",
+     "g": 1.6,
+     "m": 80
+    }
+   ],
+   "tok": [
+    3458,
+    842
+   ]
+  },
+  {
+   "dish": "dish_1559668314",
+   "reel": 32.832001,
+   "estime": 30.2,
+   "cost": 0.0018744999999999999,
+   "sec": 2.4,
+   "seen": "Une assiette carrée contenant des œufs brouillés, une portion de hash browns (pommes de terre râpées poêlées) et un petit mélange de salade verte avec des framboises.",
+   "conf": "medium",
+   "low": 27,
+   "high": 35,
+   "items": [
+    {
+     "n": "œufs brouillés",
+     "g": 1.8,
+     "m": 150
+    },
+    {
+     "n": "hash browns (pommes de terre râpées)",
+     "g": 26.4,
+     "m": 120
+    },
+    {
+     "n": "salade verte et framboises",
+     "g": 2,
+     "m": 40
+    }
+   ],
+   "tok": [
+    3460,
+    673
+   ]
+  },
+  {
+   "dish": "dish_1565020867",
+   "reel": 35.736317,
+   "estime": 22.2,
+   "cost": 0.002272,
+   "sec": 3.1,
+   "seen": "Une assiette carrée blanche contenant des framboises, des mûres, des dés de patate douce rôtie, deux tranches de bacon grillé et quelques morceaux de fromage blanc frais type feta ou fromage de chèvre.",
+   "conf": "medium",
+   "low": 19.0,
+   "high": 26.0,
+   "items": [
+    {
+     "n": "framboises",
+     "g": 4.0,
+     "m": 60
+    },
+    {
+     "n": "mûres",
+     "g": 1.6,
+     "m": 30
+    },
+    {
+     "n": "patate douce rôtie en dés",
+     "g": 16.0,
+     "m": 80
+    },
+    {
+     "n": "bacon grillé",
+     "g": 0.2,
+     "m": 30
+    },
+    {
+     "n": "fromage type feta ou chèvre frais",
+     "g": 0.4,
+     "m": 40
+    }
+   ],
+   "tok": [
+    3460,
+    938
+   ]
+  },
+  {
+   "dish": "dish_1558721636",
+   "reel": 35.818001,
+   "estime": 31.0,
+   "cost": 0.002027,
+   "sec": 3.5,
+   "seen": "Une assiette carrée blanche contenant des rondelles de carottes cuites, deux tronçons de maïs, quatre tomates cerises et des morceaux de melon cantaloup.",
+   "conf": "medium",
+   "low": 27,
+   "high": 35,
+   "items": [
+    {
+     "n": "carottes cuites en rondelles",
+     "g": 8.4,
+     "m": 120
+    },
+    {
+     "n": "maïs en tronçons (épis)",
+     "g": 14.4,
+     "m": 80
+    },
+    {
+     "n": "tomates cerises",
+     "g": 1.8,
+     "m": 60
+    },
+    {
+     "n": "melon cantaloup",
+     "g": 6.4,
+     "m": 80
+    }
+   ],
+   "tok": [
+    3458,
+    775
+   ]
+  },
+  {
+   "dish": "dish_1561739238",
+   "reel": 37.556999,
+   "estime": 22.1,
+   "cost": 0.002168,
+   "sec": 4.2,
+   "seen": "Une assiette carrée contenant des morceaux de fromage blanc, des copeaux de noix de coco, des dés de patate douce rôtie et quelques baies rouges et noires (framboises et mûres).",
+   "conf": "medium",
+   "low": 19,
+   "high": 26,
+   "items": [
+    {
+     "n": "Fromage frais type mozzarella ou feta",
+     "g": 0.9,
+     "m": 60
+    },
+    {
+     "n": "Copeaux de noix de coco séchée",
+     "g": 2.4,
+     "m": 10
+    },
+    {
+     "n": "Patate douce rôtie",
+     "g": 16.0,
+     "m": 80
+    },
+    {
+     "n": "Mûres et framboises",
+     "g": 2.8,
+     "m": 40
+    }
+   ],
+   "tok": [
+    3458,
+    869
+   ]
+  },
+  {
+   "dish": "dish_1565118067",
+   "reel": 41.417,
+   "estime": 45.0,
+   "cost": 0.0021514999999999998,
+   "sec": 4.1,
+   "seen": "Une assiette carrée contenant deux parts de pizza au fromage, une portion de thon émietté, une salade de carottes râpées et des poivrons en lanières.",
+   "conf": "medium",
+   "low": 40,
+   "high": 52,
+   "items": [
+    {
+     "n": "Pizza au fromage",
+     "g": 36,
+     "m": 120
+    },
+    {
+     "n": "Thon émietté",
+     "g": 0,
+     "m": 80
+    },
+    {
+     "n": "Carottes râpées",
+     "g": 7,
+     "m": 100
+    },
+    {
+     "n": "Poivrons en lanières",
+     "g": 2,
+     "m": 50
+    }
+   ],
+   "tok": [
+    3458,
+    858
+   ]
+  },
+  {
+   "dish": "dish_1558723568",
+   "reel": 42.959999,
+   "estime": 39.5,
+   "cost": 0.0022895,
+   "sec": 4.4,
+   "seen": "Une pomme entière, quelques morceaux de melon, une tranche de maïs, des morceaux de chou-fleur et des rondelles de carotte sur une assiette rouge.",
+   "conf": "medium",
+   "low": 35,
+   "high": 45,
+   "items": [
+    {
+     "n": "pomme rouge",
+     "g": 21,
+     "m": 150
+    },
+    {
+     "n": "melon cantaloup",
+     "g": 4.8,
+     "m": 60
+    },
+    {
+     "n": "maïs (épi)",
+     "g": 8,
+     "m": 40
+    },
+    {
+     "n": "chou-fleur",
+     "g": 1.5,
+     "m": 50
+    },
+    {
+     "n": "carottes",
+     "g": 4.2,
+     "m": 60
+    }
+   ],
+   "tok": [
+    3458,
+    950
+   ]
+  },
+  {
+   "dish": "dish_1558378634",
+   "reel": 44.301998,
+   "estime": 20.7,
+   "cost": 0.0018205,
+   "sec": 3.2,
+   "seen": "Une assiette rouge contenant trois groupes d'aliments : des rondelles de saucisse fumée, une poignée de raisins rouges et verts, et des amandes entières.",
+   "conf": "medium",
+   "low": 18,
+   "high": 24,
+   "items": [
+    {
+     "n": "raisins",
+     "g": 17,
+     "m": 100
+    },
+    {
+     "n": "saucisse fumée en rondelles",
+     "g": 1.6,
+     "m": 80
+    },
+    {
+     "n": "amandes",
+     "g": 2.1,
+     "m": 30
+    }
+   ],
+   "tok": [
+    3460,
+    637
+   ]
+  },
+  {
+   "dish": "dish_1560887435",
+   "reel": 44.367718,
+   "estime": 38.8,
+   "cost": 0.001693,
+   "sec": 2.2,
+   "seen": "Une assiette carrée contenant une portion de lasagnes gratinées et un accompagnement de chou kale sauté avec quelques morceaux de croûtons.",
+   "conf": "medium",
+   "low": 32,
+   "high": 45,
+   "items": [
+    {
+     "n": "lasagnes à la bolognaise",
+     "g": 32.4,
+     "m": 180
+    },
+    {
+     "n": "chou kale sauté aux croûtons",
+     "g": 6.4,
+     "m": 80
+    }
+   ],
+   "tok": [
+    3460,
+    552
+   ]
+  },
+  {
+   "dish": "dish_1563464670",
+   "reel": 47.477001,
+   "estime": 51.3,
+   "cost": 0.002026,
+   "sec": 2.7,
+   "seen": "Une assiette carrée contenant deux moitiés de bagel tartinées de fromage frais, un bâtonnet de fromage et quelques rondelles de concombre.",
+   "conf": "medium",
+   "low": 45,
+   "high": 60,
+   "items": [
+    {
+     "n": "Bagel blanc",
+     "g": 50,
+     "m": 100
+    },
+    {
+     "n": "Fromage frais à tartiner",
+     "g": 0.6,
+     "m": 20
+    },
+    {
+     "n": "Bâtonnet de fromage (type String Cheese)",
+     "g": 0.2,
+     "m": 20
+    },
+    {
+     "n": "Concombre",
+     "g": 0.5,
+     "m": 15
+    }
+   ],
+   "tok": [
+    3460,
+    774
+   ]
+  },
+  {
+   "dish": "dish_1558719145",
+   "reel": 48.143997,
+   "estime": 40.05,
+   "cost": 0.0021215,
+   "sec": 3.8,
+   "seen": "Une assiette rouge contenant une pomme entière, des morceaux de melon, une poignée de tomates cerises et une portion d'amandes.",
+   "conf": "medium",
+   "low": 36,
+   "high": 45,
+   "items": [
+    {
+     "n": "pomme",
+     "g": 25.2,
+     "m": 180
+    },
+    {
+     "n": "melon",
+     "g": 9.6,
+     "m": 120
+    },
+    {
+     "n": "tomates cerises",
+     "g": 3.15,
+     "m": 105
+    },
+    {
+     "n": "amandes",
+     "g": 2.1,
+     "m": 30
+    }
+   ],
+   "tok": [
+    3458,
+    838
+   ]
+  },
+  {
+   "dish": "dish_1567526888",
+   "reel": 51.193001,
+   "estime": 35.9,
+   "cost": 0.002204,
+   "sec": 4.3,
+   "seen": "Une assiette carrée contenant des blancs d'œufs pochés recouverts d'une sauce verte, accompagnés d'une salade de fruits (pastèque, fraises, myrtilles) et de morceaux de patate douce rôtie avec une sauce verte.",
+   "conf": "medium",
+   "low": 32,
+   "high": 40,
+   "items": [
+    {
+     "n": "blancs d'œufs pochés",
+     "g": 1.4,
+     "m": 200
+    },
+    {
+     "n": "sauce verte (type salsa verde)",
+     "g": 2.5,
+     "m": 50
+    },
+    {
+     "n": "salade de pastèque, fraises et myrtilles",
+     "g": 12,
+     "m": 150
+    },
+    {
+     "n": "patate douce rôtie",
+     "g": 20,
+     "m": 100
+    }
+   ],
+   "tok": [
+    3458,
+    893
+   ]
+  },
+  {
+   "dish": "dish_1562170331",
+   "reel": 54.537998,
+   "estime": 41.6,
+   "cost": 0.0020075,
+   "sec": 3.5,
+   "seen": "Une assiette carrée blanche contenant quelques quartiers de pommes de terre rissolées et un mélange de fruits frais (ananas, fraises, framboises, myrtilles et pastèque).",
+   "conf": "medium",
+   "low": 38,
+   "high": 46,
+   "items": [
+    {
+     "n": "Pommes de terre rissolées",
+     "g": 20,
+     "m": 100
+    },
+    {
+     "n": "Ananas frais",
+     "g": 9.6,
+     "m": 80
+    },
+    {
+     "n": "Mélange de fruits rouges et pastèque",
+     "g": 12,
+     "m": 150
+    }
+   ],
+   "tok": [
+    3458,
+    762
+   ]
+  },
+  {
+   "dish": "dish_1561737293",
+   "reel": 55.828995,
+   "estime": 46.4,
+   "cost": 0.002309,
+   "sec": 4.2,
+   "seen": "Assiette carrée composée de dés de melon, ananas frais, morceaux de saucisse, brocolis rôtis et une portion de riz brun.",
+   "conf": "medium",
+   "low": 40,
+   "high": 55,
+   "items": [
+    {
+     "n": "Riz complet cuit",
+     "g": 25,
+     "m": 100
+    },
+    {
+     "n": "Ananas frais",
+     "g": 10.4,
+     "m": 80
+    },
+    {
+     "n": "Melon",
+     "g": 8,
+     "m": 100
+    },
+    {
+     "n": "Saucisses",
+     "g": 1.5,
+     "m": 75
+    },
+    {
+     "n": "Brocolis",
+     "g": 1.5,
+     "m": 50
+    }
+   ],
+   "tok": [
+    3458,
+    963
+   ]
+  },
+  {
+   "dish": "dish_1560874751",
+   "reel": 58.687004,
+   "estime": 49.1,
+   "cost": 0.002222,
+   "sec": 3.8,
+   "seen": "Une assiette carrée blanche contenant une moitié de bagel tartinée de fromage frais, une portion de cubes de patate douce rôtis, deux tranches de bacon grillé, quelques fraises coupées et quelques myrtilles.",
+   "conf": "medium",
+   "low": 42,
+   "high": 56,
+   "items": [
+    {
+     "n": "Moitié de bagel au fromage frais",
+     "g": 28,
+     "m": 70
+    },
+    {
+     "n": "Cubes de patate douce rôtis",
+     "g": 16,
+     "m": 80
+    },
+    {
+     "n": "Fruits (fraises et myrtilles)",
+     "g": 4.8,
+     "m": 60
+    },
+    {
+     "n": "Bacon grillé",
+     "g": 0.3,
+     "m": 30
+    }
+   ],
+   "tok": [
+    3458,
+    905
+   ]
+  },
+  {
+   "dish": "dish_1558721827",
+   "reel": 59.541,
+   "estime": 36.8,
+   "cost": 0.001993,
+   "sec": 2.8,
+   "seen": "Une assiette plate contenant une poignée généreuse d'amandes, plusieurs morceaux de melon cantaloup, une pomme entière et des fleurettes de chou-fleur crues.",
+   "conf": "medium",
+   "low": 32,
+   "high": 42,
+   "items": [
+    {
+     "n": "amandes",
+     "g": 3.8,
+     "m": 50
+    },
+    {
+     "n": "melon cantaloup",
+     "g": 9.6,
+     "m": 120
+    },
+    {
+     "n": "pomme",
+     "g": 21,
+     "m": 150
+    },
+    {
+     "n": "chou-fleur",
+     "g": 2.4,
+     "m": 80
+    }
+   ],
+   "tok": [
+    3460,
+    752
+   ]
+  },
+  {
+   "dish": "dish_1566838407",
+   "reel": 62.420345,
+   "estime": 32.9,
+   "cost": 0.002333,
+   "sec": 4.8,
+   "seen": "Une assiette carrée contenant un mélange de fruits frais (pastèque, ananas, mûres, framboises), des dés de patate douce rôtie et des œufs brouillés.",
+   "conf": "medium",
+   "low": 28.0,
+   "high": 38.0,
+   "items": [
+    {
+     "n": "Pastèque en dés",
+     "g": 4.6,
+     "m": 60
+    },
+    {
+     "n": "Ananas en dés",
+     "g": 8.8,
+     "m": 70
+    },
+    {
+     "n": "Mûres et framboises",
+     "g": 3.0,
+     "m": 50
+    },
+    {
+     "n": "Patate douce rôtie",
+     "g": 16.0,
+     "m": 80
+    },
+    {
+     "n": "Œufs brouillés",
+     "g": 0.5,
+     "m": 50
+    }
+   ],
+   "tok": [
+    3458,
+    979
+   ]
+  },
+  {
+   "dish": "dish_1558639012",
+   "reel": 63.264,
+   "estime": 59.6,
+   "cost": 0.002261,
+   "sec": 4.6,
+   "seen": "Une assiette plate contenant une pomme, des tomates cerises, une grappe de raisins rouges, des bouquets de chou-fleur cru et une rondelle de maïs en épis.",
+   "conf": "medium",
+   "low": 55,
+   "high": 65,
+   "items": [
+    {
+     "n": "Pomme",
+     "g": 22.4,
+     "m": 160
+    },
+    {
+     "n": "Raisins rouges",
+     "g": 20.4,
+     "m": 120
+    },
+    {
+     "n": "Tomates cerises",
+     "g": 7,
+     "m": 180
+    },
+    {
+     "n": "Chou-fleur cru",
+     "g": 1.8,
+     "m": 60
+    },
+    {
+     "n": "Maïs en épi (rondelle)",
+     "g": 8,
+     "m": 40
+    }
+   ],
+   "tok": [
+    3458,
+    931
+   ]
+  },
+  {
+   "dish": "dish_1559246053",
+   "reel": 63.925999,
+   "estime": 40.0,
+   "cost": 0.002272,
+   "sec": 3.1,
+   "seen": "Assiette plate contenant des choux-fleurs crus, des fraises coupées en morceaux, quelques myrtilles, une clémentine entière et une poire entière.",
+   "conf": "medium",
+   "low": 36,
+   "high": 45,
+   "items": [
+    {
+     "n": "Chou-fleur cru",
+     "g": 2.4,
+     "m": 80
+    },
+    {
+     "n": "Fraises",
+     "g": 9.2,
+     "m": 120
+    },
+    {
+     "n": "Myrtilles",
+     "g": 2.4,
+     "m": 20
+    },
+    {
+     "n": "Clémentine",
+     "g": 8,
+     "m": 80
+    },
+    {
+     "n": "Poire",
+     "g": 18,
+     "m": 150
+    }
+   ],
+   "tok": [
+    3460,
+    938
+   ]
+  },
+  {
+   "dish": "dish_1568401302",
+   "reel": 69.864967,
+   "estime": 50.9,
+   "cost": 0.0023515,
+   "sec": 3.6,
+   "seen": "Une assiette carrée contenant du riz sauté, des dés de courge ou patate douce, une salade de thon émietté avec des légumes, des carottes râpées et quelques tranches d'avocat.",
+   "conf": "medium",
+   "low": 45,
+   "high": 58,
+   "items": [
+    {
+     "n": "Riz sauté aux légumes",
+     "g": 33.6,
+     "m": 120
+    },
+    {
+     "n": "Dés de courge ou patate douce cuite",
+     "g": 10.5,
+     "m": 70
+    },
+    {
+     "n": "Salade de thon aux légumes",
+     "g": 2.7,
+     "m": 90
+    },
+    {
+     "n": "Carottes râpées",
+     "g": 3.5,
+     "m": 50
+    },
+    {
+     "n": "Avocat",
+     "g": 0.6,
+     "m": 30
+    }
+   ],
+   "tok": [
+    3460,
+    991
+   ]
+  }
+ ]
+}

@@ -211,11 +211,18 @@ résultats et réserves : **[BENCHMARK.md](BENCHMARK.md)**.
 Deux enseignements ont changé les réglages par défaut :
 
 **Le prix n'achète pas la précision.** Claude Opus 5 se trompe de 12,0 g en moyenne pour 35×
-le prix de Gemini 3.1 Flash-Lite, qui se trompe de 10,0 g en 4 secondes. Claude Sonnet 5
+le prix de Gemini 3.1 Flash-Lite, qui se trompe de 10,9 g en 3,5 secondes. Claude Sonnet 5
 (14,5 g) est derrière Qwen 3.7 Flash, 79× moins cher. **Aucun écart entre deux modèles
 voisins n'est statistiquement significatif** à cette taille d'échantillon — d'où la règle
 retenue : à précision indistinguable, le moins cher et le plus rapide. Le défaut Gemini est
 donc passé de 3.6 Flash (qui sous-estimait de 30 %) à **3.1 Flash-Lite**.
+
+**Le plafond est plus bas qu'il n'y paraît.** Sur des assiettes simples, un diététicien
+professionnel se trompe de 14,8 g en moyenne, et une personne diabétique estimant son propre
+repas de 21 à 28 g. À 10,9 g, l'estimation est donc déjà au niveau d'un professionnel : la
+marge qui reste sur ce type de plat est mince, et les progrès sont à chercher ailleurs — sur
+les repas composés, où plus aucune vérité terrain publique n'existe. Chiffres et réserves :
+**[BENCHMARK.md](BENCHMARK.md)**.
 
 **Deux avis moyennés valent mieux que le meilleur des deux.** Les erreurs de Gemini 3.1
 Flash-Lite et de Qwen3-VL 235B Thinking sont faiblement corrélées (r = +0,30) et de sens

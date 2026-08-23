@@ -276,3 +276,61 @@ d'assiette plausible ?) ou pas du tout.
    représentent pas un repas français type.
 4. **Le choix de la paire fusionnée est postérieur aux résultats de la manche 1.**
    La manche 2 sert de validation hors échantillon, mais une seule.
+
+## Manche 4 — 23 août 2026 : l'ancrage géométrique ne change rien (mesuré)
+
+Première manche jouée avec les prompts **extraits** de l'application au lieu d'être
+recopiés (`bench/extract-prompts.mjs`), donc la première à mesurer réellement ce
+que le produit envoie.
+
+Comparaison **appariée** : mêmes 44 plats, même modèle, seul le prompt système
+change. Chaque plat est son propre témoin — comparer deux MAE globales sur 44
+plats ne dirait rien, l'écart-type entre plats écrasant l'effet cherché.
+
+| | prompt v88 | prompt v89 (ancrage) |
+|---|---|---|
+| MAE | 10,6 g | **10,9 g** |
+| médiane | 8,1 g | 8,9 g |
+| biais | −13,2 % | −11,3 % |
+| erreurs > 20 g | 14 % | 14 % |
+
+**18 plats améliorés, 19 dégradés, 7 inchangés — test des signes : p = 1,00.**
+
+C'est un résultat nul, pas une régression : la consigne d'ancrage obligatoire
+(dimensions en cm ou décompte d'unités, portion type reléguée au rang de contrôle)
+n'améliore ni ne dégrade l'exactitude sur ce jeu. Elle est conservée pour une autre
+raison, non mesurée ici : « 14 × 9 × 2,5 cm » se vérifie sur la photo, « portion
+restaurant standard » non — l'utilisateur peut contredire la première, pas la seconde.
+
+**Ce que cette manche ne teste pas.** Nutrition5k ne contient que des assiettes
+uniques, filmées de dessus, entre 20 et 130 g de glucides — exactement le domaine
+où la portion type mémorisée est un bon estimateur, puisque les portions y SONT
+standard. L'hypothèse initiale visait le cas inverse : un plateau de restaurant,
+une pile de frites, 190 g de glucides. Aucune vérité terrain publique n'existe pour
+ce cas, et cette manche ne permet donc pas de trancher là-dessus.
+
+Coût : 0,18 $ (88 appels, Gemini 3.1 Flash-Lite, 3,5 s et 0,0021 $ par analyse).
+Rejouer : `BENCH_A=g_avant.json BENCH_B=g_apres.json python3 bench/score-ab.py`.
+
+### Repères externes
+
+Les chiffres ci-dessus n'ont de sens que comparés à ce que font les humains et les
+systèmes publiés :
+
+| système | MAE glucides |
+|---|---|
+| GoCARB, laboratoire, avec repère d'assiette | 6 ± 8 g |
+| **GlucoVision, Gemini 3.1 Flash-Lite, sans carte** | **10,9 g** |
+| GoCARB en essai clinique | 12,3 ± 9,6 g |
+| SNAQ (volumétrie + profondeur) | 13,1 g |
+| **Diététiciens professionnels** | **14,8 – 14,9 g** |
+| Personnes diabétiques de type 1 estimant leur propre repas | 21 – 27,9 g |
+
+Sources : [GoCARB vs diététiciens](https://pubmed.ncbi.nlm.nih.gov/29880772/),
+[GoCARB vs patients](https://pmc.ncbi.nlm.nih.gov/articles/PMC4880742/),
+[SNAQ](https://www.snaq.ai/blog/photo-based-carb-counting-why-portion-estimation-is-the-hard-part).
+
+Attention : les jeux de plats diffèrent, ces valeurs ne sont pas strictement
+comparables. L'ordre de grandeur, lui, est parlant — sur des assiettes simples,
+l'estimation est déjà au niveau d'un diététicien, et nettement meilleure que
+l'auto-estimation. La marge restante y est faible ; elle est ailleurs.
