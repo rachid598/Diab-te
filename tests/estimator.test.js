@@ -341,3 +341,48 @@ test('le prompt système impose un ancrage mesurable et dégrade la portion type
   assert.match(systeme, /"portionDescription":[^\n]*ancrage/i,
     'le schéma doit exiger que l\'ancrage soit reporté, sinon il reste invérifiable');
 });
+
+/* Enregistrer une densité personnelle ne sert à rien si le prompt ne la porte
+   pas jusqu'au modèle : c'est le maillon qui transforme une correction passée
+   en meilleure estimation future. */
+test('les densités personnelles atteignent le prompt, en a priori et non en fait', () => {
+  const densites = [
+    { name: 'pain complet grillé', density: 52, count: 3, ts: 2 },
+    { name: 'riz blanc', density: 28, count: 1, ts: 1 }
+  ];
+  const { Estimator } = env({
+    Storage: {
+      DEFAULT_MODELS: { claude: 'claude-test' },
+      getBiasByCategory() { return []; },
+      getBias() { return { count: 0, pct: 0 }; },
+      getFoodDensities() { return densites; },
+      noteUsage() {}
+    }
+  });
+
+  const prompt = Estimator.buildPhotoPrompt({ imageCount: 1, referenceMode: 'none' });
+  assert.match(prompt, /DENSITÉS PERSONNELLES/);
+  assert.match(prompt, /pain complet grillé : 52 g de glucides pour 100 g \(3 corrections\)/);
+  assert.match(prompt, /riz blanc : 28 g de glucides pour 100 g \(1 correction\)/,
+    'le singulier doit être correct : une seule correction n’est pas « 1 corrections »');
+
+  // Un a priori sur les aliments habituels, jamais une mesure de CETTE assiette.
+  assert.match(prompt, /la photo qui gagne/i,
+    'la photo doit rester prioritaire sur l’habitude');
+  assert.match(prompt, /Cela ne change pas la masse/,
+    'la densité ne doit pas être confondue avec la portion');
+});
+
+test('sans aucune correction passée, le prompt ne porte aucun bloc de densité', () => {
+  const { Estimator } = env({
+    Storage: {
+      DEFAULT_MODELS: { claude: 'claude-test' },
+      getBiasByCategory() { return []; },
+      getBias() { return { count: 0, pct: 0 }; },
+      getFoodDensities() { return []; },
+      noteUsage() {}
+    }
+  });
+  assert.doesNotMatch(Estimator.buildPhotoPrompt({ imageCount: 1, referenceMode: 'none' }),
+    /DENSITÉS PERSONNELLES/);
+});

@@ -126,6 +126,14 @@ parallèle. L'app compare les totaux **et le contenu** : deux modèles peuvent t
 70 g pour des raisons opposées, et annoncer « confirmé » là-dessus serait une fausse
 assurance. Elle dit alors précisément *« l'autre modèle voit du pain que le premier ignore »*.
 
+**Densités personnelles.** Des trois verrous de l'estimation de portion — échelle,
+occlusion, densité —, seul le troisième résiste à la photo : un croissant aéré et un
+bagel dense occupent le même volume à l'écran. Aucun modèle ne peut trancher, quel que
+soit son prix. L'app utilise donc les densités que **tu** as déjà établies : celles
+relevées sur les emballages que tu as recopiés, et celles que tu corriges sur un repas.
+Elles sont transmises au modèle comme un a priori sur tes aliments habituels — jamais
+comme une mesure de l'assiette du jour : si la photo contredit l'habitude, la photo gagne.
+
 **D'où vient l'écart.** Quand plusieurs avis divergent, l'app ne se contente plus d'annoncer
 la différence : elle aligne les aliments d'une colonne à l'autre et nomme les postes qui la
 portent — *« frites : 45 g (Gemini) → 95 g (Grok), 50 g d'écart »*. Un total qui diffère de

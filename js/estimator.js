@@ -209,6 +209,8 @@
     if (ctxBlock) lines.push(ctxBlock);
     var cal = calibrationBlock();
     if (cal) lines.push(cal);
+    var dens = personalDensityBlock(ctx);
+    if (dens) lines.push(dens);
     lines.push('Réponds uniquement avec le JSON.');
     return lines.join('\n');
   }
@@ -229,6 +231,8 @@
     if (ctxBlock) lines.push(ctxBlock);
     var cal = calibrationBlock();
     if (cal) lines.push(cal);
+    var dens = personalDensityBlock(ctx);
+    if (dens) lines.push(dens);
     lines.push('Réponds uniquement avec le JSON.');
     return lines.join('\n');
   }
@@ -415,6 +419,42 @@
       'ce repas ne contient pas la catégorie concernée, ignore la correction.',
       'Ces écarts portent sur des repas passés, pas forcément sur celui-ci : ce',
       'qui est visible sur la photo prime toujours.'
+    ].join('\n');
+  }
+
+  /* Densités personnelles : le seul verrou que la photo ne lèvera jamais.
+
+     Une échelle se calibre (la carte), une hauteur se croise (plusieurs angles),
+     mais la densité d'un aliment est invisible — un croissant aéré et un bagel
+     dense occupent le même volume. Le modèle ne peut que supposer une valeur
+     moyenne de table. L'utilisateur, lui, mange le même pain toutes les semaines
+     et a déjà corrigé ses glucides : c'est sa mesure, sur son aliment.
+
+     N'entrent ici que les aliments effectivement corrigés à la main. Un a priori
+     ne remplace jamais l'image : la consigne finale est la même que pour le lieu
+     du repas — si la photo contredit l'habitude, la photo gagne. */
+  function personalDensityBlock(ctx) {
+    if (!window.Storage || !Storage.getFoodDensities) return '';
+    var list = [];
+    try { list = Storage.getFoodDensities(6) || []; } catch (e) { return ''; }
+    if (!list.length) return '';
+
+    var lignes = list.map(function (f) {
+      var origine = f.fromLabel ? 'relevé sur l\'emballage'
+        : (f.count > 1 ? f.count + ' corrections' : '1 correction');
+      return '  - ' + f.name + ' : ' + f.density + ' g de glucides pour 100 g' +
+        ' (' + origine + ')';
+    });
+
+    return [
+      'DENSITÉS PERSONNELLES — valeurs que cet utilisateur a lui-même corrigées',
+      'sur SES aliments habituels :',
+      lignes.join('\n'),
+      'Si tu reconnais l\'un de ces aliments dans la photo, utilise SA densité',
+      'plutôt qu\'une valeur moyenne de table : la sienne a été mesurée, la tienne',
+      'est supposée. Cela ne change pas la masse, que tu dois toujours estimer',
+      'sur l\'image. Un aliment absent de cette liste garde ta valeur habituelle,',
+      'et si la photo contredit franchement l\'habitude, c\'est la photo qui gagne.'
     ].join('\n');
   }
 

@@ -367,3 +367,90 @@ test('la reprise conserve les champs v72 et ARCore sans accepter de faux boolée
   assert.equal(got.resultSnapshot.items[0].name, 'riz');
   assert.equal(got.verification.items[0].carbsG, 19);
 });
+
+/* La densité est le seul des trois verrous de l'estimation de portion qu'aucune
+   photo ne lèvera : un croissant aéré et un bagel dense occupent le même volume.
+   Seul l'utilisateur la connaît, et il l'énonce déjà en corrigeant les glucides
+   d'un aliment sans toucher à sa masse. */
+test('la densité personnelle d’un aliment est retenue, par médiane', () => {
+  const { Storage } = env();
+  assert.equal(Storage.getFoodDensity('pain complet'), null,
+    'aucun a priori tant que rien n’a été corrigé');
+
+  Storage.noteFoodDensity('pain complet grillé', 52);
+  const un = Storage.getFoodDensity('pain complet grillé');
+  assert.equal(un.density, 52);
+  assert.equal(un.count, 1, 'une seule correction suffit à valoir mieux qu’une supposition');
+
+  /* Médiane et non moyenne : une saisie fautive isolée ne doit pas déplacer la
+     valeur servie — ce chiffre finit dans une dose d'insuline. */
+  Storage.noteFoodDensity('pain complet grillé', 54);
+  Storage.noteFoodDensity('pain complet grillé', 99);
+  assert.equal(Storage.getFoodDensity('pain complet grillé').density, 54,
+    'la valeur aberrante ne doit pas tirer la médiane');
+
+  // La clé est nutritionnelle : « pain complet » et « pain blanc » restent distincts.
+  Storage.noteFoodDensity('pain blanc', 49);
+  assert.equal(Storage.getFoodDensity('pain complet grillé').density, 54);
+  assert.equal(Storage.getFoodDensity('pain blanc').density, 49);
+});
+
+test('une densité physiquement impossible est refusée', () => {
+  const { Storage } = env();
+  [0, -5, 101, 500, NaN, null, undefined, 'beaucoup'].forEach((mauvais) => {
+    assert.equal(Storage.noteFoodDensity('riz blanc', mauvais), false,
+      'densité refusée : ' + String(mauvais));
+  });
+  assert.equal(Storage.getFoodDensity('riz blanc'), null);
+
+  Storage.noteFoodDensity('riz blanc', 28);
+  assert.equal(Storage.getFoodDensity('riz blanc').density, 28);
+});
+
+test('les densités personnelles sortent classées par nombre de corrections', () => {
+  const { Storage } = env();
+  Storage.noteFoodDensity('riz blanc', 28);
+  Storage.noteFoodDensity('pain complet', 50);
+  Storage.noteFoodDensity('pain complet', 52);
+  Storage.noteFoodDensity('pain complet', 51);
+
+  const list = Storage.getFoodDensities(10);
+  assert.equal(list.length, 2);
+  assert.equal(list[0].count, 3, 'l’aliment le plus souvent corrigé passe devant');
+  assert.match(list[0].name, /pain complet/);
+  assert.equal(list[0].density, 51);
+  assert.equal(Storage.getFoodDensities(1).length, 1, 'la limite est respectée');
+});
+
+/* Un produit recopié depuis un emballage porte une densité VRAIE, lue sur
+   l'étiquette. Elle ne servait qu'au scan du code-barres : photographier le
+   même pain relançait le modèle à l'aveugle. C'est le gisement le plus direct
+   contre le verrou de la densité, et il ne demande aucune saisie nouvelle. */
+test('les étiquettes recopiées alimentent les densités personnelles', () => {
+  const { Storage } = env();
+  Storage.setProduct('3017620422003', { n: 'Pain complet maison', carb: 47 }, 'perso');
+  Storage.setProduct('5000159484695', { n: 'Barre chocolatée', carb: 61 }, 'off');
+
+  const list = Storage.getFoodDensities(10);
+  const noms = list.map((f) => f.name);
+  assert.ok(noms.includes('Pain complet maison'),
+    'une étiquette recopiée par l’utilisateur doit servir d’a priori');
+  assert.equal(noms.includes('Barre chocolatée'), false,
+    'un produit venant d’OpenFoodFacts n’est pas une mesure personnelle');
+
+  const pain = list.find((f) => f.name === 'Pain complet maison');
+  assert.equal(pain.density, 47);
+  assert.equal(pain.fromLabel, true, 'l’origine doit rester distinguable dans le prompt');
+});
+
+test('une correction explicite prime sur l’étiquette du même aliment', () => {
+  const { Storage } = env();
+  Storage.setProduct('3017620422003', { n: 'pain complet', carb: 47 }, 'perso');
+  Storage.noteFoodDensity('pain complet', 53);
+
+  const list = Storage.getFoodDensities(10);
+  const pains = list.filter((f) => Storage.foodKey(f.name) === Storage.foodKey('pain complet'));
+  assert.equal(pains.length, 1, 'un même aliment ne doit pas apparaître deux fois');
+  assert.equal(pains[0].density, 53, 'la correction faite sur le repas gagne');
+  assert.equal(pains[0].fromLabel, undefined);
+});

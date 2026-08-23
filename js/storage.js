@@ -19,7 +19,8 @@
     recentFoods: 'diabete.recentfoods.v1',
     savedMeals: 'diabete.savedmeals.v1',
     packaging: 'diabete.emballages.v1',
-    products: 'diabete.produits.v1'
+    products: 'diabete.produits.v1',
+    densities: 'diabete.densites.v1'
   };
 
   /* Catalogue de modèles par fournisseur.
@@ -1345,6 +1346,111 @@
       }).sort(function (a, b) {
         return Math.abs(b.pct) - Math.abs(a.pct);
       });
+    },
+
+    /* ----- Densité glucidique personnelle, par aliment -----
+
+       La littérature 2026 sur l'estimation de portion nomme trois verrous : la
+       calibration d'échelle, l'occlusion, et la DENSITÉ. Les deux premiers se
+       voient sur une photo — la carte résout le premier, plusieurs angles
+       aident au second. Le troisième, non : un croissant aéré et un bagel dense
+       occupent le même volume à l'écran et n'apportent pas les mêmes glucides.
+       Aucun modèle de vision ne peut trancher, quel que soit son prix.
+
+       Toi, si. Et tu le fais déjà : corriger les glucides d'un aliment sans
+       toucher à sa masse, c'est énoncer sa densité réelle. Jusqu'ici cette
+       information était jetée à chaque repas. On la garde, par aliment.
+
+       Médiane et non moyenne : une saisie fautive isolée ne doit pas déplacer
+       la valeur servie, et ce chiffre finit dans une dose d'insuline. Bornée à
+       100 g/100 g, physiquement indépassable.
+
+       Attention : c'est un a priori sur TES aliments, jamais une mesure de
+       CETTE assiette. Le prompt le dit explicitement au modèle. */
+    noteFoodDensity: function (name, density) {
+      var key = foodKey(name);
+      var d = finite(density);
+      if (!key || d == null || d < 1 || d > 100) return false;
+      var all = read(KEYS.densities, {});
+      if (!isObject(all)) all = {};
+      var rec = isObject(all[key]) ? all[key] : { n: '', s: [] };
+      var samples = Array.isArray(rec.s) ? rec.s.filter(function (x) {
+        return finite(x) != null && x >= 1 && x <= 100;
+      }) : [];
+      samples.push(Math.round(d * 10) / 10);
+      all[key] = {
+        n: String(name || '').trim().slice(0, 60) || rec.n,
+        s: samples.slice(-8),          // 8 dernières : on suit un changement de marque
+        ts: Date.now()
+      };
+      /* Purge par ancienneté : une cuisine ne contient pas 400 aliments
+         distincts, et un stockage sans borne finit par saturer le quota. */
+      var keys = Object.keys(all);
+      if (keys.length > 200) {
+        keys.sort(function (a, b) { return (all[b].ts || 0) - (all[a].ts || 0); })
+          .slice(200).forEach(function (k) { delete all[k]; });
+      }
+      return write(KEYS.densities, all);
+    },
+
+    getFoodDensity: function (name) {
+      var key = foodKey(name);
+      if (!key) return null;
+      var all = read(KEYS.densities, {});
+      var rec = isObject(all) && isObject(all[key]) ? all[key] : null;
+      var samples = rec && Array.isArray(rec.s) ? rec.s.filter(function (x) {
+        return finite(x) != null && x >= 1 && x <= 100;
+      }) : [];
+      if (!samples.length) return null;
+      var tri = samples.slice().sort(function (a, b) { return a - b; });
+      var mid = Math.floor(tri.length / 2);
+      var median = tri.length % 2 ? tri[mid] : (tri[mid - 1] + tri[mid]) / 2;
+      return { name: rec.n || name, density: Math.round(median * 10) / 10,
+               count: samples.length, ts: rec.ts || 0 };
+    },
+
+    /* Deux sources, par ordre de confiance décroissant :
+
+       1. Les corrections explicites ci-dessus.
+       2. Les produits que l'utilisateur a lui-même recopiés depuis un emballage
+          (source 'perso'). Leur champ carb EST une densité pour 100 g, lue sur
+          l'étiquette qu'il avait en main. C'est la meilleure valeur qui existe
+          pour cet aliment, et jusqu'ici elle ne servait qu'au scan du code-barres :
+          photographier le même pain relançait le modèle à l'aveugle.
+
+       Les produits venant d'OpenFoodFacts sont volontairement exclus. Ils ont été
+       remplis par des inconnus, et surtout un code scanné une fois ne dit pas que
+       c'est CE produit-là sur la photo — l'appliquer à tout pain aperçu ferait
+       passer une coïncidence pour une mesure. */
+    getFoodDensities: function (limit) {
+      var self = this;
+      var vus = {};
+      var out = [];
+
+      var all = read(KEYS.densities, {});
+      if (isObject(all)) {
+        Object.keys(all).forEach(function (k) {
+          var rec = all[k];
+          var d = isObject(rec) ? self.getFoodDensity(rec.n || k) : null;
+          if (!d) return;
+          vus[foodKey(d.name)] = true;
+          out.push(d);
+        });
+      }
+
+      (this.getProducts(200) || []).forEach(function (p) {
+        if (!p || p.source !== 'perso') return;
+        var key = foodKey(p.n);
+        // Une correction explicite prime toujours sur l'étiquette d'un paquet.
+        if (!key || vus[key]) return;
+        vus[key] = true;
+        out.push({ name: p.n, density: p.carb, count: 1, ts: p.ts || 0,
+                   fromLabel: true });
+      });
+
+      return out.sort(function (a, b) {
+        return (b.count - a.count) || (b.ts - a.ts);
+      }).slice(0, limit == null ? 50 : Math.max(0, Math.floor(limit)));
     },
 
     foodKey: foodKey,
