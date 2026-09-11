@@ -67,9 +67,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Empreinte du certificat déjà installé sur le téléphone. Ce contrôle est
-  # bloquant avant le build puis répété sur l'APK produit.
-  EXPECTED_CERT_SHA256: 6fbba12e3103b5919940ab0de529f900b3ce085c90195f898c9b4ee5265a4a8b
+  # Empreinte de la clé de signature actuelle (rotation du 11/09/2026, voir
+  # signing/README.md). Toute app installée avec l'ancienne clé
+  # (6fbba12e3103b5919940ab0de529f900b3ce085c90195f898c9b4ee5265a4a8b) doit être
+  # désinstallée une fois avant d'accepter une mise à jour signée avec celle-ci.
+  EXPECTED_CERT_SHA256: 48bb88d1d90aaa61578a5d65d3ffeb25085f2df035c100af64632336b160f53e
   # Ces empreintes lient la carte imprimable au PNG réellement embarqué dans
   # l'APK. Toute régénération volontaire doit mettre à jour les deux valeurs,
   # le test de contrat et la documentation dans le même commit.
@@ -494,7 +496,7 @@ jobs:
         if: steps.variant.outputs.has_depth == 'true'
         run: bash scripts/check-java.sh
 
-      - name: Installer et vérifier la clé de signature historique
+      - name: Installer et vérifier la clé de signature
         shell: bash
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
@@ -508,29 +510,22 @@ jobs:
             sha256sum "$out" | cut -d' ' -f1
           }
 
-          COMMITTED=$(fingerprint signing/glucovision-signing.jks glucovision)
-          test "$COMMITTED" = "$EXPECTED_CERT_SHA256" || {
-            echo "::error::La clé committée n'est plus la clé historique ($COMMITTED)"
+          # Aucun repli sur un fichier committé : la clé n'existe QUE dans les
+          # secrets du dépôt depuis la rotation du 11/09/2026 (voir signing/README.md
+          # pour la raison — l'ancienne clé était committée en clair, mot de passe
+          # inclus, ce qui permettait à quiconique clonait le dépôt de signer un faux
+          # APK que les téléphones déjà installés auraient accepté comme mise à jour).
+          [[ -n "$KEYSTORE_B64" && -n "$KEYSTORE_PASS" ]] || {
+            echo "::error::ANDROID_KEYSTORE_B64 et ANDROID_KEYSTORE_PASS doivent être définis (secrets du dépôt) : plus aucun repli sur un fichier committé."
             exit 1
           }
 
           DEST=android/app/glucovision-signing.jks
-          if [[ -n "$KEYSTORE_B64" || -n "$KEYSTORE_PASS" ]]; then
-            [[ -n "$KEYSTORE_B64" && -n "$KEYSTORE_PASS" ]] || {
-              echo "::error::Les deux secrets de signature doivent être définis ensemble"
-              exit 1
-            }
-            printf '%s' "$KEYSTORE_B64" | base64 --decode > "$DEST"
-            PASS="$KEYSTORE_PASS"
-            echo "Clé chargée depuis les secrets GitHub."
-          else
-            cp signing/glucovision-signing.jks "$DEST"
-            PASS=glucovision
-            echo "Clé historique committée utilisée."
-          fi
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$DEST"
+          PASS="$KEYSTORE_PASS"
           ACTUAL=$(fingerprint "$DEST" "$PASS")
           test "$ACTUAL" = "$EXPECTED_CERT_SHA256" || {
-            echo "::error::Le certificat sélectionné ne correspond pas au téléphone ($ACTUAL)"
+            echo "::error::Le certificat des secrets ne correspond pas au téléphone ($ACTUAL)"
             exit 1
           }
           echo "Empreinte vérifiée : $ACTUAL"

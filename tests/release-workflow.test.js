@@ -67,7 +67,12 @@ test('le workflow refuse toute branche autre que codex et garde une seule identi
   assert.match(workflow, /has_depth=true/);
   assert.match(workflow, /minimum_native_floor=2088/);
   assert.match(workflow,
-    /EXPECTED_CERT_SHA256: 6fbba12e3103b5919940ab0de529f900b3ce085c90195f898c9b4ee5265a4a8b/);
+    /EXPECTED_CERT_SHA256: 48bb88d1d90aaa61578a5d65d3ffeb25085f2df035c100af64632336b160f53e/);
+    // Rotation du 11/09/2026 : plus aucun repli sur un fichier .jks committé.
+    assert.doesNotMatch(workflow, /signing\/glucovision-signing\.jks/,
+      'la clé de signature ne doit plus jamais être lue depuis un fichier du dépôt');
+    assert.match(workflow, /KEYSTORE_B64"\s*&&\s*-n\s*"\$KEYSTORE_PASS/,
+      'les deux secrets doivent être exigés, sans repli possible');
   assert.match(workflow,
     /github\.event_name == 'push' &&\s*github\.ref == 'refs\/heads\/codex'/);
 });
