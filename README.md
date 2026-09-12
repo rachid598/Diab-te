@@ -12,6 +12,29 @@ application Android.
 > ta glycémie, et ne modifie jamais tes réglages sans ton équipe soignante. Tu restes
 > responsable de la dose finale.
 
+## ✨ Points forts
+
+- **📏 Échelle vérifiée, pas devinée.** La carte GlucoVision donne une mesure
+  confirmée par ARCore — pas une supposition visuelle sur la taille d'une
+  assiette. [Comment ça marche ↓](#comment-la-précision-est-obtenue)
+- **🔍 Vérification croisée aliment par aliment.** Un second modèle rejoue le
+  même repas ; l'app compare le détail, pas juste le total, et dit
+  explicitement quand deux avis d'accord ne comptent pas les mêmes aliments.
+- **🧠 Apprend tes aliments.** Les densités que tu corriges ou relèves sur tes
+  emballages deviennent un a priori pour tes prochaines photos — jamais une
+  vérité qui l'emporte sur ce que montre l'image.
+- **📊 Modèles choisis sur mesure, pas sur réputation.** Banc d'essai public de
+  44 plats **pesés** (Nutrition5k) : voir [BENCHMARK.md](BENCHMARK.md) plutôt
+  que croire un nom commercial.
+- **🥖 Fonctionne sans réseau.** Mode manuel avec base de produits hors-ligne
+  (OpenFoodFacts + tes propres corrections), scan de code-barres, calcul de
+  parts pour un paquet — aucune clé API requise pour ce mode.
+- **🔒 Rien ne transite par un serveur intermédiaire.** Historique, photos et
+  clés API restent sur l'appareil ; l'estimation part directement de ton
+  téléphone vers le fournisseur d'IA que **tu** as choisi.
+- **🆓 Gratuit et open-source.** Seul coût réel : ton usage direct de l'API
+  d'un fournisseur d'IA, de l'ordre de 0,002 à 0,02 $ par repas.
+
 ## 📥 Utiliser l'app
 
 | | |
@@ -207,6 +230,35 @@ séparée. Idem pour Claude Pro.
 Le coût dérisoire d'OpenRouter est ce qui rend la **vérification croisée systématique**
 tenable : environ 70 estimations pour 1 $ avec Qwen3-VL 235B Thinking, 2500 avec Qwen 3.7
 Flash.
+
+### Débuter en 5 minutes, sans savoir quel fournisseur choisir
+
+Si l'idée d'ouvrir un compte chez Anthropic, Google **et** OpenAI juste pour tester
+l'app rebute, commence par une seule clé **OpenRouter** : elle donne accès à tous
+les modèles du tableau ci-dessus (Gemini, Claude, GPT, Grok, Qwen…), au même tarif
+que chez chacun directement.
+
+1. Va sur [openrouter.ai](https://openrouter.ai) et connecte-toi avec ton compte
+   Google ou GitHub — pas besoin de créer un mot de passe séparé.
+2. Une fois connecté : clique sur ton avatar en haut à droite → **Keys**, ou va
+   directement sur [openrouter.ai/keys](https://openrouter.ai/keys).
+3. Clique **Create Key**, donne-lui un nom (par exemple « GlucoVision »), valide.
+   La clé ne s'affiche **qu'une seule fois** : copie-la tout de suite (elle
+   commence par `sk-or-v1-…`).
+4. Ajoute un peu de crédit prépayé : menu **Credits** → **Add Credits**. 5 à 10 $
+   suffisent pour plusieurs centaines d'estimations, selon le modèle choisi (voir
+   le tableau ci-dessus).
+5. Dans GlucoVision : **Réglages → Fournisseur → OpenRouter**, colle la clé, et
+   garde le modèle recommandé par défaut (Gemini 3.1 Flash-Lite — meilleur
+   rapport précision/prix mesuré au banc d'essai).
+
+Avantage concret par rapport à Google directement : pas de facturation
+spécifique à activer pour l'Europe, pas de compte séparé par fournisseur, une
+seule page pour suivre toute la dépense.
+
+⚠️ Cette clé donne accès à ton crédit prépayé : ne la partage jamais, ne la colle
+jamais dans un message, une capture d'écran ou un commit. Si elle a déjà été
+exposée, révoque-la sur la même page et crées-en une nouvelle.
 
 ## Quel modèle choisir — la mesure, pas la réputation
 
