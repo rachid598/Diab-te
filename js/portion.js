@@ -43,7 +43,8 @@
     ['capsule', /\bcapsules?\b/], ['sachet', /\bsachets?\b/],
     ['pot', /\bpots?\b/], ['bouteille', /\bbouteilles?\b/],
     ['canette', /\bcanettes?\b/], ['portion', /\bportions?\b/],
-    ['pièce', /\bpieces?\b|\bpi[eè]ces?\b/]
+    ['pièce', /\bpieces?\b|\bpi[eè]ces?\b/], ['barquette', /\bbarquettes?\b/],
+    ['yaourt', /\byaourts?\b/]
   ];
 
   function labelDans(texte) {
@@ -55,12 +56,19 @@
     return '';
   }
 
+  // Source unique pour la regex ci-dessous : elle dupliquait la même liste
+  // à part, en dur — exactement ce qui a fait manquer « barquette » jusqu'ici.
+  var UNIT_LABEL_ALTERNATION = UNIT_LABELS.map(function (x) {
+    return x[1].source.replace(/^\\b/, '').replace(/\\b$/, '');
+  }).join('|');
+
   function compteDans(texte) {
     var t = String(texte || '').toLowerCase();
     if (!t) return null;
     var label = labelDans(t);
     if (!label) return null;
-    var m = /(\d{1,4}(?:[.,]\d+)?)\s*(?:x\s*)?(?:biscuits?|cookies?|gaufrettes?|barres?|tranches?|galettes?|capsules?|sachets?|pots?|bouteilles?|canettes?|portions?|pi[eè]ces?)\b/.exec(t);
+    var m = new RegExp('(\\d{1,4}(?:[.,]\\d+)?)\\s*(?:x\\s*)?(?:' +
+      UNIT_LABEL_ALTERNATION + ')\\b').exec(t);
     var n = m ? nombre(m[1]) : null;
     if (!(n > 0) || Math.floor(n) !== n) return null;
     return { unitesSuggerees: n, label: label };
@@ -75,7 +83,8 @@
     var t = String(texte || '').toLowerCase().trim();
     if (!t) return null;
 
-    var nomme = /(\d+)\s*(?:biscuits?|cookies?|gaufrettes?|barres?|tranches?|galettes?|capsules?|sachets?|pots?|bouteilles?|canettes?|portions?|pi[eè]ces?)\s*(?:[x×*]|de|à|a)?\s*([\d.,]+)\s*(kg|g|ml|cl|dl|l)\b/.exec(t);
+    var nomme = new RegExp('(\\d+)\\s*(?:' + UNIT_LABEL_ALTERNATION +
+      ')\\s*(?:[x\u00d7*]|de|\u00e0|a)?\\s*([\\d.,]+)\\s*(kg|g|ml|cl|dl|l)\\b').exec(t);
     if (nomme) {
       var nombrePieces = parseInt(nomme[1], 10);
       var poidsPiece = normalise(nombre(nomme[2]), nomme[3]);
@@ -185,7 +194,22 @@
       pour100: pour100, methode: 'paquet' });
   }
 
+  /* La phrase parlée dit d'abord l'unité (« 2 barquettes de LU »), pas
+     l'inverse comme readPack() qui lit une fiche produit. Reste en dehors
+     de compteDans/parseQuantity : ceux-là exigent aussi un poids ou un
+     total, une phrase dictée n'en donne jamais. Sert à js/voice.js. */
+  function matchLeadingUnit(texte) {
+    var t = String(texte || '').replace(/^\s+/, '');
+    if (!t) return null;
+    var connecteur = '(?:de |d[’\']|d\')?';
+    var re = new RegExp('^(?:' + UNIT_LABEL_ALTERNATION + ')\\b\\s*' + connecteur + '\\s*', 'i');
+    var m = re.exec(t);
+    if (!m) return null;
+    return { label: labelDans(m[0]), rest: t.slice(m[0].length) };
+  }
+
   window.Portion = {
+    matchLeadingUnit: matchLeadingUnit,
     parseQuantity: parseQuantity,
     countFromText: compteDans,
     labelFromText: labelDans,

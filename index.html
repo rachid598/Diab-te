@@ -13,7 +13,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="stylesheet" href="css/styles.css?v=90" />
+  <link rel="stylesheet" href="css/styles.css?v=91" />
 </head>
 <body>
   <!-- ============ En-tête ============ -->
@@ -291,7 +291,17 @@
         <div class="card">
           <h2>Base d'aliments</h2>
           <p class="hint">Fonctionne hors-ligne, sans clé API. Choisis un aliment puis sa portion courante.</p>
-          <input id="food-search" class="input" type="text" placeholder="Rechercher (ex. riz, pain, pomme…)" />
+          <div class="off-search-row">
+            <input id="food-search" class="input" type="text" placeholder="Rechercher (ex. riz, pain, pomme…)" />
+            <button id="voice-search-btn" class="btn btn-ghost" type="button" hidden
+                    aria-label="Dicter ce que tu manges (ex. « 2 barquettes de LU »)">
+              <svg class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z" />
+                <path d="M19 11a7 7 0 0 1-14 0M12 18v3" />
+              </svg>
+            </button>
+          </div>
+          <p id="voice-status" class="hint tiny" hidden></p>
           <div id="cat-chips" class="chips"></div>
           <div id="food-results" class="food-results"></div>
 
@@ -804,21 +814,22 @@
        off.js, qui décident de leur support de stockage / de leur transport HTTP
        selon Native.isApp. Dans le navigateur, les deux fichiers se chargent sans
        effet (Capacitor y déclare la plateforme « web »). -->
-  <script src="vendor/capacitor-plugins.js?v=90"></script>
-  <script src="js/native.js?v=90"></script>
-  <script src="js/storage.js?v=90"></script>
-  <script src="js/foods.js?v=90"></script>
-  <script src="js/gi.js?v=90"></script>
-  <script src="js/queue.js?v=90"></script>
-  <script src="js/report.js?v=90"></script>
-  <script src="js/bench.js?v=90"></script>
-  <script src="js/estimator.js?v=90"></script>
-  <script src="js/camera.js?v=90"></script>
-  <script src="js/portion.js?v=90"></script>
-  <script src="js/manual.js?v=90"></script>
-  <script src="js/off.js?v=90"></script>
-  <script src="vendor/zxing.min.js?v=90"></script>
-  <script src="js/barcode.js?v=90"></script>
-  <script src="js/app.js?v=90"></script>
+  <script src="vendor/capacitor-plugins.js?v=91"></script>
+  <script src="js/native.js?v=91"></script>
+  <script src="js/storage.js?v=91"></script>
+  <script src="js/foods.js?v=91"></script>
+  <script src="js/gi.js?v=91"></script>
+  <script src="js/queue.js?v=91"></script>
+  <script src="js/report.js?v=91"></script>
+  <script src="js/bench.js?v=91"></script>
+  <script src="js/estimator.js?v=91"></script>
+  <script src="js/camera.js?v=91"></script>
+  <script src="js/portion.js?v=91"></script>
+  <script src="js/voice.js?v=91"></script>
+  <script src="js/manual.js?v=91"></script>
+  <script src="js/off.js?v=91"></script>
+  <script src="vendor/zxing.min.js?v=91"></script>
+  <script src="js/barcode.js?v=91"></script>
+  <script src="js/app.js?v=91"></script>
 </body>
 </html>

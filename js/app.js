@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '90'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '91'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -3357,12 +3357,130 @@
     initOnlineTools();
     initPortionCard();
     initUnknownProduct();
+    initVoiceSearch();
     renderLocalNote();
     renderChips();
     renderFoodResults('');
     renderSavedMeals();
     $('manual-dock-btn').addEventListener('click', function () {
       $('manual-meal-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  /* ---------- Dictée : « 2 barquettes de LU », « 4 petit beurre de LU » ----------
+     voice.js ne fait QUE comprendre la phrase (quantité + requête) ; toute la
+     recherche et l'ajout repassent par les mêmes chemins que la saisie au
+     clavier — même recherche locale tokenisée, même recherche OpenFoodFacts,
+     et surtout LA MÊME confirmation obligatoire avant qu'une quantité entre
+     dans le calcul (showPortionCard ne débloque jamais « Ajouter » tant que
+     le paquet n'est pas confirmé). La dictée pré-remplit, elle ne décide pas. */
+  function initVoiceSearch() {
+    var btn = $('voice-search-btn');
+    if (!btn) return;
+    if (!window.Voice || !Voice.supported()) { btn.hidden = true; return; }
+    btn.hidden = false;
+
+    var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var ecoute = false;
+
+    function statut(msg) {
+      var el = $('voice-status');
+      if (!el) return;
+      el.hidden = !msg;
+      if (msg) el.textContent = msg;
+    }
+
+    /* enLigne : un résultat OpenFoodFacts n'a jamais de champ « packaged »
+       (ce flag n'existe que pour le mélange local de Foods.search) alors que
+       chaque réponse OFF EST un produit emballé — c'est tout ce que cette
+       recherche peut renvoyer. renderOffResults() ouvre d'ailleurs déjà
+       showPortionCard() sans condition sur ses propres résultats ; on
+       applique la même règle ici plutôt que de se fier à un champ absent. */
+    function surUneSeuleTrouvaille(f, quantite, enLigne) {
+      if (enLigne || f.packaged) {
+        /* #portion-card vit dans le sous-onglet Produit : l'ouvrir sans y
+           basculer laisse la carte correctement construite mais invisible
+           si la dictée a été lancée depuis Base d'aliments. */
+        selectPane('tab-manual', 'produit');
+        showPortionCard(f);
+        if ($('portion-eat')) { $('portion-eat').value = quantite; updatePortion(); }
+      } else {
+        addFoodToMeal(Object.assign({}, f, { qty: quantite }));
+      }
+      toast('Compris : ' + fr(quantite) + '. Vérifie puis confirme avant d’ajouter.');
+    }
+
+    function apresRechercheEnLigne(requete, quantite, list) {
+      if (!list.length) { toast('Aucun produit trouvé en ligne pour « ' + requete + ' ».'); return; }
+      if (list.length === 1) { surUneSeuleTrouvaille(list[0], quantite, true); return; }
+      toast(list.length + ' résultats en ligne pour « ' + requete + ' » — choisis dans la liste.');
+    }
+
+    function traiter(transcript) {
+      var parsed = Voice.parse(transcript);
+      if (!parsed) {
+        statut('');
+        toast('Pas compris de quantité dans « ' + transcript +
+          ' ». Tape ta recherche, ou décris le repas dans Estimer → Description.');
+        return;
+      }
+      $('food-search').value = parsed.requete;
+      /* Toujours « Tous », jamais le chip de catégorie actif : demander
+         « 2 barquettes de LU » alors que « Sucré » était sélectionné ne doit
+         pas exclure silencieusement le bon résultat. renderFoodResults lit
+         currentCat elle-même, d'où la remise à « Tous » avant de l'appeler,
+         sinon la liste affichée et la décision ci-dessous divergeraient. */
+      currentCat = 'Tous';
+      renderChips();
+      var locaux = Foods.search(parsed.requete, 'Tous');
+      renderFoodResults(parsed.requete);
+      statut('');
+      if (locaux.length === 1) {
+        surUneSeuleTrouvaille(locaux[0], parsed.quantite);
+      } else if (locaux.length > 1) {
+        toast(locaux.length + ' résultats pour « ' + parsed.requete + ' » — choisis dans la liste.');
+      } else {
+        // Rien dans la base locale : on tente OpenFoodFacts, comme le
+        // ferait un appui sur « Chercher ce produit en ligne ».
+        selectPane('tab-manual', 'produit');
+        if ($('off-search')) $('off-search').value = parsed.requete;
+        statut('🌐 Recherche en ligne…');
+        runOffSearch(parsed.requete, function (list) {
+          statut('');
+          apresRechercheEnLigne(parsed.requete, parsed.quantite, list);
+        });
+      }
+    }
+
+    btn.addEventListener('click', function () {
+      if (ecoute) return;
+      var reco;
+      try { reco = new Recognition(); } catch (e) { btn.hidden = true; return; }
+      reco.lang = 'fr-FR';
+      reco.continuous = false;
+      reco.interimResults = false;
+      reco.maxAlternatives = 1;
+      ecoute = true;
+      statut('🎙️ Je t’écoute…');
+      reco.onresult = function (e) {
+        var transcript = e.results && e.results[0] && e.results[0][0] &&
+          e.results[0][0].transcript;
+        if (transcript) traiter(transcript);
+        else statut('');
+      };
+      reco.onerror = function (e) {
+        statut('');
+        var code = e && e.error;
+        if (code === 'not-allowed' || code === 'service-not-allowed') {
+          toast('Micro refusé — autorise l’accès dans les réglages du navigateur.');
+        } else if (code === 'no-speech') {
+          toast('Rien entendu, réessaie.');
+        } else {
+          toast('Reconnaissance vocale indisponible.');
+        }
+      };
+      reco.onend = function () { ecoute = false; };
+      try { reco.start(); } catch (e) { ecoute = false; statut(''); }
     });
   }
 
@@ -3395,7 +3513,11 @@
     });
   }
 
-  function runOffSearch(query) {
+  // onDone(list) : optionnel, appelé après le rendu avec ce qui a été trouvé
+  // (tableau vide si rien). Sert à la dictée vocale pour ouvrir directement
+  // la carte de portion sur un résultat unique, sans dupliquer cette
+  // recherche ni son repli hors-ligne.
+  function runOffSearch(query, onDone) {
     /* Une nouvelle intention invalide immédiatement la précédente, y compris si
        la nouvelle saisie est trop courte. Sans ce jeton, une réponse lente à A
        pouvait remplacer les résultats déjà affichés pour B. */
@@ -3410,6 +3532,7 @@
       if (generation !== offSearchGeneration) return;
       status.hidden = true;
       renderOffResults(list);
+      if (onDone) onDone(list);
     }).catch(function (e) {
       if (generation !== offSearchGeneration) return;
       status.hidden = true;
@@ -3421,9 +3544,11 @@
         renderOffResults(locaux, 'hors ligne');
         toast('OpenFoodFacts injoignable — ' + locaux.length +
               ' produit(s) trouvé(s) dans ta base locale.');
+        if (onDone) onDone(locaux);
         return;
       }
       toast(e.message);
+      if (onDone) onDone([]);
     });
   }
 

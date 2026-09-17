@@ -81,3 +81,23 @@ test('la page peut vérifier la version du worker qui la contrôle', () => {
   assert.ok(attendu, 'APP_VERSION doit être lisible dans js/app.js');
   assert.equal(workerEnv().version(), attendu[1]);
 });
+
+test('chaque script chargé par index.html est précaché par le worker', () => {
+  /* voice.js a été ajouté aux balises <script> sans être ajouté à ASSETS :
+     l'app aurait fonctionné en ligne, mais un premier lancement hors-ligne ou
+     juste après une mise à jour OTA aurait échoué à charger ce fichier. Rien
+     ne le signalait avant ce test. */
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const index = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const worker = fs.readFileSync(path.join(__dirname, '..', 'service-worker.js'), 'utf8');
+
+  const scripts = Array.from(index.matchAll(/<script src="(js\/[^"?]+\.js)\?v=/g), (m) => m[1]);
+  assert.ok(scripts.length > 5, 'la liste extraite ne doit pas être vide par erreur de regex');
+
+  scripts.forEach((src) => {
+    assert.match(worker, new RegExp(
+      "'\\./" + src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "\\?v=' \\+ VERSION"),
+      src + ' est chargé par index.html mais absent de ASSETS dans service-worker.js');
+  });
+});

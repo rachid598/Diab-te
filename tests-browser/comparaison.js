@@ -1115,6 +1115,106 @@ async function ecran(page, liste, contexte) {
   verifie(/401|clé API invalide/i.test(await page.textContent('#toast')),
     'et c\'est bien l\'erreur du fournisseur principal qui remonte, pas un message générique');
 
+  /* Dictée : « 2 barquettes de LU », « 4 petit beurre de LU ». voice.js ne
+     fait QUE comprendre la phrase ; ce test vérifie le VRAI chemin bout en
+     bout — recherche, ouverture de la carte de portion, quantité pré-remplie
+     — et surtout que la confirmation reste obligatoire, comme au clavier.
+     SpeechRecognition n'existe pas dans Chromium headless : on le simule via
+     addInitScript, seul moyen qu'il existe AVANT que voice.js ne teste sa
+     présence au chargement de la page. */
+  console.log('\nDictée vocale :');
+  await page.addInitScript(function () {
+    function ReconnaissanceSimulee() {}
+    ReconnaissanceSimulee.prototype.start = function () {
+      var self = this;
+      setTimeout(function () {
+        if (window.__voiceError) {
+          if (self.onerror) self.onerror({ error: window.__voiceError });
+        } else if (self.onresult) {
+          self.onresult({ results: [[{ transcript: window.__voiceTranscript || '' }]] });
+        }
+        if (self.onend) self.onend();
+      }, 0);
+    };
+    window.SpeechRecognition = ReconnaissanceSimulee;
+    window.webkitSpeechRecognition = ReconnaissanceSimulee;
+  });
+
+  await page.route('**/world.openfoodfacts.org/**', function (route) {
+    const url = new URL(route.request().url());
+    const query = (url.searchParams.get('search_terms') || '').toLowerCase();
+    // Nom inventé : « Nutella » a une vraie entrée dans la base générique
+    // hors-ligne (« Pâte à tartiner (Nutella) »), ce qui aurait fait trouver
+    // un résultat local et jamais interroger ce mock — comportement correct
+    // de l'app, mais pas ce que ce scénario veut vérifier.
+    const produits = query === 'zibulor' ? [{
+      code: '3017620422003', product_name_fr: 'Zibulor', brands: 'Ferrero',
+      quantity: '400 g', product_quantity: 400, product_quantity_unit: 'g',
+      nutriments: { carbohydrates_100g: 57 }
+    }] : [];
+    return route.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify({ products: produits }) });
+  });
+
+  /* Produit connu localement, avec un vrai code (comme après un scan) : c'est
+     ce qui donne packaged:true, et donc l'ouverture de la carte de portion —
+     pas d'ajout direct sans confirmation. Un aliment personnalisé via le
+     formulaire « + Ajouter » n'a pas ce statut, ce n'est pas le chemin visé
+     ici. Nom volontairement distinctif : une requête de deux lettres comme
+     « LU » matcherait aussi « sirop dilué » dans la base générique
+     (correspondance partielle) et transformerait ce test en cas ambigu. */
+  await page.evaluate(function () {
+    Storage.setProduct('9887766554433', { n: 'Barquette Croqinou', carb: 62 }, 'perso');
+  });
+  await page.goto('http://localhost:' + PORT + '/');
+  await page.click('.tab[data-tab="manual"]');
+
+  verifie(await page.isVisible('#voice-search-btn'),
+    'le bouton dictée apparaît quand SpeechRecognition est disponible');
+
+  await page.evaluate(function () {
+    window.__voiceTranscript = 'je mange 2 barquettes de Croqinou';
+  });
+  await page.click('#voice-search-btn');
+  await page.waitForSelector('#portion-card:not([hidden])', { timeout: 5000 });
+  verifie(/Barquette Croqinou/.test(await page.textContent('#portion-name')),
+    'un résultat local unique ouvre directement sa carte de portion');
+  verifie(await page.inputValue('#portion-eat') === '2',
+    'la quantité dictée est pré-remplie');
+  verifie(await page.isDisabled('#portion-add'),
+    'mais l’ajout reste bloqué tant que le paquet n’est pas confirmé — la dictée ne contourne pas ce garde-fou');
+  await page.click('#portion-close');
+  await page.click('.mode-btn[data-mode="base"]');
+
+  // Rien en local : bascule automatique vers Open Food Facts (mock ci-dessus).
+  await page.evaluate(function () { window.__voiceTranscript = 'je mange 3 Zibulor'; });
+  await page.click('#voice-search-btn');
+  await page.waitForSelector('#portion-card:not([hidden])', { timeout: 5000 });
+  verifie(/Zibulor/.test(await page.textContent('#portion-name')),
+    'sans résultat local, la recherche en ligne prend le relais automatiquement');
+  verifie(await page.inputValue('#portion-eat') === '3',
+    'la quantité dictée reste pré-remplie après la recherche en ligne');
+  verifie(await page.evaluate(function () {
+    return document.querySelector('.mode-btn[data-mode="produit"]').getAttribute('aria-selected');
+  }) === 'true', 'et l’écran a basculé sur l’onglet Produit pour montrer d’où ça vient');
+  await page.click('#portion-close');
+  await page.click('.mode-btn[data-mode="base"]');
+
+  // Aucune quantité comprise : on ne devine pas, on le dit.
+  await page.fill('#food-search', '');
+  await page.evaluate(function () { window.__voiceTranscript = 'un bon repas entre amis'; });
+  await page.click('#voice-search-btn');
+  // Le toast précédent (« Compris : 3… ») peut être encore affiché : on
+  // attend le nouveau texte, pas seulement « non masqué ».
+  await page.waitForFunction(function () {
+    const t = document.getElementById('toast');
+    return t && !t.hidden && /pas compris/i.test(t.textContent || '');
+  }, { timeout: 5000 });
+  verifie(/pas compris/i.test(await page.textContent('#toast')),
+    'une phrase sans quantité reconnaissable est signalée, pas devinée');
+  verifie((await page.inputValue('#food-search')) === '',
+    'et le champ de recherche n’est pas modifié dans ce cas');
+
   verifie(erreursJs.length === 0, 'aucune erreur JavaScript : ' + (erreursJs[0] || '—'));
 
   await nav.close();

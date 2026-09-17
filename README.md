@@ -110,6 +110,15 @@ fiche produit reste une suggestion à confirmer : « 2 × 250 g » peut décrire
 sachets, pas deux biscuits. Le poids direct d'une unité est aussi accepté. Les produits
 scannés et les corrections personnelles enrichissent la recherche locale du téléphone.
 
+**🎙️ Dictée** — dans Manuel, dis par exemple *« je mange 2 barquettes de LU »* ou
+*« 4 petit beurre de LU »* : la quantité et le nom du produit sont compris, puis
+recherchés — d'abord localement, puis sur OpenFoodFacts si rien n'est trouvé. Un résultat
+unique ouvre directement le calcul de portion, quantité déjà remplie ; plusieurs résultats
+laissent le choix ; une phrase sans quantité reconnaissable ne devine rien et le dit. La
+dictée ne fait que pré-remplir : elle ne contourne jamais la confirmation exigée avant
+qu'une quantité entre dans le calcul. Nécessite un navigateur compatible avec la
+reconnaissance vocale (Web Speech API) ; le bouton reste caché sinon.
+
 ## Comment la précision est obtenue
 
 La difficulté n'est pas de reconnaître l'aliment, c'est d'**estimer la portion**. La méthode

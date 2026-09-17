@@ -131,3 +131,22 @@ test('un nombre d\'unités de paquet est entier et un dépassement est signalé'
   assert.equal(Portion.calcule('300 g', 15, 2, 70), null,
     'un suffixe inattendu ne doit pas être avalé par parseFloat');
 });
+
+/* « barquette » et « yaourt » étaient absents des trois listes de noms
+   d'unité (labelDans, compteDans, parseQuantity) — dupliquées en dur, donc
+   un nom ajouté à l'une pouvait rester invisible aux deux autres. La
+   vérification porte sur les trois pour empêcher cet écart de revenir. */
+test('« barquette » et « yaourt » sont reconnus partout où le sont « biscuit » ou « sachet »', () => {
+  assert.equal(Portion.labelFromText('2 barquettes de LU'), 'barquette');
+  assert.equal(Portion.labelFromText('6 yaourts nature'), 'yaourt');
+
+  assert.deepEqual(plain(Portion.countFromText('2 barquettes de LU')),
+    { unitesSuggerees: 2, label: 'barquette' });
+
+  assert.deepEqual(plain(Portion.parseQuantity('2 barquettes de 25 g')),
+    { total: 50, unitesSuggerees: 2, parUniteSuggeree: 25, label: 'barquette',
+      unite: 'g', confirme: false });
+  assert.deepEqual(plain(Portion.parseQuantity('6 yaourts x 125 g')),
+    { total: 750, unitesSuggerees: 6, parUniteSuggeree: 125, label: 'yaourt',
+      unite: 'g', confirme: false });
+});
