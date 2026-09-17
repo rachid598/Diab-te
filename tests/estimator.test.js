@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadScript } = require('./test-env');
+const { loadScript, plain } = require('./test-env');
 
 function raw(total) {
   return {
@@ -385,4 +385,91 @@ test('sans aucune correction passée, le prompt ne porte aucun bloc de densité'
   });
   assert.doesNotMatch(Estimator.buildPhotoPrompt({ imageCount: 1, referenceMode: 'none' }),
     /DENSITÉS PERSONNELLES/);
+});
+
+/* Secours IA de la dictée : n'entre en jeu qu'à la demande explicite de
+   app.js (jamais depuis voice.js, qui reste pur), et ne doit JAMAIS estimer
+   de glucides — seulement identifier quoi chercher ensuite dans les mêmes
+   bases que la saisie manuelle. */
+test('parseVoiceItems extrait plusieurs aliments d’une seule phrase', async () => {
+  let corpsEnvoye = null;
+  const { Estimator } = env({
+    fetch(url, options) {
+      corpsEnvoye = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true, status: 200,
+        text: () => Promise.resolve(JSON.stringify({
+          content: [{ type: 'text', text: JSON.stringify({
+            items: [
+              { quantite: 2, produit: 'LU' },
+              { quantite: 1, produit: 'café' }
+            ]
+          }) }]
+        }))
+      });
+    }
+  });
+  const got = await Estimator.parseVoiceItems('2 barquettes de LU et un café', {
+    provider: 'claude', apiKeys: { claude: 'test' }, models: { claude: 'claude-test' }
+  });
+  assert.deepEqual(plain(got.items), [{ quantite: 2, produit: 'LU' }, { quantite: 1, produit: 'café' }]);
+
+  // Un autre système que celui de l'estimation de glucides doit être envoyé :
+  // cet appel n'a pas à recevoir les consignes d'ancrage, de fourchette, etc.
+  assert.match(corpsEnvoye.system, /extrais les aliments/i);
+  assert.doesNotMatch(corpsEnvoye.system, /COMPTAGE DES GLUCIDES/);
+});
+
+test('parseVoiceItems filtre les entrées invalides plutôt que de les accepter telles quelles', async () => {
+  const { Estimator } = env({
+    fetch() {
+      return Promise.resolve({
+        ok: true, status: 200,
+        text: () => Promise.resolve(JSON.stringify({
+          content: [{ type: 'text', text: JSON.stringify({
+            items: [
+              { quantite: 2, produit: 'valide' },
+              { quantite: 0, produit: 'quantité nulle' },
+              { quantite: -1, produit: 'quantité négative' },
+              { quantite: 500, produit: 'quantité absurde' },
+              { quantite: 2, produit: '' },
+              { quantite: 'deux', produit: 'quantité non numérique' },
+              {}
+            ]
+          }) }]
+        }))
+      });
+    }
+  });
+  const got = await Estimator.parseVoiceItems('peu importe', {
+    provider: 'claude', apiKeys: { claude: 'test' }, models: { claude: 'claude-test' }
+  });
+  assert.deepEqual(plain(got.items), [{ quantite: 2, produit: 'valide' }]);
+});
+
+test('parseVoiceItems plafonne le nombre d’aliments retenus', async () => {
+  const items = Array.from({ length: 20 }, (_, i) => ({ quantite: 1, produit: 'aliment ' + i }));
+  const { Estimator } = env({
+    fetch() {
+      return Promise.resolve({
+        ok: true, status: 200,
+        text: () => Promise.resolve(JSON.stringify({
+          content: [{ type: 'text', text: JSON.stringify({ items: items }) }]
+        }))
+      });
+    }
+  });
+  const got = await Estimator.parseVoiceItems('une longue liste', {
+    provider: 'claude', apiKeys: { claude: 'test' }, models: { claude: 'claude-test' }
+  });
+  assert.equal(got.items.length, 8);
+});
+
+test('parseVoiceItems refuse sans clé, sans jamais contacter le réseau', async () => {
+  let appele = false;
+  const { Estimator } = env({ fetch() { appele = true; return Promise.reject(new Error('ne doit pas être appelé')); } });
+  await assert.rejects(
+    Estimator.parseVoiceItems('2 barquettes de LU', { provider: 'claude', apiKeys: {} }),
+    /Aucune clé API/);
+  assert.equal(appele, false);
 });

@@ -1200,20 +1200,124 @@ async function ecran(page, liste, contexte) {
   await page.click('#portion-close');
   await page.click('.mode-btn[data-mode="base"]');
 
-  // Aucune quantité comprise : on ne devine pas, on le dit.
+  // Aucune quantité comprise ET aucune clé IA configurée : on ne devine pas,
+  // on le dit — sans tenter le moindre appel réseau.
+  await page.evaluate(function () {
+    const key = 'diabete.settings.v1';
+    const s = JSON.parse(localStorage.getItem(key) || '{}');
+    s.apiKeys = {};
+    localStorage.setItem(key, JSON.stringify(s));
+  });
+  await page.reload();
+  await page.click('.tab[data-tab="manual"]');
   await page.fill('#food-search', '');
-  await page.evaluate(function () { window.__voiceTranscript = 'un bon repas entre amis'; });
+  await page.evaluate(function () {
+    window.__iaAppelee = false;
+    window.Estimator.parseVoiceItems = function () {
+      window.__iaAppelee = true;
+      return Promise.reject(new Error('ne doit jamais être appelé sans clé'));
+    };
+    window.__voiceTranscript = 'un bon repas entre amis';
+  });
   await page.click('#voice-search-btn');
-  // Le toast précédent (« Compris : 3… ») peut être encore affiché : on
-  // attend le nouveau texte, pas seulement « non masqué ».
   await page.waitForFunction(function () {
     const t = document.getElementById('toast');
     return t && !t.hidden && /pas compris/i.test(t.textContent || '');
   }, { timeout: 5000 });
   verifie(/pas compris/i.test(await page.textContent('#toast')),
-    'une phrase sans quantité reconnaissable est signalée, pas devinée');
+    'sans clé IA, une phrase sans quantité reconnaissable est signalée, pas devinée');
   verifie((await page.inputValue('#food-search')) === '',
     'et le champ de recherche n’est pas modifié dans ce cas');
+  verifie(await page.evaluate(() => window.__iaAppelee) === false,
+    'et le secours IA n’est même pas tenté sans clé configurée');
+
+  /* Secours IA : seulement quand voice.js échoue (ou que sa recherche
+     n'aboutit à rien) ET qu'une clé est configurée. Estimator.parseVoiceItems
+     est remplacée plutôt que le réseau simulé : ce test vérifie le
+     BRANCHEMENT dans app.js, pas le prompt ni l'appel HTTP — déjà couverts
+     dans tests/estimator.test.js. */
+  console.log('\nSecours IA de la dictée :');
+  await page.evaluate(function () {
+    const key = 'diabete.settings.v1';
+    const s = JSON.parse(localStorage.getItem(key) || '{}');
+    s.provider = 'gemini';
+    s.apiKeys = Object.assign({}, s.apiKeys || {}, { gemini: 'cle-test' });
+    localStorage.setItem(key, JSON.stringify(s));
+  });
+  await page.reload();
+  await page.click('.tab[data-tab="manual"]');
+
+  // Un seul aliment reconnu par l'IA, qui se résout en un seul résultat
+  // local (le produit emballé semé plus haut) : même comportement final que
+  // le chemin rapide, juste passé par l'IA parce que voice.js seul avait
+  // échoué à comprendre la phrase.
+  await page.evaluate(function () {
+    window.Estimator.parseVoiceItems = function () {
+      return Promise.resolve({ items: [{ quantite: 2, produit: 'Croqinou' }] });
+    };
+    window.__voiceTranscript = 'sers-moi deux Croqinou steplait';
+  });
+  await page.click('#voice-search-btn');
+  await page.waitForSelector('#portion-card:not([hidden])', { timeout: 5000 });
+  verifie(/Barquette Croqinou/.test(await page.textContent('#portion-name')),
+    'une phrase que voice.js seul ne comprend pas aboutit quand même, via le secours IA');
+  verifie(await page.inputValue('#portion-eat') === '2',
+    'la quantité extraite par l’IA est pré-remplie, comme au chemin rapide');
+  verifie(await page.isDisabled('#portion-add'),
+    'et la confirmation reste tout autant obligatoire par ce chemin');
+  await page.click('#portion-close');
+  await page.click('.mode-btn[data-mode="base"]');
+
+  // Plusieurs aliments dans UNE phrase : « 2 barquettes de LU et un café ».
+  // Un aliment non emballé et un aliment emballé, résolus l'un après
+  // l'autre : le premier est ajouté directement, le second attend sa
+  // confirmation — une seule carte de portion existe, elle ne s'ouvre que
+  // pour lui.
+  await page.click('#add-custom-toggle');
+  await page.fill('#cf-name', 'Café noir maison');
+  await page.fill('#cf-carb', '0');
+  await page.click('#cf-save');
+  await page.click('.mode-btn[data-mode="base"]');
+
+  await page.evaluate(function () {
+    window.Estimator.parseVoiceItems = function () {
+      return Promise.resolve({ items: [
+        { quantite: 1, produit: 'Café noir maison' },
+        { quantite: 2, produit: 'Croqinou' }
+      ] });
+    };
+    window.__voiceTranscript = 'deux barquettes de Croqinou et un café noir maison';
+  });
+  await page.click('#voice-search-btn');
+  await page.waitForSelector('#portion-card:not([hidden])', { timeout: 5000 });
+  verifie(/Barquette Croqinou/.test(await page.textContent('#portion-name')),
+    'sur plusieurs aliments, seul celui qui a besoin d’une confirmation ouvre la carte');
+  verifie(/Café noir maison/.test(await page.textContent('#manual-items')),
+    'et l’aliment non emballé a déjà été ajouté au repas, lui, sans attendre');
+  await page.click('#portion-close');
+  await page.click('.mode-btn[data-mode="base"]');
+
+  /* voice.js comprend une structure (quantité + requête) mais la requête
+     elle-même ne mène nulle part — le cas typique d'une phrase à plusieurs
+     aliments que le parseur local, à un seul aliment par dictée, a découpée
+     de travers. Le secours IA doit prendre le relais tout seul, sans que
+     l'utilisateur ait besoin de reformuler. */
+  await page.evaluate(function () {
+    window.__iaAppelAvec = null;
+    window.Estimator.parseVoiceItems = function (transcript) {
+      window.__iaAppelAvec = transcript;
+      return Promise.resolve({ items: [{ quantite: 2, produit: 'Croqinou' }] });
+    };
+    // Ne correspond à rien, ni en local ni dans le mock OFF ci-dessus.
+    window.__voiceTranscript = 'je mange 2 machin truc qui n’existe pas';
+  });
+  await page.click('#voice-search-btn');
+  await page.waitForSelector('#portion-card:not([hidden])', { timeout: 5000 });
+  verifie(await page.evaluate(() => window.__iaAppelAvec) === 'je mange 2 machin truc qui n’existe pas',
+    'une recherche comprise mais infructueuse partout bascule aussi sur le secours IA');
+  verifie(/Barquette Croqinou/.test(await page.textContent('#portion-name')),
+    'et celui-ci retrouve bien le produit que voice.js seul n’avait pas su chercher');
+  await page.click('#portion-close');
 
   verifie(erreursJs.length === 0, 'aucune erreur JavaScript : ' + (erreursJs[0] || '—'));
 

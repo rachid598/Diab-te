@@ -3,7 +3,7 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var APP_VERSION = '91'; // à garder synchro avec la version du service worker
+  var APP_VERSION = '92'; // à garder synchro avec la version du service worker
 
   /* Build natif MINIMAL exigé par ce bundle web.
      Le contenu web se met à jour par OTA, le code Java non : un APK ancien
@@ -3390,41 +3390,17 @@
       if (msg) el.textContent = msg;
     }
 
-    /* enLigne : un résultat OpenFoodFacts n'a jamais de champ « packaged »
-       (ce flag n'existe que pour le mélange local de Foods.search) alors que
-       chaque réponse OFF EST un produit emballé — c'est tout ce que cette
-       recherche peut renvoyer. renderOffResults() ouvre d'ailleurs déjà
-       showPortionCard() sans condition sur ses propres résultats ; on
-       applique la même règle ici plutôt que de se fier à un champ absent. */
-    function surUneSeuleTrouvaille(f, quantite, enLigne) {
-      if (enLigne || f.packaged) {
-        /* #portion-card vit dans le sous-onglet Produit : l'ouvrir sans y
-           basculer laisse la carte correctement construite mais invisible
-           si la dictée a été lancée depuis Base d'aliments. */
-        selectPane('tab-manual', 'produit');
-        showPortionCard(f);
-        if ($('portion-eat')) { $('portion-eat').value = quantite; updatePortion(); }
-      } else {
-        addFoodToMeal(Object.assign({}, f, { qty: quantite }));
-      }
-      toast('Compris : ' + fr(quantite) + '. Vérifie puis confirme avant d’ajouter.');
-    }
+    /* Résout UN aliment (requête + quantité) exactement comme une saisie au
+       clavier : recherche locale, puis en ligne si rien trouvé. Rapporte à
+       cb(statut, f) sans jamais décider seule d'ouvrir la carte de portion —
+       ça reste au chemin appelant, qui sait s'il traite un seul aliment ou
+       plusieurs à la suite (une seule carte de portion existe dans l'écran).
 
-    function apresRechercheEnLigne(requete, quantite, list) {
-      if (!list.length) { toast('Aucun produit trouvé en ligne pour « ' + requete + ' ».'); return; }
-      if (list.length === 1) { surUneSeuleTrouvaille(list[0], quantite, true); return; }
-      toast(list.length + ' résultats en ligne pour « ' + requete + ' » — choisis dans la liste.');
-    }
-
-    function traiter(transcript) {
-      var parsed = Voice.parse(transcript);
-      if (!parsed) {
-        statut('');
-        toast('Pas compris de quantité dans « ' + transcript +
-          ' ». Tape ta recherche, ou décris le repas dans Estimer → Description.');
-        return;
-      }
-      $('food-search').value = parsed.requete;
+       statut : 'ajoute' (non emballé, déjà ajouté au repas), 'confirme'
+       (emballé, une carte À OUVRIR pour confirmer), 'choix' (plusieurs
+       résultats, laissés affichés), 'introuvable' (aucun, nulle part). */
+    function resoudreUnAliment(requete, quantite, cb) {
+      $('food-search').value = requete;
       /* Toujours « Tous », jamais le chip de catégorie actif : demander
          « 2 barquettes de LU » alors que « Sucré » était sélectionné ne doit
          pas exclure silencieusement le bon résultat. renderFoodResults lit
@@ -3432,24 +3408,140 @@
          sinon la liste affichée et la décision ci-dessous divergeraient. */
       currentCat = 'Tous';
       renderChips();
-      var locaux = Foods.search(parsed.requete, 'Tous');
-      renderFoodResults(parsed.requete);
-      statut('');
+      var locaux = Foods.search(requete, 'Tous');
+      renderFoodResults(requete);
       if (locaux.length === 1) {
-        surUneSeuleTrouvaille(locaux[0], parsed.quantite);
-      } else if (locaux.length > 1) {
-        toast(locaux.length + ' résultats pour « ' + parsed.requete + ' » — choisis dans la liste.');
-      } else {
-        // Rien dans la base locale : on tente OpenFoodFacts, comme le
-        // ferait un appui sur « Chercher ce produit en ligne ».
-        selectPane('tab-manual', 'produit');
-        if ($('off-search')) $('off-search').value = parsed.requete;
-        statut('🌐 Recherche en ligne…');
-        runOffSearch(parsed.requete, function (list) {
-          statut('');
-          apresRechercheEnLigne(parsed.requete, parsed.quantite, list);
+        if (locaux[0].packaged) {
+          cb('confirme', locaux[0]);
+        } else {
+          addFoodToMeal(Object.assign({}, locaux[0], { qty: quantite }));
+          cb('ajoute', locaux[0]);
+        }
+        return;
+      }
+      if (locaux.length > 1) { cb('choix', null); return; }
+      // Rien dans la base locale : on tente OpenFoodFacts, comme le
+      // ferait un appui sur « Chercher ce produit en ligne ».
+      selectPane('tab-manual', 'produit');
+      if ($('off-search')) $('off-search').value = requete;
+      statut('🌐 Recherche en ligne pour « ' + requete + ' »…');
+      runOffSearch(requete, function (list) {
+        statut('');
+        /* Un résultat OpenFoodFacts n'a jamais de champ « packaged » (ce
+           drapeau n'existe que pour le mélange local) alors que chaque
+           réponse OFF EST un produit emballé — c'est tout ce que cette
+           recherche peut renvoyer. renderOffResults() ouvre d'ailleurs déjà
+           showPortionCard() sans condition sur ses résultats. */
+        if (list.length === 1) cb('confirme', list[0]);
+        else if (list.length > 1) cb('choix', null);
+        else cb('introuvable', null);
+      });
+    }
+
+    function ouvrirConfirmation(f, quantite) {
+      /* #portion-card vit dans le sous-onglet Produit : l'ouvrir sans y
+         basculer laisse la carte correctement construite mais invisible si
+         la dictée a été lancée depuis Base d'aliments. */
+      selectPane('tab-manual', 'produit');
+      showPortionCard(f);
+      if ($('portion-eat')) { $('portion-eat').value = quantite; updatePortion(); }
+    }
+
+    // Chemin rapide : UNE quantité + UN aliment compris sans réseau par
+    // voice.js. Sur un échec total de recherche, on tente le secours IA
+    // plutôt que de laisser la phrase sans suite : c'est justement le cas où
+    // le parseur local a compris une structure, mais où la requête qu'il en
+    // a tirée était en fait mal découpée (plusieurs aliments emmêlés, par ex).
+    function traiterUnItem(requete, quantite, transcriptOriginal) {
+      resoudreUnAliment(requete, quantite, function (statut, f) {
+        if (statut === 'ajoute' || statut === 'confirme') {
+          if (statut === 'confirme') ouvrirConfirmation(f, quantite);
+          toast('Compris : ' + fr(quantite) + '. Vérifie puis confirme avant d’ajouter.');
+        } else if (statut === 'choix') {
+          toast('Plusieurs résultats pour « ' + requete + ' » — choisis dans la liste.');
+        } else {
+          secoursIA(transcriptOriginal, 'Aucun produit trouvé pour « ' + requete + ' ».');
+        }
+      });
+    }
+
+    // Plusieurs aliments compris par l'IA (« 2 barquettes de LU et un
+    // café ») : résolus un par un, dans l'ordre — deux recherches en même
+    // temps se marcheraient dessus (même champ de recherche, même bascule
+    // d'onglet). Une seule carte de portion existe dans l'écran : elle ne
+    // s'ouvre automatiquement que si UN SEUL aliment en a besoin. Sinon, on
+    // dit clairement ce qui a été ajouté et ce qui reste à faire à la main —
+    // plutôt que d'empiler des confirmations sans écran pour les montrer.
+    function traiterPlusieursItems(items) {
+      var index = 0;
+      var ajoutes = [], aConfirmer = [], aChoisir = [], introuvables = [];
+      function suivant() {
+        if (index >= items.length) {
+          var msg = [];
+          if (ajoutes.length) msg.push(ajoutes.length + ' ajouté(s) : ' + ajoutes.join(', '));
+          if (aConfirmer.length === 1) {
+            ouvrirConfirmation(aConfirmer[0].f, aConfirmer[0].quantite);
+            msg.push('« ' + aConfirmer[0].requete + ' » à confirmer ci-dessous');
+          } else if (aConfirmer.length > 1) {
+            msg.push(aConfirmer.length + ' à confirmer un par un : ' +
+              aConfirmer.map(function (x) { return x.requete; }).join(', '));
+          }
+          if (aChoisir.length) msg.push(aChoisir.length + ' avec plusieurs résultats : ' +
+            aChoisir.join(', '));
+          if (introuvables.length) msg.push(introuvables.length + ' introuvable(s) : ' +
+            introuvables.join(', '));
+          toast(msg.join(' — ') || 'Rien trouvé.');
+          return;
+        }
+        var item = items[index++];
+        resoudreUnAliment(item.produit, item.quantite, function (statut, f) {
+          if (statut === 'ajoute') ajoutes.push(item.produit);
+          else if (statut === 'confirme') aConfirmer.push({ f: f, quantite: item.quantite, requete: item.produit });
+          else if (statut === 'choix') aChoisir.push(item.produit);
+          else introuvables.push(item.produit);
+          suivant();
         });
       }
+      suivant();
+    }
+
+    /* Secours IA : seulement à la demande explicite (échec du parseur local,
+       ou de sa recherche), jamais systématique — coût et délai d'un appel
+       réseau réservés aux phrases que voice.js ne pouvait pas comprendre
+       seul. Réutilise le fournisseur déjà configuré dans les Réglages ;
+       aucune clé séparée pour la dictée. */
+    function secoursIA(transcript, raisonEchecLocal) {
+      var cle = settings && settings.apiKeys &&
+        (settings.apiKeys[settings.provider] || settings.apiKey);
+      if (!cle) {
+        toast((raisonEchecLocal ? raisonEchecLocal + ' ' : '') +
+          'Pas compris dans « ' + transcript +
+          ' ». Tape ta recherche, ou configure un fournisseur IA dans les Réglages.');
+        return;
+      }
+      statut('🧠 Analyse par l’IA…');
+      Estimator.parseVoiceItems(transcript, settings).then(function (result) {
+        statut('');
+        if (!result.items.length) {
+          toast('Rien de reconnaissable dans « ' + transcript + ' ».');
+          return;
+        }
+        if (result.items.length === 1) {
+          traiterUnItem(result.items[0].produit, result.items[0].quantite, transcript);
+        } else {
+          traiterPlusieursItems(result.items);
+        }
+      }).catch(function (e) {
+        statut('');
+        toast('IA indisponible : ' + e.message);
+      });
+    }
+
+    function traiter(transcript) {
+      var parsed = Voice.parse(transcript);
+      statut('');
+      if (!parsed) { secoursIA(transcript, ''); return; }
+      traiterUnItem(parsed.requete, parsed.quantite, transcript);
     }
 
     btn.addEventListener('click', function () {

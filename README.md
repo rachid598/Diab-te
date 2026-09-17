@@ -114,10 +114,19 @@ scannés et les corrections personnelles enrichissent la recherche locale du té
 *« 4 petit beurre de LU »* : la quantité et le nom du produit sont compris, puis
 recherchés — d'abord localement, puis sur OpenFoodFacts si rien n'est trouvé. Un résultat
 unique ouvre directement le calcul de portion, quantité déjà remplie ; plusieurs résultats
-laissent le choix ; une phrase sans quantité reconnaissable ne devine rien et le dit. La
-dictée ne fait que pré-remplir : elle ne contourne jamais la confirmation exigée avant
-qu'une quantité entre dans le calcul. Nécessite un navigateur compatible avec la
-reconnaissance vocale (Web Speech API) ; le bouton reste caché sinon.
+laissent le choix ; la dictée ne fait que pré-remplir, elle ne contourne jamais la
+confirmation exigée avant qu'une quantité entre dans le calcul. Nécessite un navigateur
+compatible avec la reconnaissance vocale (Web Speech API) ; le bouton reste caché sinon.
+
+*Secours IA.* Une phrase que ce parseur ne comprend pas seul (une énumération —
+« 2 barquettes de LU et un café » —, une tournure inhabituelle) est renvoyée au
+fournisseur d'IA déjà configuré dans les Réglages, uniquement dans ce cas et jamais en
+plus : coût et délai d'un appel réseau réservés aux phrases qui en ont vraiment besoin.
+L'IA identifie les aliments et leur quantité — elle n'estime aucun glucide, la recherche
+et la confirmation restent les mêmes qu'au clavier. Plusieurs aliments sont résolus un
+par un ; celui qui n'a besoin que d'être ajouté l'est directement, celui qui doit être
+confirmé ouvre sa carte de portion. Sans clé configurée, une phrase mal comprise reste
+signalée honnêtement plutôt que de tenter un appel qui échouerait de toute façon.
 
 ## Comment la précision est obtenue
 

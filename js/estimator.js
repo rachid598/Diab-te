@@ -664,8 +664,12 @@
     "}"
   ].join('\n');
 
-  // Le mode est déterminé par la présence d'images, pas par un réglage.
-  function systemFor(images) {
+  /* Le mode est déterminé par la présence d'images, pas par un réglage.
+     systemOverride sert aux appels qui ne visent pas l'estimation de glucides
+     (ex. l'extraction d'aliments depuis une phrase dictée) : même réseau,
+     même authentification, même gestion d'erreur, mais une autre tâche. */
+  function systemFor(images, systemOverride) {
+    if (systemOverride) return systemOverride;
     return (images && images.length) ? SYSTEM_PROMPT : SYSTEM_PROMPT_TEXT;
   }
 
@@ -682,7 +686,7 @@
     var body = {
       model: model,
       max_tokens: 2400,
-      system: systemFor(images),
+      system: systemFor(images, settings.systemPromptOverride),
       messages: [{ role: 'user', content: content }]
     };
     // Raisonnement approfondi pour une estimation de volume plus fiable (modèles compatibles).
@@ -726,7 +730,7 @@
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemFor(images) }] },
+          system_instruction: { parts: [{ text: systemFor(images, settings.systemPromptOverride) }] },
           contents: [{ role: 'user', parts: parts }],
           generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 4000 }
         })
@@ -777,7 +781,7 @@
         model: model,
         response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: systemFor(images) },
+          { role: 'system', content: systemFor(images, settings.systemPromptOverride) },
           { role: 'user', content: userContent }
         ]
       };
@@ -1298,8 +1302,11 @@
     openai: 'OpenAI (ChatGPT)', openrouter: 'OpenRouter'
   };
 
-  // Lance l'estimation pour UN fournisseur donné (utilisé aussi pour le 2ᵉ avis).
-  function estimateProvider(provider, images, ctx, settings) {
+  /* Résolution de la clé, du modèle et de la fonction d'appel pour un
+     fournisseur — partagée entre l'estimation de glucides et l'extraction
+     d'aliments dictés : même authentification, même choix de fournisseur,
+     deux tâches différentes ensuite. */
+  function resolveCall(provider, settings) {
     var keys = settings.apiKeys || {};
     var models = settings.models || {};
     var DEF = (window.Storage && window.Storage.DEFAULT_MODELS) ||
@@ -1307,8 +1314,17 @@
     // Compat : ancien format (clé/modèle uniques) si présent.
     var apiKey = keys[provider] || settings.apiKey || '';
     var model = models[provider] || settings.model || DEF[provider];
+    var call = provider === 'openrouter' ? callOpenRouter
+             : provider === 'openai' ? callOpenAI
+             : provider === 'gemini' ? callGemini
+             : callClaude;
+    return { apiKey: apiKey, model: model, call: call };
+  }
 
-    if (!apiKey) {
+  // Lance l'estimation pour UN fournisseur donné (utilisé aussi pour le 2ᵉ avis).
+  function estimateProvider(provider, images, ctx, settings) {
+    var r = resolveCall(provider, settings);
+    if (!r.apiKey) {
       return Promise.reject(new Error('Aucune clé API ' + (PROVIDER_LABEL[provider] || provider) +
         '. Ajoute-la dans les Réglages, ou utilise le mode Manuel.'));
     }
@@ -1320,21 +1336,93 @@
       return Promise.reject(new Error('Ajoute une photo, ou décris ton repas.'));
     }
     var prompt = buildUserPrompt(ctx);
-    var callSettings = { provider: provider, apiKey: apiKey, model: model };
-    var call = provider === 'openrouter' ? callOpenRouter
-             : provider === 'openai' ? callOpenAI
-             : provider === 'gemini' ? callGemini
-             : callClaude;
+    var callSettings = { provider: provider, apiKey: r.apiKey, model: r.model };
     // Compté ici et pas dans l'interface : tous les appels passent par cette
     // fonction, y compris la vérification croisée et le banc d'essai.
     if (window.Storage && Storage.noteUsage) {
-      try { Storage.noteUsage(provider, model); } catch (e) {}
+      try { Storage.noteUsage(provider, r.model); } catch (e) {}
     }
-    return call(images, prompt, callSettings).then(function (result) {
+    return r.call(images, prompt, callSettings).then(function (result) {
       var out = sanitize(result, ctx);
       out.provider = provider;
-      out.model = model;
+      out.model = r.model;
       return out;
+    });
+  }
+
+  /* ---------- Dictée : secours IA quand le parseur local échoue ----------
+     voice.js comprend « 2 barquettes de LU » sans réseau ni clé. Cette
+     fonction ne sert QUE pour les phrases qu'il ne peut pas comprendre — une
+     énumération (« 2 barquettes de LU et un café »), une tournure inhabituelle
+     — et seulement à la demande de l'appelant (app.js), jamais automatiquement
+     depuis voice.js, qui reste un module pur sans réseau.
+
+     Elle n'estime AUCUN glucide : ce n'est pas son rôle. Elle identifie des
+     aliments et des quantités, à rechercher ensuite dans les mêmes bases que
+     la saisie manuelle (Foods.search / OFF.search) — dont la confirmation
+     avant ajout n'est jamais court-circuitée. */
+  var VOICE_SYSTEM_PROMPT = [
+    "Tu extrais les aliments mentionnés dans une phrase dictée à l'oral, en",
+    "français, qui décrit ce qu'une personne est en train de manger ou vient de",
+    "manger. Tu n'estimes AUCUN glucide et AUCUNE masse en grammes : une",
+    "recherche dans une base de produits s'en charge ensuite, séparément.",
+    "",
+    "Pour CHAQUE aliment distinct mentionné dans la phrase :",
+    "- 'quantite' : le nombre d'unités mangées de CET aliment (barquettes,",
+    "  tranches, yaourts, cafés...). Si aucun nombre n'est dit pour lui,",
+    "  mets 1 — ne déduis jamais un nombre qui n'est pas énoncé.",
+    "- 'produit' : le texte à chercher pour CET aliment, en français, tel",
+    "  qu'on le taperait dans un moteur de recherche (marque comprise si",
+    "  elle est dite). N'invente jamais une marque, une saveur ou un détail",
+    "  absent de la phrase.",
+    "",
+    "Une phrase peut décrire plusieurs aliments (« 2 barquettes de LU et un",
+    "café ») : renvoie alors une entrée par aliment, dans l'ordre où ils sont",
+    "cités. Si la phrase ne décrit aucun aliment identifiable, renvoie une",
+    "liste vide plutôt que d'inventer.",
+    "",
+    "Réponds UNIQUEMENT avec ce JSON, sans texte ni balises markdown :",
+    "{",
+    '  "items": [',
+    '    { "quantite": nombre, "produit": "texte" }',
+    "  ]",
+    "}"
+  ].join('\n');
+
+  var VOICE_MAX_ITEMS = 8;
+  var VOICE_MAX_QUANTITE = 30; // même plafond que voice.js, pour la même raison
+
+  function sanitizeVoiceItems(raw) {
+    var items = (raw && Array.isArray(raw.items)) ? raw.items : [];
+    var out = [];
+    items.forEach(function (it) {
+      if (out.length >= VOICE_MAX_ITEMS) return;
+      var produit = it && typeof it.produit === 'string' ? it.produit.trim().slice(0, 120) : '';
+      var quantite = it && isFinite(it.quantite) ? Number(it.quantite) : NaN;
+      if (!produit || !(quantite > 0) || quantite > VOICE_MAX_QUANTITE) return;
+      out.push({ quantite: quantite, produit: produit });
+    });
+    return { items: out };
+  }
+
+  function parseVoiceItems(transcript, settings) {
+    var provider = (settings && settings.provider) || 'claude';
+    var r = resolveCall(provider, settings || {});
+    if (!r.apiKey) {
+      return Promise.reject(new Error('Aucune clé API ' + (PROVIDER_LABEL[provider] || provider) +
+        ' configurée.'));
+    }
+    var prompt = 'Phrase dictée : « ' + String(transcript || '').trim().slice(0, 300) +
+      ' »\nRéponds uniquement avec le JSON.';
+    var callSettings = {
+      provider: provider, apiKey: r.apiKey, model: r.model,
+      systemPromptOverride: VOICE_SYSTEM_PROMPT
+    };
+    if (window.Storage && Storage.noteUsage) {
+      try { Storage.noteUsage(provider, r.model); } catch (e) {}
+    }
+    return r.call([], prompt, callSettings).then(function (result) {
+      return sanitizeVoiceItems(result);
     });
   }
 
@@ -1359,6 +1447,10 @@
     estimateWith: function (provider, images, ctx, settings) {
       return estimateProvider(provider, images, ctx, settings);
     },
+
+    /* Secours IA pour la dictée : extrait {quantite, produit}[] d'une phrase
+       que voice.js n'a pas pu comprendre seul. N'estime aucun glucide. */
+    parseVoiceItems: parseVoiceItems,
 
     /* Recalcule tous les agrégats après une modification de la liste d'aliments :
        correction d'une portion, ou ajout d'un dessert / d'une boisson.
